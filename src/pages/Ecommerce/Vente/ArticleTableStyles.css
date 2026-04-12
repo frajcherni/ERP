@@ -1,0 +1,201 @@
+/* Table Container */
+.article-table-container {
+  max-height: 500px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05); /* Subtle shadow for depth */
+}
+
+/* Table */
+.article-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; /* Modern font stack */
+}
+
+/* Header */
+.article-table thead th {
+  background: #f8f9fa;
+  color: #333;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 10px 12px; /* Slightly more padding for readability */
+  border-bottom: 2px solid #dee2e6;
+  text-align: left;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+/* Body */
+.article-table tbody td {
+  padding: 8px 12px; /* More horizontal padding */
+  border-bottom: 1px solid #eee;
+  vertical-align: middle;
+  height: 50px;
+}
+
+.article-row:hover {
+  background-color: #f5f5f5;
+  transition: background-color 0.2s ease; /* Smooth hover */
+}
+
+/* INCREASED COLUMN WIDTHS (Adjusted totals for longer numbers) */
+.col-article { width: 30%; min-width: 250px; }
+.col-ref { width: 8%; min-width: 100px; }
+.col-qty { width: 7%; min-width: 80px; text-align: center; }
+.col-qty-liv { width: 7%; min-width: 80px; text-align: center; }
+.col-qty-reste { width: 7%; min-width: 80px; text-align: center; }
+.col-price { width: 11%; min-width: 120px; text-align: right; }
+.col-price-ttc { width: 11%; min-width: 120px; text-align: right; }
+.col-tva { width: 8%; min-width: 90px; text-align: center; }
+.col-total { width: 11%; min-width: 140px; text-align: right; } /* Widened for safety */
+.col-total-ttc { width: 11%; min-width: 140px; text-align: right; } /* Widened for safety */
+.col-action { width: 2%; min-width: 50px; text-align: center; }
+
+/* INPUT STYLING - WIDER INPUTS (Improved focus and consistency) */
+.article-input,
+.article-designation-input,
+.article-select {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  background: white;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease; /* Smooth focus transition */
+}
+
+.article-input:focus,
+.article-designation-input:focus,
+.article-select:focus {
+  border-color: #80bdff;
+  outline: 0;
+  box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+}
+
+.article-input-number {
+  text-align: center;
+}
+
+.article-input-currency {
+  text-align: right;
+  padding-right: 8px;
+}
+
+.article-designation-input {
+  min-height: 38px;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+.article-select {
+  padding-right: 25px;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23343a40' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px;
+  appearance: none; /* Hide default arrow for consistency */
+}
+
+/* Badge (Improved for better contrast) */
+.article-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  background: #e9ecef; /* Light background */
+  color: #495057;
+}
+
+/* Action Button (Added focus outline) */
+.article-action-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: #dc3545;
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s ease;
+}
+
+.article-action-btn:hover {
+  background: #c82333;
+}
+
+.article-action-btn:focus {
+  outline: 0;
+  box-shadow: 0 0 0 0.2rem rgba(220,53,69,.25);
+}
+
+/* TOTAL CELLS - Ensure no wrap, improved readability */
+.total-cell {
+  text-align: right;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap; /* Prevents line break */
+}
+
+.total-amount {
+  font-family: 'Courier New', monospace;
+  display: inline-block;
+  margin-right: 4px;
+}
+
+.total-currency {
+  color: #6c757d;
+  font-size: 11px;
+  font-weight: normal;
+  display: inline-block;
+}
+
+/* Alternative: Simple inline total */
+.inline-total {
+  text-align: right;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap; /* Prevents line break */
+  font-family: 'Courier New', monospace;
+}
+
+.inline-total .dt {
+  margin-left: 4px;
+  color: #6c757d;
+  font-size: 11px;
+  font-weight: normal;
+}
+
+/* Responsive for very wide numbers */
+.wide-number {
+  font-family: 'Courier New', monospace;
+  letter-spacing: -0.5px;
+}
+
+/* Media query for smaller screens (optional improvement) */
+@media (max-width: 1200px) {
+  .article-table {
+    font-size: 12px;
+  }
+  .article-table thead th {
+    font-size: 11px;
+    padding: 8px;
+  }
+  .article-table tbody td {
+    padding: 6px 8px;
+  }
+  .col-total, .col-total-ttc {
+    min-width: 120px; /* Reduce slightly if needed */
+  }
+}

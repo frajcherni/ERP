@@ -1,0 +1,828 @@
+/* Enhanced Professional Styling */
+.modal-icon-wrapper {
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.form-label-lg {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.form-control-lg {
+  font-size: 1rem;
+  padding: 0.875rem 1rem;
+  border-radius: 10px;
+}
+
+.search-box .search-icon {
+  z-index: 10;
+}
+
+.articles-table .table th {
+  background:  #00aeef;
+  color: white;
+  font-weight: 600;
+  padding: 1rem 0.75rem;
+  font-size: 0.85rem;
+  border: none;
+}
+
+.articles-table .table td {
+  padding: 1rem 0.75rem;
+  vertical-align: middle;
+  border-color: #f1f5f9;
+}
+
+.table-input {
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.5rem;
+  font-size: 0.9rem;
+  width: 100%;
+  transition: all 0.2s ease;
+}
+
+.table-input:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+  outline: none;
+}
+
+/* Form Switch Styling */
+.form-switch-lg .form-check-input {
+  width: 3rem;
+  height: 1.5rem;
+}
+
+.form-switch-lg .form-check-label {
+  font-size: 1rem;
+}
+
+/* Badge Enhancements */
+.remise-badge {
+  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* Card Enhancements */
+.card {
+  border-radius: 12px;
+}
+
+/* Real-time animation */
+@keyframes highlight {
+  0% { background-color: rgba(102, 126, 234, 0.1); }
+  100% { background-color: transparent; }
+}
+
+.real-time-update {
+  animation: highlight 0.5s ease-in-out;
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+  .form-control-lg {
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+  
+  .modal-body {
+    padding: 1rem;
+  }
+  
+  .articles-table .table {
+    font-size: 0.8rem;
+  }
+}
+
+/* Custom scrollbar for dropdown results */
+.search-results {
+  scrollbar-width: thin;
+  scrollbar-color: #6c757d #f8f9fa;
+}
+
+.search-results::-webkit-scrollbar {
+  width: 6px;
+}
+
+.search-results::-webkit-scrollbar-track {
+  background: #f8f9fa;
+  border-radius: 3px;
+}
+
+.search-results::-webkit-scrollbar-thumb {
+  background: #6c757d;
+  border-radius: 3px;
+}
+
+.search-results::-webkit-scrollbar-thumb:hover {
+  background: #495057;
+}
+
+/* Ensure list items are visible */
+.search-results .list-group-item {
+  border: none;
+  border-bottom: 1px solid #e9ecef;
+  transition: all 0.2s ease;
+}
+
+.search-results .list-group-item:hover {
+  background-color: #f8f9fa;
+}
+
+.search-results .list-group-item:last-child {
+  border-bottom: none;
+}
+  .articles-table th:nth-child(1) { width: 20%; }
+.articles-table th:nth-child(2) { width: 10%; }
+.articles-table th:nth-child(3) { width: 8%; }
+.articles-table th:nth-child(4) { width: 12%; }
+.articles-table th:nth-child(5) { width: 12%; }
+.articles-table th:nth-child(6) { width: 10%; }
+.articles-table th:nth-child(7) { width: 10%; }
+.articles-table th:nth-child(8) { width: 10%; }
+.articles-table th:nth-child(9) { width: 8%; }
+
+/* Professional Timbre Checkbox */
+.timbre-checkbox {
+  transform: scale(1.2);
+}
+
+.timbre-checkbox:checked {
+  background-color: #10b981;
+  border-color: #10b981;
+}
+
+.timbre-section-inline .bg-light {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 2px solid #e2e8f0 !important;
+}
+
+.timbre-section-inline .timbre-content-inline {
+  flex-grow: 1;
+}
+
+/* Fixed Table Header */
+.table-dark {
+  background: linear-gradient(135deg, #374151 0%, #4b5563 100%) !important;
+}
+
+.table-dark th {
+  border: none;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 0.75rem 0.5rem;
+  white-space: nowrap;
+}
+
+/* Clean Dropdown */
+.list-group-item:hover {
+  background-color: #f8fafc;
+}
+
+/* Professional Input Sizing */
+.table-input {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 0.375rem 0.5rem;
+  width: 100%;
+}
+
+.table-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+/* Detail Modal Styling */
+.detail-modal .modal-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-bottom: none;
+}
+
+.detail-modal .modal-header .btn-close {
+  filter: invert(1);
+}
+
+.detail-modal .card {
+  border: 1px solid #e9ecef;
+  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+.detail-modal .table th {
+  background-color: #f8f9fa;
+  border-bottom: 2px solid #dee2e6;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  color: #6c757d;
+}
+
+.detail-modal .table td {
+  vertical-align: middle;
+  padding: 0.75rem;
+}
+
+.detail-modal .articles-table {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.detail-modal .articles-table thead th {
+  position: sticky;
+  top: 0;
+  background-color: #2d3748;
+  color: white;
+  z-index: 10;
+}
+
+.detail-modal .calculation-summary {
+  background: linear-gradient(135deg, #f8f9ff 0%, #f0f4ff 100%);
+  border-radius: 10px;
+  padding: 20px;
+  margin-top: 20px;
+}
+
+.detail-modal .calculation-summary table {
+  margin-bottom: 0;
+}
+
+.detail-modal .calculation-summary th {
+  border: none !important;
+  font-weight: 600;
+  color: #495057;
+}
+
+.detail-modal .calculation-summary td {
+  border: none !important;
+  font-weight: 500;
+}
+
+.detail-modal .final-total {
+  border-top: 2px solid #dee2e6 !important;
+  background-color: #e7f1ff;
+}
+
+.detail-modal .final-total th,
+.detail-modal .final-total td {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #2962ff;
+}
+
+/* Status badges */
+.detail-modal .badge {
+  font-size: 0.75rem;
+  padding: 0.35em 0.65em;
+}
+
+/* Client info card */
+.detail-modal .client-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.detail-modal .client-card h6 {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .detail-modal .modal-dialog {
+    margin: 0.5rem;
+  }
+  
+  .detail-modal .table-responsive {
+    font-size: 0.875rem;
+  }
+}
+
+/* Animation for modal */
+.detail-modal .modal-content {
+  animation: slideInUp 0.3s ease-out;
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(50px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Compact table styles */
+.table-input {
+  font-size: 0.8rem !important;
+  padding: 0.25rem !important;
+}
+
+.compact-table th,
+.compact-table td {
+  padding: 0.3rem 0.5rem;
+}
+
+.compact-table .btn-sm {
+  padding: 0.15rem 0.3rem;
+  font-size: 0.7rem;
+}
+
+
+/* Global Remise Section Styling */
+.remise-global-section {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.remise-global-section h6 {
+  color: #374151;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  font-size: 1rem;
+}
+
+.remise-global-section .form-label {
+  font-weight: 600;
+  color: #4b5563;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
+.remise-global-section .form-control-sm {
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+}
+
+.remise-global-section .form-control-sm:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
+.remise-global-section .form-switch .form-check-input {
+  width: 2.5rem;
+  height: 1.25rem;
+  background-color: #e2e8f0;
+  border: 1px solid #cbd5e0;
+}
+
+.remise-global-section .form-switch .form-check-input:checked {
+  background-color: #48bb78;
+  border-color: #38a169;
+}
+
+.remise-global-section .form-switch .form-check-label {
+  font-weight: 600;
+  color: #374151;
+  font-size: 0.875rem;
+}
+
+/* Calculation Summary Right Side Styling */
+.calculation-summary-right {
+  padding-left: 2rem;
+}
+
+.calculation-summary-right .table {
+  margin-bottom: 0;
+}
+
+.calculation-summary-right th {
+  font-weight: 600;
+  color: #6b7280;
+  font-size: 0.875rem;
+  padding-right: 3rem;
+  white-space: nowrap;
+}
+
+.calculation-summary-right td {
+  font-weight: 600;
+  color: #374151;
+  text-align: right;
+  font-size: 0.875rem;
+}
+
+.calculation-summary-right .final-total {
+  border-top: 2px solid #e5e7eb !important;
+  background-color: #f9fafb;
+}
+
+.calculation-summary-right .final-total th,
+.calculation-summary-right .final-total td {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #059669;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .remise-global-section {
+    padding: 1rem;
+  }
+  
+  .calculation-summary-right {
+    padding-left: 0;
+    padding-top: 1.5rem;
+  }
+  
+  .calculation-summary-right th {
+    padding-right: 1.5rem;
+  }
+}
+
+
+.btn-link.text-primary:hover {
+  background-color: rgba(13, 110, 253, 0.1);
+  border-radius: 50%;
+}
+
+.form-control-lg.pe-5 {
+  padding-right: 3rem !important;
+}
+
+.form-control-lg.ps-5.pe-5 {
+  padding-left: 3rem !important;
+  padding-right: 3rem !important;
+}
+
+
+
+.payment-method-item {
+  background-color: #f8f9fa;
+  border-left: 4px solid #007bff !important;
+}
+
+.payment-method-item:last-child {
+  margin-bottom: 0;
+}
+
+.btn-invoice-primary {
+  background-color: #007bff;
+  border-color: #007bff;
+  color: white;
+}
+
+.btn-invoice-primary:hover {
+  background-color: #0056b3;
+  border-color: #0056b3;
+}
+
+.btn-invoice-danger {
+  background-color: #dc3545;
+  border-color: #dc3545;
+  color: white;
+}
+
+.btn-invoice-danger:hover {
+  background-color: #c82333;
+  border-color: #c82333;
+}
+
+
+
+/* Add to your InvoiceModal.css or existing CSS */
+.btn-invoice {
+  border-radius: 0.5rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.btn-invoice-primary {
+  background-color: #0d6efd;
+  border-color: #0d6efd;
+}
+
+.btn-invoice-primary:hover {
+  background-color: #0b5ed7;
+  border-color: #0a58ca;
+}
+
+.btn-invoice-success {
+  background-color: #198754;
+  border-color: #198754;
+}
+
+.btn-invoice-success:hover {
+  background-color: #157347;
+  border-color: #146c43;
+}
+
+.btn-invoice-danger {
+  background-color: #dc3545;
+  border-color: #dc3545;
+}
+
+.btn-invoice-danger:hover {
+  background-color: #bb2d3b;
+  border-color: #b02a37;
+}
+
+.btn-invoice-warning {
+  background-color: #ffc107;
+  border-color: #ffc107;
+  color: #000;
+}
+
+.btn-invoice-warning:hover {
+  background-color: #ffca2c;
+  border-color: #ffc720;
+  color: #000;
+}
+
+.btn-invoice-secondary {
+  background-color: #6c757d;
+  border-color: #6c757d;
+}
+
+.btn-invoice-secondary:hover {
+  background-color: #5c636a;
+  border-color: #565e64;
+}
+
+.btn-details {
+  background-color: #0dcaf0;
+  border-color: #0dcaf0;
+  color: white;
+}
+
+.btn-details:hover {
+  background-color: #0baccc;
+  border-color: #0aa2c0;
+}
+
+
+
+
+
+
+
+
+/* Editable designation input */
+.designation-input-editable {
+  font-size: 0.75rem !important;
+  padding: 4px 8px !important;
+  height: 32px !important;
+  border: 1px solid #dee2e6 !important;
+  border-radius: 4px !important;
+  width: 100% !important;
+  background-color: #f8f9fa !important;
+  transition: all 0.2s ease !important;
+}
+
+.designation-input-editable:hover {
+  background-color: white !important;
+  border-color: #86b7fe !important;
+}
+
+.designation-input-editable:focus {
+  background-color: white !important;
+  border-color: #0d6efd !important;
+  box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15) !important;
+  outline: none !important;
+}
+
+
+
+/* Client Dropdown - Light Grey Background */
+.search-results.client-results {
+  background-color: #fafafa !important; /* Very light grey */
+  border: 1px solid #e9ecef !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* List items with subtle hover effect */
+.client-results .list-group-item {
+  background-color: transparent !important;
+  border-bottom: 1px solid #f1f3f5 !important;
+  padding: 12px 16px !important;
+  transition: all 0.15s ease !important;
+}
+
+/* Last item should not have bottom border */
+.client-results .list-group-item:last-child {
+  border-bottom: none !important;
+}
+
+/* Hover state - slightly darker grey */
+.client-results .list-group-item:hover {
+  background-color: #f5f5f5 !important; /* Slightly darker grey on hover */
+  border-left: 3px solid #0d6efd !important;
+}
+
+/* Active state for keyboard navigation */
+.client-results .list-group-item.active {
+  background-color: #f0f7ff !important; /* Light blue-grey */
+  border-left: 3px solid #0d6efd !important;
+}
+
+/* Client info text colors */
+.client-info-name {
+  color: #212529 !important; /* Darker text for better contrast */
+  font-weight: 600 !important;
+}
+
+.client-info-phone {
+  color: #6c757d !important; /* Medium grey for phone */
+  font-size: 0.85rem !important;
+}
+
+.client-info-designation {
+  color: #495057 !important; /* Slightly darker grey for designation */
+  font-size: 0.82rem !important;
+}
+
+.client-info-address {
+  color: #868e96 !important; /* Light grey for address */
+  font-size: 0.8rem !important;
+}
+
+/* Optional: Add a subtle gradient to the container */
+.client-results::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #e9ecef, transparent);
+}
+
+
+
+/* Styles pour le champ de désignation */
+.designation-input {
+  transition: all 0.2s ease;
+  border: 1px solid #dee2e6;
+}
+
+.designation-input:focus {
+  border-color: #86b7fe;
+  box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+/* Scrollbar pour les désignations longues */
+.designation-input::-webkit-scrollbar {
+  width: 6px;
+}
+
+.designation-input::-webkit-scrollbar-track {
+  background: #f8f9fa;
+  border-radius: 3px;
+}
+
+.designation-input::-webkit-scrollbar-thumb {
+  background: #adb5bd;
+  border-radius: 3px;
+}
+
+/* Style pour l'affichage en mode lecture seule */
+.designation-content {
+  scrollbar-width: thin;
+  scrollbar-color: #adb5bd #f8f9fa;
+}
+
+/* Ajustement de hauteur automatique */
+.designation-input {
+  min-height: 60px !important;
+  max-height: 150px !important;
+  resize: vertical;
+  overflow-y: auto !important;
+}
+
+/* Style pour les désignations modifiées */
+.designation-modified {
+  border-left: 3px solid #ffc107 !important;
+  background-color: #fff8e1 !important;
+}
+
+
+
+
+
+
+/* Ensure the edit button doesn't interfere with click */
+.list-group-item-action {
+  position: relative;
+}
+
+.list-group-item-action:hover .edit-client-btn {
+  opacity: 1;
+}
+
+.edit-client-btn {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  background: white;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.edit-client-btn:hover {
+  background: #f8f9fa;
+  opacity: 1 !important;
+}
+
+
+/* Enhanced Client Search Results Styling */
+.search-results.client-results {
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+.search-results.client-results .list-group-item {
+  border-left: none;
+  border-right: none;
+  border-radius: 0;
+}
+
+.search-results.client-results .list-group-item:first-child {
+  border-top: none;
+}
+
+.search-results.client-results .list-group-item:last-child {
+  border-bottom: none;
+}
+
+.search-results.client-results .list-group-item:hover {
+  background-color: #f8f9fa;
+}
+
+/* Edit button styling */
+.search-results.client-results .list-group-item .btn-link {
+  opacity: 0.6;
+  transition: opacity 0.2s, transform 0.2s;
+  background: white;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.search-results.client-results .list-group-item:hover .btn-link {
+  opacity: 1;
+  transform: translateY(-50%) scale(1.05);
+}
+
+.search-results.client-results .list-group-item .btn-link:hover {
+  background: #e7f1ff;
+  opacity: 1 !important;
+}
+
+.search-results.client-results .list-group-item .btn-link i {
+  font-size: 16px;
+}
+
+/* Phone number badge styling */
+.phone-badge {
+  font-family: monospace;
+  background-color: #e7f1ff;
+  color: #0d6efd;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
+
+
+
+.btn-invoice-info {
+    background-color: #17a2b8;
+    border-color: #17a2b8;
+    color: white;
+}
+
+.btn-invoice-info:hover {
+    background-color: #138496;
+    border-color: #117a8b;
+    color: white;
+}

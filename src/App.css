@@ -1,0 +1,309 @@
+.App {
+  text-align: center;
+}
+
+.App-logo {
+  height: 40vmin;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .App-logo {
+    animation: App-logo-spin infinite 20s linear;
+  }
+}
+
+.App-header {
+  background-color: #282c34;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(10px + 2vmin);
+  color: white;
+}
+
+.App-link {
+  color: #61dafb;
+}
+
+@keyframes App-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Professional Invoice Modal Styling */
+.invoice-modal .modal-content {
+  border: none;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+}
+
+.invoice-modal .modal-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-bottom: none;
+  padding: 1.5rem 2rem;
+  border-radius: 12px 12px 0 0;
+}
+
+.invoice-modal .modal-title {
+  font-weight: 700;
+  font-size: 1.4rem;
+  letter-spacing: -0.5px;
+}
+
+.invoice-modal .modal-body {
+  padding: 2rem;
+  background: #f8fafc;
+}
+
+.invoice-modal .modal-footer {
+  border-top: 1px solid #e9ecef;
+  padding: 1.5rem 2rem;
+  background: white;
+  border-radius: 0 0 12px 12px;
+}
+
+/* Form Styling */
+.invoice-form .form-label {
+  font-weight: 600;
+  color: #2d3748;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.invoice-form .form-control,
+.invoice-form .form-select {
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+  background: white;
+}
+
+.invoice-form .form-control:focus,
+.invoice-form .form-select:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  background: white;
+}
+
+/* Checkbox Styling */
+.invoice-form .form-check-input {
+  width: 1.1em;
+  height: 1.1em;
+  margin-top: 0.15em;
+  border: 2px solid #cbd5e0;
+}
+
+.invoice-form .form-check-input:checked {
+  background-color: #667eea;
+  border-color: #667eea;
+}
+
+.invoice-form .form-check-label {
+  font-weight: 500;
+  color: #4a5568;
+  margin-left: 0.5rem;
+}
+
+/* Search Results */
+.search-results {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+.search-results .list-group-item {
+  border: none;
+  border-bottom: 1px solid #edf2f7;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+}
+
+.search-results .list-group-item:hover {
+  background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+  border-left: 3px solid #667eea;
+}
+
+.search-results .list-group-item:last-child {
+  border-bottom: none;
+}
+
+/* Articles Table Styling */
+.articles-table {
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e2e8f0;
+}
+
+.articles-table .table {
+  margin-bottom: 0;
+  font-size: 0.85rem;
+}
+
+.articles-table thead {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.articles-table thead th {
+  border: none;
+  color: white;
+  font-weight: 600;
+  padding: 1rem 0.75rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.articles-table tbody td {
+  padding: 1rem 0.75rem;
+  vertical-align: middle;
+  border-color: #f1f5f9;
+  background: white;
+}
+
+.articles-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+.articles-table .table-input {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 0.5rem;
+  font-size: 0.8rem;
+  width: 100%;
+  transition: all 0.2s ease;
+}
+
+.articles-table .table-input:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+  outline: none;
+}
+
+/* Calculation Summary */
+.calculation-summary {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  border: 1px solid #e2e8f0;
+  margin-top: 1rem;
+}
+
+.calculation-summary table {
+  margin-bottom: 0;
+  font-size: 0.9rem;
+}
+
+.calculation-summary th {
+  font-weight: 600;
+  color: #4a5568;
+  text-align: right;
+  padding: 0.5rem 1rem;
+  border: none;
+}
+
+.calculation-summary td {
+  font-weight: 500;
+  text-align: right;
+  padding: 0.5rem 1rem;
+  border: none;
+  min-width: 120px;
+}
+
+.calculation-summary .final-total {
+  border-top: 2px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.calculation-summary .final-total th,
+.calculation-summary .final-total td {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #2d3748;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+/* Badge Styling */
+.remise-badge {
+  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-left: 0.5rem;
+}
+
+/* Button Styling */
+.btn-invoice {
+  border-radius: 8px;
+  padding: 0.75rem 1.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+  border: none;
+}
+
+.btn-invoice-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-invoice-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+}
+
+.btn-invoice-danger {
+  background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%);
+  color: white;
+}
+
+.btn-invoice-danger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(245, 101, 101, 0.3);
+}
+
+/* Real-time calculation highlights */
+.real-time-update {
+  animation: pulse 0.5s ease-in-out;
+}
+
+@keyframes pulse {
+  0% { background-color: transparent; }
+  50% { background-color: #fff3cd; }
+  100% { background-color: transparent; }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .invoice-modal .modal-body {
+    padding: 1rem;
+  }
+  
+  .articles-table {
+    font-size: 0.8rem;
+  }
+  
+  .calculation-summary {
+    padding: 1rem;
+  }
+}
