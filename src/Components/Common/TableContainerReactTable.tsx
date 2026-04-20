@@ -225,28 +225,49 @@ const TableContainer = ({
         </Table>
       </div>
 
-      <Row className="align-items-center mt-2 g-3 text-center text-sm-start">
-        <div className="col-sm">
-          <div className="text-muted">Showing<span className="fw-semibold ms-1">{getState().pagination.pageSize}</span> of <span className="fw-semibold">{data.length}</span> Results
+      <Row className="align-items-center mt-2 g-3">
+        <Col className="col-sm">
+          <div className="text-muted">
+            Showing <span className="fw-semibold ms-1">{getState().pagination.pageSize}</span> of <span className="fw-semibold">{data.length}</span> Results
           </div>
-        </div>
-        <div className="col-sm-auto">
-          <ul className="pagination pagination-separated pagination-md justify-content-center justify-content-sm-start mb-0">
-            <li className={!getCanPreviousPage() ? "page-item disabled" : "page-item"}>
-              <Link to="#" className="page-link" onClick={previousPage}>Previous</Link>
-            </li>
-            {getPageOptions().map((item: any, key: number) => (
-              <React.Fragment key={key}>
-                <li className="page-item">
-                  <Link to="#" className={getState().pagination.pageIndex === item ? "page-link active" : "page-link"} onClick={() => setPageIndex(item)}>{item + 1}</Link>
+        </Col>
+        <Col className="col-sm-auto">
+          <div className="d-flex gap-3 flex-wrap align-items-center">
+            {/* Page Size Dropdown */}
+            <div className="d-flex align-items-center">
+              <span className="text-muted text-nowrap me-2">Show:</span>
+              <select
+                className="form-select form-select-sm"
+                style={{ width: "auto" }}
+                value={getState().pagination.pageSize}
+                onChange={e => {
+                  setPageSize(Number(e.target.value));
+                }}
+              >
+                {[10, 25, 50, 100].map(pageSize => (
+                  <option key={pageSize} value={pageSize}>
+                    {pageSize}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Pagination Buttons */}
+            <ul className="pagination pagination-separated pagination-md justify-content-center justify-content-sm-start mb-0">
+              <li className={!getCanPreviousPage() ? "page-item disabled" : "page-item"}>
+                <Link to="#" className="page-link" onClick={previousPage}>Previous</Link>
+              </li>
+              {getPageOptions().map((item: any, key: number) => (
+                <li className={`page-item ${getState().pagination.pageIndex === item ? "active" : ""}`} key={key}>
+                  <Link to="#" className="page-link" onClick={() => setPageIndex(item)}>{item + 1}</Link>
                 </li>
-              </React.Fragment>
-            ))}
-            <li className={!getCanNextPage() ? "page-item disabled" : "page-item"}>
-              <Link to="#" className="page-link" onClick={nextPage}>Next</Link>
-            </li>
-          </ul>
-        </div>
+              ))}
+              <li className={!getCanNextPage() ? "page-item disabled" : "page-item"}>
+                <Link to="#" className="page-link" onClick={nextPage}>Next</Link>
+              </li>
+            </ul>
+          </div>
+        </Col>
       </Row>
     </Fragment>
   );

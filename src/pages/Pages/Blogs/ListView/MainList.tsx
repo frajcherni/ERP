@@ -7,10 +7,10 @@ import { Card, CardBody, Col, Row } from 'reactstrap'
 const MainList = () => {
     //pagination
     const [currentPage, setCurrentPage] = useState(1);
-    const perPageData = 6;
+    const [perPageData, setPerPageData] = useState(10);
     const indexOfLast = currentPage * perPageData;
     const indexOfFirst = indexOfLast - perPageData;
-    const currentdata = useMemo(() => listData?.slice(indexOfFirst, indexOfLast), [indexOfFirst, indexOfLast])
+    const currentdata = useMemo(() => listData?.slice(indexOfFirst, indexOfLast), [indexOfFirst, indexOfLast, perPageData])
 
     return (
         <React.Fragment>
@@ -74,21 +74,14 @@ const MainList = () => {
                     ))}
                 </Row>
 
-                <div className="row g-0 text-center text-sm-start align-items-center mb-4">
-                    <div className="col-sm-6">
-                        <div>
-                            <p className="mb-sm-0 text-muted">Showing <span className="fw-semibold">1</span> to <span className="fw-semibold">6</span> of <span className="fw-semibold text-decoration-underline">21</span> entries</p>
-                        </div>
-                    </div>
-                    <div className="col-sm-6">
-                        <Pagination
-                            perPageData={perPageData}
-                            data={listData}
-                            currentPage={currentPage}
-                            setCurrentPage={setCurrentPage}
-                        />
-                    </div>
-                </div>
+                <Pagination
+                    perPageData={perPageData}
+                    setPerPageData={setPerPageData}
+                    data={listData}
+                    currentPage={currentPage}
+                    setCurrentPage={setCurrentPage}
+                    showingText={<p className="mb-0 text-muted">Showing <span className="fw-semibold">{indexOfFirst + 1}</span> to <span className="fw-semibold">{Math.min(indexOfLast, listData.length)}</span> of <span className="fw-semibold text-decoration-underline">{listData.length}</span> entries</p>}
+                />
 
 
 

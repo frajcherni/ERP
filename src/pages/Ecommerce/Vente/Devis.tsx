@@ -3237,7 +3237,7 @@ const Devis = () => {
                                           </td>
                                         </tr>
                                         {showRemise && globalRemise > 0 && (() => {
-                                          const computedPercentage = grandTotal > 0 ? (discountAmount / grandTotal) * 100 : 0;
+                                          const computedPercentage = sousTotalHT > 0 ? (discountAmount / sousTotalHT) * 100 : 0;
                                           const isHigh = computedPercentage > 10;
                                           return (
                                             <tr className={`real-time-update ${isHigh ? "table-danger" : "table-success"}`}>
@@ -4304,10 +4304,9 @@ const Devis = () => {
 
                                         discountAmountValue =
                                           sousTotalHTValue - netHTValue;
-                                        discountPercentage =
-                                          (discountAmountValue /
-                                            grandTotalValue) *
-                                          100;
+                                        discountPercentage = sousTotalHTValue > 0
+                                          ? (discountAmountValue / sousTotalHTValue) * 100
+                                          : 0;
                                       }
 
                                       // Round final values

@@ -7,6 +7,7 @@ import CountUp from "react-countup";
 import Flatpickr from "react-flatpickr";
 import moment from "moment";
 import TrésoreriePDF from './TrésoreriePDF ';
+import UnifiedDashboard from '../Ecommerce/Vente/JournalVente';
 
 const API_BASE = process.env.REACT_APP_API_BASE;
 
@@ -412,8 +413,7 @@ const Trésorerie: React.FC = () => {
   ];
 
   // Group transactions by document to handle retention properly
-  // Group transactions by document to handle retention properly
-  // Group transactions by document to handle retention properly
+
   const groupTransactionsByDocument = (): GroupedTransaction[] => {
     const groupedMap = new Map<string, GroupedTransaction>();
 
@@ -478,7 +478,7 @@ const Trésorerie: React.FC = () => {
 
   return (
     <div className="page-content">
-      <Container fluid>
+      <Container fluid style={{ maxWidth: "100%" }}>
         {/* Header Section */}
         <Row className="mb-2">
           <Col xs={12}>
@@ -551,6 +551,7 @@ const Trésorerie: React.FC = () => {
         {activeTab === 'overview' ? (
           <>
             {/* Payment Methods by Source */}
+            <UnifiedDashboard hideHeader={true} />
             <Row className="mb-3">
               {paymentMethodsBySource.map((source, index) => (
                 <Col xl={4} md={6} key={index} className="mb-3">

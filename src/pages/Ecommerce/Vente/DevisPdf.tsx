@@ -11,6 +11,7 @@ import {
 import moment from "moment";
 import { BonCommandeClient } from "../../../Components/Article/Interfaces";
 
+// Register fonts
 Font.register({
   family: "Open Sans",
   fonts: [
@@ -95,7 +96,7 @@ const styles = StyleSheet.create({
   },
   tableContainer: {
     marginBottom: 15,
-    marginTop: 8, // Reduced from 16 to 8 (moves table up)
+    marginTop: 8,
     borderTop: "1pt solid #ddd",
     borderLeft: "1pt solid #ddd",
     borderRight: "1pt solid #ddd",
@@ -103,34 +104,38 @@ const styles = StyleSheet.create({
   tableHeader: {
     flexDirection: "row",
     backgroundColor: "#00aeef",
-    paddingVertical: 4, // Reduced from 5 to 4
+    paddingVertical: 4,
   },
   tableRow: {
     flexDirection: "row",
     borderBottom: "1pt solid #ddd",
-    paddingVertical: 2, // Reduced from 6 to 2
-    minHeight: 18, // Reduced from 24 to 18
+    height: 32,
+    overflow: "hidden",
   },
   tableColHeader: {
     paddingHorizontal: 2,
     textAlign: "center",
     fontWeight: "bold",
-    fontSize: 9, // Reduced from 10 to 9
+    fontSize: 10,
     color: "#ffffff",
+    justifyContent: "center",
+    alignItems: "center",
   },
   tableCol: {
     paddingHorizontal: 4,
-    fontSize: 9, // Reduced from 10 to 9
+    fontSize: 10,
     textAlign: "center",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  colN: { width: "6%" }, // Increased slightly to accommodate removed column
-  colArticle: { width: "16%", textAlign: "left" },
-  colDesignation: { width: "38%", textAlign: "left" }, // Increased to fill space
-  colQteC: { width: "8%" },
-  colPUHT: { width: "10%", textAlign: "right" },
-  colTVA: { width: "8%" },
+  colN: { width: "4%" },
+  colArticle: { width: "17%", textAlign: "left" },
+  colDesignation: { width: "34%", textAlign: "left" },
+  colQuantite: { width: "6%" },
+  colPUHT: { width: "9%", textAlign: "right" },
+  colTVA: { width: "7%" },
   colPUTTC: { width: "10%", textAlign: "right" },
-  colMontantTTC: { width: "10%", textAlign: "right" },
+  colMontantTTC: { width: "13%", textAlign: "right" },
   summaryArea: {
     position: "absolute",
     left: 20,
@@ -147,95 +152,63 @@ const styles = StyleSheet.create({
     borderTop: "1pt solid #ddd",
     borderLeft: "1pt solid #ddd",
     borderRight: "1pt solid #ddd",
-    width: "100%",
-    marginBottom: -5, // Pull it up slightly
+    width: "103%",
   },
   tvaHeader: {
     flexDirection: "row",
     backgroundColor: "#00aeef",
-    paddingVertical: 3, // Reduced from 5 to 3
+    paddingVertical: 3,
   },
   tvaRow: {
     flexDirection: "row",
     borderBottom: "1pt solid #ddd",
-    paddingVertical: 3, // Reduced from 5 to 3
+    paddingVertical: 5,
   },
-  tvaHeaderTaux: { width: "22%", fontSize: 9, fontWeight: "bold", textAlign: "center", color: "#fff", paddingHorizontal: 4 },
-  tvaHeaderBase: { width: "35%", fontSize: 9, fontWeight: "bold", textAlign: "right", color: "#fff", paddingHorizontal: 4 },
-  tvaHeaderMontant: { width: "40%", fontSize: 9, fontWeight: "bold", textAlign: "right", color: "#fff", paddingHorizontal: 4 },
-  tvaColTaux: { width: "22%", fontSize: 9, textAlign: "center", paddingHorizontal: 4 },
-  tvaColBase: { width: "35%", fontSize: 9, textAlign: "right", paddingHorizontal: 4 },
-  tvaColMontant: { width: "40%", fontSize: 9, textAlign: "right", paddingHorizontal: 4 },
-  paymentBoxUnderTVA: {
-    width: "100%",
-    border: "1pt solid #ddd",
-    borderTop: "none",
-    marginTop: 25,
-    alignSelf: 'flex-start',
-  },
-  paymentHeader: {
-    flexDirection: "row",
-    backgroundColor: "#00aeef",
-    paddingVertical: 4,
-    paddingHorizontal: 2,
-  },
-  paymentTitle: {
-    fontSize: 10,
-    fontWeight: "bold",
-    color: "#ffffff",
-    textAlign: "center",
-    width: "100%",
-  },
-  paymentContent: {
-    padding: 3,
-  },
-  paymentLine: {
-    fontSize: 10,
-    marginBottom: 2,
-  },
+  tvaHeaderTaux: { width: "22%", fontSize: 10, fontWeight: "bold", textAlign: "center", color: "#fff", paddingHorizontal: 4 },
+  tvaHeaderBase: { width: "35%", fontSize: 10, fontWeight: "bold", textAlign: "right", color: "#fff", paddingHorizontal: 4 },
+  tvaHeaderMontant: { width: "40%", fontSize: 10, fontWeight: "bold", textAlign: "right", color: "#fff", paddingHorizontal: 4 },
+  tvaColTaux: { width: "22%", fontSize: 10, textAlign: "center", paddingHorizontal: 4 },
+  tvaColBase: { width: "35%", fontSize: 10, textAlign: "right", paddingHorizontal: 4 },
+  tvaColMontant: { width: "40%", fontSize: 10, textAlign: "right", paddingHorizontal: 4 },
   totalsContainer: { width: "40%" },
   totalsBox: {
-    padding: 5, // Reduced from 8 to 5
+    padding: 8,
     border: "1pt solid #ddd",
     width: "100%",
   },
-  summaryRow: { 
-    flexDirection: "row", 
-    justifyContent: "space-between", 
-    marginBottom: 2 // Reduced from 3 to 2
-  },
-  summaryLabel: { fontSize: 10 }, // Reduced from 11 to 10
-  summaryValue: { fontSize: 10 }, // Reduced from 11 to 10
+  summaryRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 3 },
+  summaryLabel: { fontSize: 11 },
+  summaryValue: { fontSize: 11 },
   netAPayerContainer: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 6, // Reduced from 8 to 6
+    marginTop: 8,
     borderTop: "2pt solid #333",
-    marginHorizontal: -5,
-    marginBottom: -5,
+    marginHorizontal: -8,
+    marginBottom: -8,
   },
   netAPayerLabel: {
-    fontSize: 11, // Reduced from 12 to 11
+    fontSize: 12,
     fontWeight: "bold",
     backgroundColor: "#00aeef",
     color: "#ffffff",
     width: "50%",
-    paddingVertical: 6, // Reduced from 8 to 6
-    paddingLeft: 5, // Reduced from 8 to 5
+    paddingVertical: 6,
+    paddingLeft: 8,
   },
   netAPayerValue: {
-    fontSize: 11, // Reduced from 12 to 11
+    fontSize: 12,
     fontWeight: "bold",
     textAlign: "right",
     width: "50%",
-    paddingVertical: 4, // Reduced from 6 to 4
-    paddingRight: 5, // Reduced from 8 to 5
+    paddingVertical: 6,
+    paddingRight: 8,
   },
   cachetSignatureSection: {
     flexDirection: "row",
     justifyContent: "space-around",
     position: "absolute",
-    bottom: 75,
+    bottom: 115,
     left: 20,
     right: 20,
   },
@@ -250,7 +223,7 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     textAlign: "center",
-    fontSize: 8,
+    fontSize: 9,
     borderTop: "1pt solid #ddd",
     paddingTop: 3,
   },
@@ -262,7 +235,7 @@ const styles = StyleSheet.create({
     bottom: 155,
     left: 20,
     right: 20,
-    padding: 6, // Reduced from 8 to 6
+    padding: 8,
     border: "1pt solid #ddd",
   },
   amountText: { fontSize: 9, textAlign: "center" },
@@ -271,33 +244,20 @@ const styles = StyleSheet.create({
   clientInfoContainer: {
     width: "50%",
     border: "1pt solid #ddd",
-    padding: 6, // Reduced from 8 to 6
+    padding: 8,
     alignItems: "flex-start",
-    marginLeft: 200,
+    marginLeft: "auto",
   },
-  clientLine: { fontSize: 10, marginBottom: 1, fontWeight: "bold", flexWrap: "wrap" },
   clientLineItem: { fontSize: 10, marginBottom: 1, fontWeight: "bold" },
-  continuationHeader: {
-    fontSize: 10,
-    textAlign: "center",
-    marginBottom: 8,
-    fontWeight: "bold",
-    backgroundColor: "#f0f0f0",
-    padding: 5,
-    border: "1pt solid #ddd"
-  },
   vendeurPaymentContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 2, // Reduced from 6 to 2 (moves vendeur up)
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 6,
   },
   vendeurContainer: {
-    width: '55%',
+    width: "55%",
   },
-  paymentContainerAboveTable: {
-    width: '40%',
-  }
 });
 
 interface DevisPDFProps {
@@ -315,6 +275,47 @@ interface DevisPDFProps {
   };
 }
 
+const LAST_PAGE_MAX = 6;
+const INTER_PAGE_MAX = 15;
+
+interface PageGroup {
+  articles: any[];
+  isLast: boolean;
+  startIndex: number;
+}
+
+function buildPageGroups(articles: any[]): PageGroup[] {
+  if (!articles || articles.length === 0) {
+    return [{ articles: [], isLast: true, startIndex: 0 }];
+  }
+
+  if (articles.length <= LAST_PAGE_MAX) {
+    return [{ articles, isLast: true, startIndex: 0 }];
+  }
+
+  const groups: PageGroup[] = [];
+  let cursor = 0;
+
+  while (cursor < articles.length) {
+    const remaining = articles.length - cursor;
+
+    if (remaining <= LAST_PAGE_MAX) {
+      groups.push({ articles: articles.slice(cursor), isLast: true, startIndex: cursor });
+      cursor = articles.length;
+    } else {
+      const take = Math.min(INTER_PAGE_MAX, remaining);
+      groups.push({ articles: articles.slice(cursor, cursor + take), isLast: false, startIndex: cursor });
+      cursor += take;
+    }
+  }
+
+  if (groups.length > 0 && !groups[groups.length - 1].isLast) {
+    groups.push({ articles: [], isLast: true, startIndex: articles.length });
+  }
+
+  return groups;
+}
+
 const DevisPDF: React.FC<DevisPDFProps> = ({
   bonCommande,
   companyInfo,
@@ -328,69 +329,34 @@ const DevisPDF: React.FC<DevisPDFProps> = ({
         grandTotal: 0,
         finalTotal: 0,
         discountAmount: 0,
-        retentionAmount: 0,
-        netAPayer: 0,
-        acompteTotal: 0,
-        resteAPayer: 0,
-        totalPaye: 0,
         tvaBreakdown: {} as { [key: number]: { base: number; montant: number } },
-        hasRetention: false,
       };
     }
 
-    // Step 1: Calculate original totals (without document-level discount)
     let sousTotalHTValue = 0;
     let totalTaxValue = 0;
     let grandTotalValue = 0;
 
-    // Store line details for proportional calculation
-    const lineDetails: Array<{
-      ht: number;
-      tvaRate: number;
-      tvaAmount: number;
-      ttc: number;
-      qty: number;
-    }> = [];
-
-    // Store TVA breakdown for original amounts
     const tvaBreakdownOriginal: { [key: number]: { base: number; montant: number } } = {};
 
-    // Calculate original line amounts (with line-level discounts only)
     bonCommande.articles.forEach((article) => {
       const qty = Number(article.quantite) || 0;
       const articleRemise = Number(article.remise) || 0;
       const tvaRate = Number(article.tva) || 0;
-
       let unitHT = Number(article.prixUnitaire) || 0;
       let unitTTC = Number(article.prix_ttc) || unitHT * (1 + tvaRate / 100);
 
-      // Calculate line amounts
       const lineHT = Math.round(unitHT * 1000) / 1000;
       const lineTTC = Math.round(unitTTC * 1000) / 1000;
-
       const montantSousTotalHT = Math.round(qty * lineHT * 1000) / 1000;
-      const montantNetHTLigne = Math.round(
-        qty * lineHT * (1 - articleRemise / 100) * 1000
-      ) / 1000;
+      const montantNetHTLigne = Math.round(qty * lineHT * (1 - articleRemise / 100) * 1000) / 1000;
       const montantTTCLigne = Math.round(qty * lineTTC * 1000) / 1000;
-      const montantTVALigne = Math.round(
-        (montantTTCLigne - montantNetHTLigne) * 1000
-      ) / 1000;
+      const montantTVALigne = Math.round((montantTTCLigne - montantNetHTLigne) * 1000) / 1000;
 
       sousTotalHTValue += montantSousTotalHT;
       totalTaxValue += montantTVALigne;
       grandTotalValue += montantTTCLigne;
 
-      // Store line details
-      lineDetails.push({
-        ht: montantNetHTLigne,
-        tvaRate: tvaRate,
-        tvaAmount: montantTVALigne,
-        ttc: montantTTCLigne,
-        qty: qty
-      });
-
-      // Store original TVA breakdown
       if (tvaRate > 0) {
         if (!tvaBreakdownOriginal[tvaRate]) {
           tvaBreakdownOriginal[tvaRate] = { base: 0, montant: 0 };
@@ -400,7 +366,6 @@ const DevisPDF: React.FC<DevisPDFProps> = ({
       }
     });
 
-    // Round original totals
     sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
     totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
     grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
@@ -408,85 +373,49 @@ const DevisPDF: React.FC<DevisPDFProps> = ({
     let finalTotalValue = grandTotalValue;
     let discountAmountValue = 0;
     let netHTValue = sousTotalHTValue;
-
-    // Initialize final TVA breakdown
     let tvaBreakdownFinal: { [key: number]: { base: number; montant: number } } = {};
 
-    // Apply document-level remise if exists
     const remiseValue = Number(bonCommande.remise) || 0;
     const remiseTypeValue = bonCommande.remiseType || "percentage";
 
     if (remiseValue > 0) {
       if (remiseTypeValue === "percentage") {
-        // ✅ SIMPLE FORMULA: Apply percentage discount on HT
         discountAmountValue = Math.round((sousTotalHTValue * remiseValue / 100) * 1000) / 1000;
         netHTValue = sousTotalHTValue - discountAmountValue;
-
-        // Calculate new TVA proportionally
         const tvaToHtRatio = sousTotalHTValue > 0 ? totalTaxValue / sousTotalHTValue : 0;
         const newTVA = Math.round((netHTValue * tvaToHtRatio) * 1000) / 1000;
-
         totalTaxValue = newTVA;
         finalTotalValue = Math.round((netHTValue + newTVA) * 1000) / 1000;
-
-        // Calculate TVA breakdown proportionally
         const discountRatio = netHTValue / sousTotalHTValue;
-
         Object.keys(tvaBreakdownOriginal).forEach(rate => {
           const tvaRate = parseFloat(rate);
           tvaBreakdownFinal[tvaRate] = {
             base: Math.round((tvaBreakdownOriginal[tvaRate].base * discountRatio) * 1000) / 1000,
-            montant: Math.round((tvaBreakdownOriginal[tvaRate].montant * discountRatio) * 1000) / 1000
+            montant: Math.round((tvaBreakdownOriginal[tvaRate].montant * discountRatio) * 1000) / 1000,
           };
         });
-
       } else if (remiseTypeValue === "fixed") {
-        // ✅ FIXED DISCOUNT FORMULA: TTC is given, calculate HT
         finalTotalValue = Math.round(Number(remiseValue) * 1000) / 1000;
-
-        // Find all unique TVA rates
-        const tvaRates = Array.from(new Set(bonCommande.articles.map(a => Number(a.tva) || 0)));
-
+        const tvaRates = Array.from(new Set(bonCommande.articles.map((a: any) => Number(a.tva) || 0)));
         if (tvaRates.length === 1 && tvaRates[0] > 0) {
-          // ✅ SINGLE TVA RATE: HT = TTC / (1 + TVA rate)
           const tvaRate = tvaRates[0];
           netHTValue = Math.round((finalTotalValue / (1 + tvaRate / 100)) * 1000) / 1000;
           totalTaxValue = Math.round((finalTotalValue - netHTValue) * 1000) / 1000;
-
-          // For single rate, TVA breakdown is simple
-          tvaBreakdownFinal[tvaRate] = {
-            base: netHTValue,
-            montant: totalTaxValue
-          };
-
+          tvaBreakdownFinal[tvaRate] = { base: netHTValue, montant: totalTaxValue };
         } else {
-          // ✅ MULTIPLE TVA RATES: Use proportional method
           const discountCoefficient = grandTotalValue > 0 ? finalTotalValue / grandTotalValue : 0;
-
-          // Reset values
           netHTValue = 0;
           totalTaxValue = 0;
-
-          // Recalculate each line proportionally
-          bonCommande.articles.forEach((article) => {
+          bonCommande.articles.forEach((article: any) => {
             const qty = Number(article.quantite) || 0;
             const articleRemise = Number(article.remise) || 0;
             const tvaRate = Number(article.tva) || 0;
-            let unitHT = Number(article.prixUnitaire) || 0;
-
-            // Calculate original line amounts
-            const montantNetHTLigne = Math.round(
-              qty * unitHT * (1 - articleRemise / 100) * 1000
-            ) / 1000;
-
-            // Apply coefficient to get new amounts
+            const unitHT = Number(article.prixUnitaire) || 0;
+            const montantNetHTLigne = Math.round(qty * unitHT * (1 - articleRemise / 100) * 1000) / 1000;
             const newLineHT = Math.round((montantNetHTLigne * discountCoefficient) * 1000) / 1000;
             const newLineTVA = Math.round((newLineHT * (tvaRate / 100)) * 1000) / 1000;
-
             netHTValue += newLineHT;
             totalTaxValue += newLineTVA;
-
-            // Update TVA breakdown
             if (tvaRate > 0) {
               if (!tvaBreakdownFinal[tvaRate]) {
                 tvaBreakdownFinal[tvaRate] = { base: 0, montant: 0 };
@@ -495,29 +424,19 @@ const DevisPDF: React.FC<DevisPDFProps> = ({
               tvaBreakdownFinal[tvaRate].montant += newLineTVA;
             }
           });
-
-          // Round final values
           netHTValue = Math.round(netHTValue * 1000) / 1000;
           totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
         }
-
         discountAmountValue = Math.round((sousTotalHTValue - netHTValue) * 1000) / 1000;
       }
-
-      // Final rounding
       netHTValue = Math.round(netHTValue * 1000) / 1000;
       totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
       finalTotalValue = Math.round(finalTotalValue * 1000) / 1000;
       discountAmountValue = Math.round(discountAmountValue * 1000) / 1000;
-
     } else {
-      // No document-level discount - use original values
       netHTValue = sousTotalHTValue;
       tvaBreakdownFinal = { ...tvaBreakdownOriginal };
     }
-
-    // For Devis, we don't have payments, retention, etc.
-    const netAPayerValue = finalTotalValue;
 
     return {
       sousTotalHT: Math.round(sousTotalHTValue * 1000) / 1000,
@@ -526,12 +445,7 @@ const DevisPDF: React.FC<DevisPDFProps> = ({
       grandTotal: Math.round(grandTotalValue * 1000) / 1000,
       finalTotal: Math.round(finalTotalValue * 1000) / 1000,
       discountAmount: Math.round(discountAmountValue * 1000) / 1000,
-      retentionAmount: 0,
-      netAPayer: Math.round(netAPayerValue * 1000) / 1000,
-      acompteTotal: 0,
-      resteAPayer: 0,
       tvaBreakdown: tvaBreakdownFinal,
-      hasRetention: false,
     };
   };
 
@@ -539,209 +453,76 @@ const DevisPDF: React.FC<DevisPDFProps> = ({
     sousTotalHT,
     netHT,
     totalTax,
-    grandTotal,
     finalTotal,
     discountAmount,
-    retentionAmount,
-    netAPayer,
-    acompteTotal,
-    resteAPayer,
     tvaBreakdown,
-    hasRetention,
   } = calculateTotals();
 
-  // Keep the formatCurrency function with .toFixed(3):
-  const formatCurrency = (amount: number) => {
-    return amount.toFixed(3);
-  };
+  const formatCurrency = (amount: number) => amount.toFixed(3);
 
   const numberToWords = (num: number): string => {
-    const units = [
-      "",
-      "un",
-      "deux",
-      "trois",
-      "quatre",
-      "cinq",
-      "six",
-      "sept",
-      "huit",
-      "neuf",
-    ];
-    const teens = [
-      "dix",
-      "onze",
-      "douze",
-      "treize",
-      "quatorze",
-      "quinze",
-      "seize",
-      "dix-sept",
-      "dix-huit",
-      "dix-neuf",
-    ];
-    const tens = [
-      "",
-      "dix",
-      "vingt",
-      "trente",
-      "quarante",
-      "cinquante",
-      "soixante",
-      "soixante-dix",
-      "quatre-vingt",
-      "quatre-vingt-dix",
-    ];
-
+    const units = ["", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf"];
+    const teens = ["dix", "onze", "douze", "treize", "quatorze", "quinze", "seize", "dix-sept", "dix-huit", "dix-neuf"];
+    const tens = ["", "dix", "vingt", "trente", "quarante", "cinquante", "soixante", "soixante-dix", "quatre-vingt", "quatre-vingt-dix"];
     const integerPart = Math.floor(num);
     if (integerPart === 0) return "Zéro dinars zéro millimes uniquement";
-
     let words = "";
-
-    // Handle thousands
     if (integerPart >= 1000) {
       const thousands = Math.floor(integerPart / 1000);
-      if (thousands === 1) {
-        words += "mille";
-      } else {
-        words += numberToWords(thousands).replace(" dinars zéro millimes uniquement", "") + " mille";
-      }
+      words += thousands === 1 ? "mille" : numberToWords(thousands).replace(" dinars zéro millimes uniquement", "") + " mille";
       if (integerPart % 1000 > 0) words += " ";
     }
-
     const remainder = integerPart % 1000;
-
-    // Handle hundreds
     if (remainder >= 100) {
       const hundreds = Math.floor(remainder / 100);
-      if (hundreds === 1) {
-        words += "cent";
-      } else {
-        words += units[hundreds] + " cent";
-      }
+      words += hundreds === 1 ? "cent" : units[hundreds] + " cent";
       if (remainder % 100 > 0) words += " ";
     }
-
-    // Handle tens and units
     const smallRemainder = remainder % 100;
     if (smallRemainder > 0) {
-      if (smallRemainder < 10) {
-        words += units[smallRemainder];
-      } else if (smallRemainder < 20) {
-        words += teens[smallRemainder - 10];
-      } else {
+      if (smallRemainder < 10) words += units[smallRemainder];
+      else if (smallRemainder < 20) words += teens[smallRemainder - 10];
+      else {
         const tensDigit = Math.floor(smallRemainder / 10);
         const unitsDigit = smallRemainder % 10;
-
         if (tensDigit === 7 || tensDigit === 9) {
-          // Special cases for 70-79 and 90-99
           words += tens[tensDigit - 1];
-          if (unitsDigit === 1) {
-            words += "-et-onze";
-          } else if (unitsDigit > 1) {
-            words += "-" + teens[unitsDigit];
-          } else {
-            words += "-dix";
-          }
+          if (unitsDigit === 1) words += "-et-onze";
+          else if (unitsDigit > 1) words += "-" + teens[unitsDigit];
+          else words += "-dix";
         } else {
           words += tens[tensDigit];
-          if (unitsDigit > 0) {
-            if (unitsDigit === 1 && tensDigit !== 8 && tensDigit !== 9) {
-              words += "-et-un";
-            } else {
-              words += "-" + units[unitsDigit];
-            }
-          }
+          if (unitsDigit > 0) words += (unitsDigit === 1 && tensDigit !== 8 ? "-et-un" : "-" + units[unitsDigit]);
         }
       }
     }
-
     words += " dinars zéro millimes";
     return words.charAt(0).toUpperCase() + words.slice(1) + " uniquement";
   };
 
-  const amountInWords = numberToWords(netAPayer);
+  const amountInWords = numberToWords(finalTotal);
 
-  // PAGINATION LOGIC - EXACT SAME AS BONCOMMANDEPDF
-  const totalArticles = bonCommande?.articles?.length || 0;
-
-  // Determine pagination based on total articles
-  let articlesFirstPage: any[] = [];
-  let articlesSecondPage: any[] = [];
-  let needsSecondPage = false;
-  let totalPages = 1;
-
-  if (totalArticles <= 10) {
-    // 1-4 articles: Single page with ALL content
-    articlesFirstPage = bonCommande?.articles?.slice(0, 10) || [];
-    needsSecondPage = false;
-    totalPages = 1;
-  } else if (totalArticles <= 13) {
-    // 5-13 articles: ALL articles on first page, second page for summary only
-    articlesFirstPage = bonCommande?.articles?.slice(0, 13) || [];
-    articlesSecondPage = []; // No articles on second page
-    needsSecondPage = true; // Force second page for summary content
-    totalPages = 2;
-  } else {
-    // 14+ articles: Split articles across pages
-    articlesFirstPage = bonCommande?.articles?.slice(0, 13) || [];
-    articlesSecondPage = bonCommande?.articles?.slice(13) || [];
-    needsSecondPage = true;
-    totalPages = 2;
-  }
-
-  // Function to wrap client info text
-  const wrapClientText = (text: string, maxCharsPerLine: number = 40): string[] => {
-    if (!text || text.trim() === '') return [];
-    
+  const wrapTextHelper = (text: string, maxCharsPerLine: number = 40): string[] => {
+    if (!text || text.trim() === "") return [];
     const cleanText = text.trim();
-    
-    // If text is shorter than max line length, return as is
     if (cleanText.length <= maxCharsPerLine) return [cleanText];
-    
-    const words = cleanText.split(' ');
+    const words = cleanText.split(" ");
     const lines: string[] = [];
-    let currentLine = '';
-    
+    let currentLine = "";
     words.forEach((word) => {
-      // Try to add word to current line
       const testLine = currentLine ? `${currentLine} ${word}` : word;
-      
-      if (testLine.length <= maxCharsPerLine) {
-        currentLine = testLine;
-      } else {
-        // Current line is full, push it and start new line with this word
+      if (testLine.length <= maxCharsPerLine) currentLine = testLine;
+      else {
         if (currentLine) lines.push(currentLine);
         currentLine = word;
       }
     });
-    
-    // Add the last line
     if (currentLine) lines.push(currentLine);
-    
     return lines;
   };
 
   const renderTVABreakdown = () => {
-    const tvaRates = Object.keys(tvaBreakdown).map(rate => parseFloat(rate)).sort((a, b) => a - b);
-
-    if (tvaRates.length === 0) {
-      return (
-        <View style={styles.tvaTable}>
-          <View style={styles.tvaHeader}>
-            <Text style={styles.tvaHeaderTaux}>Taux TVA</Text>
-            <Text style={styles.tvaHeaderBase}>Base HT</Text>
-            <Text style={styles.tvaHeaderMontant}>Montant TVA</Text>
-          </View>
-          <View style={styles.tvaRow}>
-            <Text style={styles.tvaColTaux}>-</Text>
-            <Text style={styles.tvaColBase}>0.000 DT</Text>
-            <Text style={styles.tvaColMontant}>0.000 DT</Text>
-          </View>
-        </View>
-      );
-    }
-
+    const tvaRates = Object.keys(tvaBreakdown).map((r) => parseFloat(r)).sort((a, b) => a - b);
     return (
       <View style={styles.tvaTable}>
         <View style={styles.tvaHeader}>
@@ -749,48 +530,43 @@ const DevisPDF: React.FC<DevisPDFProps> = ({
           <Text style={styles.tvaHeaderBase}>Base HT</Text>
           <Text style={styles.tvaHeaderMontant}>Montant TVA</Text>
         </View>
-
-        {tvaRates.map(rate => (
-          <View style={styles.tvaRow} key={rate}>
-            <Text style={styles.tvaColTaux}>{rate}%</Text>
-            <Text style={styles.tvaColBase}>
-              {formatCurrency(tvaBreakdown[rate].base)} DT
-            </Text>
-            <Text style={styles.tvaColMontant}>
-              {formatCurrency(tvaBreakdown[rate].montant)} DT
-            </Text>
+        {tvaRates.length === 0 ? (
+          <View style={styles.tvaRow}>
+            <Text style={styles.tvaColTaux}>-</Text>
+            <Text style={styles.tvaColBase}>0.000 DT</Text>
+            <Text style={styles.tvaColMontant}>0.000 DT</Text>
           </View>
-        ))}
+        ) : (
+          tvaRates.map((rate) => (
+            <View style={styles.tvaRow} key={rate}>
+              <Text style={styles.tvaColTaux}>{rate}%</Text>
+              <Text style={styles.tvaColBase}>{formatCurrency(tvaBreakdown[rate].base)} DT</Text>
+              <Text style={styles.tvaColMontant}>{formatCurrency(tvaBreakdown[rate].montant)} DT</Text>
+            </View>
+          ))
+        )}
       </View>
     );
   };
 
-  const renderPaymentBoxUnderTVA = () => {
-    // For Devis, we don't show payment info typically
-    return null;
-  };
+  const renderSummarySection = (summaryBottom: number, floated: boolean = true) => {
+    const areaStyle: any = floated
+      ? [styles.summaryArea, { bottom: summaryBottom }]
+      : { flexDirection: "row", justifyContent: "space-between", marginTop: 80 };
 
-  const renderSummarySection = (summaryBottom: number, amountBottom: number) => {
     return (
-      <View style={[styles.summaryArea, { bottom: summaryBottom }]}>
-        <View style={styles.leftColumn}>
-          {renderTVABreakdown()}
-          {renderPaymentBoxUnderTVA()}
-        </View>
+      <View style={areaStyle}>
+        <View style={styles.leftColumn}>{renderTVABreakdown()}</View>
         <View style={styles.totalsContainer}>
           <View style={styles.totalsBox}>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Total H.T.:</Text>
-              <Text style={styles.summaryValue}>
-                {formatCurrency(sousTotalHT)} DT
-              </Text>
+              <Text style={styles.summaryValue}>{formatCurrency(sousTotalHT)} DT</Text>
             </View>
             {Number(bonCommande.remise) > 0 && (
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Remise HT:</Text>
-                <Text style={styles.summaryValue}>
-                  - {formatCurrency(discountAmount)} DT
-                </Text>
+                <Text style={styles.summaryLabel}>Remise sur HT:</Text>
+                <Text style={styles.summaryValue}>- {formatCurrency(discountAmount)} DT</Text>
               </View>
             )}
             <View style={styles.summaryRow}>
@@ -798,25 +574,16 @@ const DevisPDF: React.FC<DevisPDFProps> = ({
               <Text style={styles.summaryValue}>{formatCurrency(netHT)} DT</Text>
             </View>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>TVA:</Text>
-              <Text style={styles.summaryValue}>
-                {formatCurrency(totalTax)} DT
-              </Text>
+              <Text style={styles.summaryLabel}>Total TVA:</Text>
+              <Text style={styles.summaryValue}>{formatCurrency(totalTax)} DT</Text>
             </View>
-
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Total TTC:</Text>
-              <Text style={styles.summaryValue}>
-                {formatCurrency(finalTotal)} DT
-              </Text>
+              <Text style={styles.summaryValue}>{formatCurrency(finalTotal)} DT</Text>
             </View>
-
-            {/* NET À PAYER */}
             <View style={styles.netAPayerContainer}>
               <Text style={styles.netAPayerLabel}>NET À PAYER:</Text>
-              <Text style={styles.netAPayerValue}>
-                {formatCurrency(netAPayer)} DT
-              </Text>
+              <Text style={styles.netAPayerValue}>{formatCurrency(finalTotal)} DT</Text>
             </View>
           </View>
         </View>
@@ -824,157 +591,87 @@ const DevisPDF: React.FC<DevisPDFProps> = ({
     );
   };
 
-  const renderTable = (articles: any[], pageIndex: number, isContinuation: boolean = false) => (
-    <View style={styles.tableContainer}>
-      <View style={styles.tableHeader}>
-        <View style={[styles.colN, styles.tableColHeader]}>
-          <Text>N°</Text>
+  const renderTable = (group: PageGroup) => {
+    if (group.articles.length === 0) return null;
+    return (
+      <View style={styles.tableContainer}>
+        <View style={styles.tableHeader}>
+          <View style={[styles.colN, styles.tableColHeader]}><Text>N°</Text></View>
+          <View style={[styles.colArticle, styles.tableColHeader]}><Text>ARTICLE</Text></View>
+          <View style={[styles.colDesignation, styles.tableColHeader]}><Text>DESIGNATION</Text></View>
+          <View style={[styles.colQuantite, styles.tableColHeader]}><Text>QTE</Text></View>
+          <View style={[styles.colPUHT, styles.tableColHeader]}><Text>P.U.H.T</Text></View>
+          <View style={[styles.colTVA, styles.tableColHeader]}><Text>TVA</Text></View>
+          <View style={[styles.colPUTTC, styles.tableColHeader]}><Text>P.U.TTC</Text></View>
+          <View style={[styles.colMontantTTC, styles.tableColHeader]}><Text>M.TTC</Text></View>
         </View>
-        <View style={[styles.colArticle, styles.tableColHeader]}>
-          <Text>ARTICLE</Text>
+        {group.articles.map((item, index) => {
+          const globalRowNumber = group.startIndex + index + 1;
+          const qty = Number(item.quantite) || 0;
+          const priceHT = Number(item.prixUnitaire) || 0;
+          const tvaRate = Number(item.tva) || 0;
+          const prixTTC = Number(item.prix_ttc) || priceHT * (1 + tvaRate / 100);
+          const montantTTC = Math.round(qty * prixTTC * 1000) / 1000;
+          return (
+            <View style={styles.tableRow} key={index}>
+              <View style={[styles.colN, styles.tableCol]}><Text>{globalRowNumber}</Text></View>
+              <View style={[styles.colArticle, styles.tableCol]}><Text>{item.article?.reference || "-"}</Text></View>
+              <View style={[styles.colDesignation, styles.tableCol]}><Text>{item.designation || item.article?.designation || "-"}</Text></View>
+              <View style={[styles.colQuantite, styles.tableCol]}><Text>{qty}</Text></View>
+              <View style={[styles.colPUHT, styles.tableCol]}><Text>{formatCurrency(priceHT)}</Text></View>
+              <View style={[styles.colTVA, styles.tableCol]}><Text>{tvaRate > 0 ? `${tvaRate}%` : "-"}</Text></View>
+              <View style={[styles.colPUTTC, styles.tableCol]}><Text>{formatCurrency(prixTTC)}</Text></View>
+              <View style={[styles.colMontantTTC, styles.tableCol]}><Text>{formatCurrency(montantTTC)}</Text></View>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
+  const renderSummaryContent = (floated: boolean = true) => (
+    <>
+      {renderSummarySection(205, floated)}
+      <View style={[styles.amountInWords, { bottom: 155 }]}>
+        <Text style={styles.amountText}>Arrêté le présent devis à la somme de : {amountInWords}</Text>
+      </View>
+      <View style={styles.cachetSignatureSection}>
+        <View style={styles.signatureContainer}>
+          <Text style={styles.signatureText}>Client</Text>
+          <Text style={styles.subText}>Signature</Text>
         </View>
-        <View style={[styles.colDesignation, styles.tableColHeader]}>
-          <Text>DESIGNATION</Text>
-        </View>
-        <View style={[styles.colQteC, styles.tableColHeader]}>
-          <Text>QTE</Text>
-        </View>
-        <View style={[styles.colPUHT, styles.tableColHeader]}>
-          <Text>P.U.H.T</Text>
-        </View>
-        <View style={[styles.colTVA, styles.tableColHeader]}>
-          <Text>TVA</Text>
-        </View>
-        <View style={[styles.colPUTTC, styles.tableColHeader]}>
-          <Text>P.U.TTC</Text>
-        </View>
-        <View style={[styles.colMontantTTC, styles.tableColHeader]}>
-          <Text>M.TTC</Text>
+        <View style={styles.cachetContainer}>
+          <Text style={styles.cachetText}> Signature & Cachet</Text>
+          <Text style={styles.subText}>Du Responsable </Text>
         </View>
       </View>
-      {articles.map((item, index) => {
-        const qty = Number(item.quantite) || 0;
-        const priceHT = Number(item.prixUnitaire) || 0;
-        const tvaRate = Number(item.tva) || 0;
-        const prixTTC = Number(item.prix_ttc) || priceHT * (1 + tvaRate / 100);
-        const montantTTC = Math.round(qty * prixTTC * 1000) / 1000;
-
-        // Calculate global index based on pagination
-        let globalIndex;
-        if (pageIndex === 0) {
-          globalIndex = index;
-        } else {
-          // For second page, start from 14 (since first page shows 13 articles)
-          globalIndex = 13 + index;
-        }
-
-        return (
-          <View style={styles.tableRow} key={index}>
-            <View style={[styles.colN, styles.tableCol]}>
-              <Text>{globalIndex + 1}</Text>
-            </View>
-            <View style={[styles.colArticle, styles.tableCol]}>
-              <Text>{item.article?.reference || "-"}</Text>
-            </View>
-            <View style={[styles.colDesignation, styles.tableCol]}>
-              <Text>{item.designation || item.article?.designation || '-'}</Text>
-            </View>
-            <View style={[styles.colQteC, styles.tableCol]}>
-              <Text>{qty}</Text>
-            </View>
-            <View style={[styles.colPUHT, styles.tableCol]}>
-              <Text>{formatCurrency(priceHT)}</Text>
-            </View>
-            <View style={[styles.colTVA, styles.tableCol]}>
-              <Text>{tvaRate > 0 ? `${tvaRate}%` : "-"}</Text>
-            </View>
-            <View style={[styles.colPUTTC, styles.tableCol]}>
-              <Text>{formatCurrency(prixTTC)}</Text>
-            </View>
-            <View style={[styles.colMontantTTC, styles.tableCol]}>
-              <Text>{formatCurrency(montantTTC)}</Text>
-            </View>
-          </View>
-        );
-      })}
-    </View>
+    </>
   );
 
-  const safeBonCommande = bonCommande || {};
-  const safeCompanyInfo = companyInfo || {};
-
-  const renderPageHeader = (pageIndex: number) => (
+  const renderPageHeader = () => (
     <>
       <View style={styles.header}>
-        <View style={styles.companyInfo}>
-          {companyInfo.logo && (
-            <Image src={companyInfo.logo} style={styles.logo} />
-          )}
-        </View>
+        <View style={styles.companyInfo}>{companyInfo.logo && <Image src={companyInfo.logo} style={styles.logo} />}</View>
       </View>
       <View style={styles.commandeDetails}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
           <View>
             <View style={styles.commandeDetailItem}>
-              <Text style={styles.N}>
-                <Text style={styles.commandeNumberValue}>{bonCommande.numeroCommande || "N/A"}</Text>
-              </Text>
+              <Text style={styles.N}><Text style={styles.commandeNumberValue}>{bonCommande.numeroCommande || "N/A"}</Text></Text>
             </View>
             <View style={[styles.commandeDetailItem, { marginTop: 4 }]}>
-              <Text style={styles.commandeDetailLabel}>
-                Date Devis: <Text style={styles.boldText}>
-                  {bonCommande.dateCommande ? moment(bonCommande.dateCommande).format("DD/MM/YYYY") : "N/A"}
-                </Text>
-              </Text>
+              <Text style={styles.commandeDetailLabel}>Date Devis: <Text style={styles.boldText}>{bonCommande.dateCommande ? moment(bonCommande.dateCommande).format("DD/MM/YYYY") : "N/A"}</Text></Text>
             </View>
-            {bonCommande.dateLivBonCommande && (
-              <View style={[styles.commandeDetailItem, { marginTop: 4 }]}>
-                <Text style={styles.commandeDetailLabel}>
-                  Date Livraison: <Text style={styles.boldText}>
-                    {moment(bonCommande.dateLivBonCommande).format("DD/MM/YYYY")}
-                  </Text>
-                </Text>
-              </View>
-            )}
           </View>
           <View style={styles.clientInfoContainer}>
             <Text style={styles.sectionTitle}>CLIENT</Text>
             {bonCommande.client && (
               <>
-                {/* Raison sociale - keep wrapping if needed */}
-                {bonCommande.client.raison_sociale && 
-                  wrapClientText(bonCommande.client.raison_sociale, 35).map((line, idx) => (
-                    <Text key={`rs-${idx}`} style={styles.clientLineItem}>
-                      {line}
-                    </Text>
-                  ))
-                }
-                
-                {/* Matricule fiscal */}
-                {bonCommande.client.matricule_fiscal && (
-                  <Text style={styles.clientLineItem}>
-                    MF: {bonCommande.client.matricule_fiscal}
-                  </Text>
-                )}
-                
-                {/* Adresse */}
-                {bonCommande.client.adresse && (
-                  <Text style={styles.clientLineItem}>
-                    {bonCommande.client.adresse}
-                  </Text>
-                )}
-                
-                {/* Phones */}
-                {bonCommande.client.telephone1 && (
-                  <Text style={styles.clientLineItem}>
-                    Tél: {bonCommande.client.telephone1}
-                  </Text>
-                )}
-                {bonCommande.client.telephone2 && (
-                  <Text style={styles.clientLineItem}>
-                    Tél: {bonCommande.client.telephone2}
-                  </Text>
-                )}
+                {bonCommande.client.raison_sociale && wrapTextHelper(bonCommande.client.raison_sociale, 35).map((line, idx) => (<Text key={`rs-${idx}`} style={styles.clientLineItem}>{line}</Text>))}
+                {bonCommande.client.matricule_fiscal && <Text style={styles.clientLineItem}>MF: {bonCommande.client.matricule_fiscal}</Text>}
+                {bonCommande.client.adresse && wrapTextHelper(bonCommande.client.adresse, 35).map((line, idx) => (<Text key={`adr-${idx}`} style={styles.clientLineItem}>{line}</Text>))}
+                {bonCommande.client.telephone1 && <Text style={styles.clientLineItem}>Tél: {bonCommande.client.telephone1}</Text>}
+                {bonCommande.client.telephone2 && <Text style={styles.clientLineItem}>Tél: {bonCommande.client.telephone2}</Text>}
               </>
             )}
           </View>
@@ -984,9 +681,7 @@ const DevisPDF: React.FC<DevisPDFProps> = ({
         <View style={styles.vendeurContainer}>
           <Text style={styles.sectionTitle}>VENDEUR</Text>
           {bonCommande.vendeur && (
-            <Text style={styles.vendeurText}>
-              {[bonCommande.vendeur.nom, bonCommande.vendeur.prenom].filter(Boolean).join(" ")}
-            </Text>
+            <Text style={styles.vendeurText}>{[bonCommande.vendeur.nom, bonCommande.vendeur.prenom].filter(Boolean).join(" ")}</Text>
           )}
         </View>
       </View>
@@ -997,81 +692,42 @@ const DevisPDF: React.FC<DevisPDFProps> = ({
     <View style={styles.footer}>
       <Text style={styles.footerLine}>
         {[
-          safeCompanyInfo.name,
-          safeCompanyInfo.address,
-          safeCompanyInfo.city,
-          safeCompanyInfo.phone,
-          safeCompanyInfo.gsm,
-          safeCompanyInfo.taxId,
+          companyInfo.name,
+          companyInfo.address,
+          companyInfo.city,
+          companyInfo.phone,
+          companyInfo.gsm,
+          companyInfo.taxId ? "MF: " + companyInfo.taxId : "",
         ]
           .filter(Boolean)
           .join(" - ")}
       </Text>
-      {safeCompanyInfo.email && safeCompanyInfo.website ? (
+      {companyInfo.email && companyInfo.website ? (
         <Text style={styles.footerLine}>
-          Email: {safeCompanyInfo.email} | Site: {safeCompanyInfo.website}
+          Email: {companyInfo.email} | Site: {companyInfo.website.replace(/^https?:\/\//, "")}
         </Text>
-      ) : safeCompanyInfo.email ? (
-        <Text style={styles.footerLine}>Email: {safeCompanyInfo.email}</Text>
-      ) : safeCompanyInfo.website ? (
-        <Text style={styles.footerLine}>Site: {safeCompanyInfo.website}</Text>
+      ) : companyInfo.email ? (
+        <Text style={styles.footerLine}>Email: {companyInfo.email}</Text>
+      ) : companyInfo.website ? (
+        <Text style={styles.footerLine}>Site: {companyInfo.website.replace(/^https?:\/\//, "")}</Text>
       ) : null}
     </View>
   );
 
-  const renderSummaryContent = () => {
-    const totalArticles = bonCommande?.articles?.length || 0;
-    
-    // Calculate bottom position based on article count
-    const summaryBottom = totalArticles < 3 ? 240 : 190; // Reduced from 255/205
-    const amountBottom = totalArticles < 3 ? 190 : 140; // Reduced from 205/155
-
-    return (
-      <>
-        {renderSummarySection(summaryBottom, amountBottom)}
-        <View style={[styles.amountInWords, { bottom: amountBottom }]}>
-          <Text style={styles.amountText}>
-            Arrêté le présent devis à la somme de : {amountInWords}
-          </Text>
-        </View>
-        <View style={[styles.cachetSignatureSection, { bottom: amountBottom - 40 }]}>
-          <View style={styles.signatureContainer}>
-            <Text style={styles.signatureText}>Client</Text>
-            <Text style={styles.subText}>Signature</Text>
-          </View>
-          <View style={styles.cachetContainer}>
-            <Text style={styles.cachetText}> Signature & Cachet</Text>
-            <Text style={styles.subText}>Du Responsable </Text>
-          </View>
-        </View>
-      </>
-    );
-  };
+  const pageGroups = buildPageGroups(bonCommande?.articles || []);
+  const totalPages = pageGroups.length;
 
   return (
     <Document>
-      {/* FIRST PAGE */}
-      <Page key={0} size="A4" style={styles.page}>
-        {renderPageHeader(0)}
-        {renderTable(articlesFirstPage, 0)}
-        {/* Show summary on first page ONLY for 1-4 articles */}
-        {totalArticles <= 10 && renderSummaryContent()}
-        {renderFooter()}
-        <Text style={styles.pageNumber}>Page 1 sur {totalPages}</Text>
-      </Page>
-
-      {/* SECOND PAGE - For 5+ articles */}
-      {needsSecondPage && (
-        <Page key={1} size="A4" style={styles.page}>
-          {renderPageHeader(1)}
-          {/* Show table only if there are articles for second page (14+ articles case) */}
-          {articlesSecondPage.length > 0 && renderTable(articlesSecondPage, 1, true)}
-          {/* ALWAYS show summary on second page for 5+ articles */}
-          {renderSummaryContent()}
+      {pageGroups.map((group, index) => (
+        <Page key={index} size="A4" style={styles.page}>
+          {renderPageHeader()}
+          {renderTable(group)}
+          {group.isLast && renderSummaryContent(group.articles.length > 0)}
           {renderFooter()}
-          <Text style={styles.pageNumber}>Page 2 sur {totalPages}</Text>
+          <Text style={styles.pageNumber}>Page {index + 1} sur {totalPages}</Text>
         </Page>
-      )}
+      ))}
     </Document>
   );
 };

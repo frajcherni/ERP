@@ -115,27 +115,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     textAlign: "center",
     fontWeight: "bold",
-    fontSize: 10,
+    fontSize: 9,
     color: "#ffffff",
     justifyContent: "center",
     alignItems: "center",
   },
   tableCol: {
     paddingHorizontal: 4,
-    fontSize: 10,
+    fontSize: 9,
     textAlign: "center",
     justifyContent: "center",
     alignItems: "center",
   },
-  colN: { width: "6%" },
-  colArticle: { width: "16%", textAlign: "left" },
-  colDesignation: { width: "38%", textAlign: "left" },
-  colQteC: { width: "8%" },
-  colQteLiv: { width: "8%" },
-  colPUHT: { width: "10%", textAlign: "right" },
-  colTVA: { width: "8%" },
-  colPUTTC: { width: "10%", textAlign: "right" },
-  colMontantTTC: { width: "10%", textAlign: "right" },
+  colN: { width: "5%" },
+  colArticle: { width: "15%", textAlign: "left" },
+  colDesignation: { width: "34%", textAlign: "left" },
+  colQteC: { width: "7%" },
+  colQteLiv: { width: "7%" },
+  colPUHT: { width: "9%", textAlign: "right" },
+  colTVA: { width: "7%" },
+  colPUTTC: { width: "9%", textAlign: "right" },
+  colMontantTTC: { width: "12%", textAlign: "right" },
   summaryArea: {
     position: "absolute",
     left: 20,
@@ -250,7 +250,7 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     textAlign: "center",
-    fontSize: 8,
+    fontSize: 9,
     borderTop: "1pt solid #ddd",
     paddingTop: 3,
   },
@@ -269,13 +269,12 @@ const styles = StyleSheet.create({
   pageNumber: { position: "absolute", bottom: 5, left: 20, fontSize: 8 },
   boldText: { fontWeight: "bold" },
   clientInfoContainer: {
-    width: "50%",
+    minWidth: 250,
     border: "1pt solid #ddd",
-    padding: 8,
+    padding: 6,
     alignItems: "flex-start",
-    marginLeft: 200,
+    marginLeft: "auto",
   },
-  clientLine: { fontSize: 10, marginBottom: 1, fontWeight: "bold", flexWrap: "wrap" },
   clientLineItem: { fontSize: 10, marginBottom: 1, fontWeight: "bold" },
   continuationHeader: {
     fontSize: 10,
@@ -521,13 +520,13 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
 
     const acompteFromMethods = bonCommande.paymentMethods
       ? bonCommande.paymentMethods.reduce((sum: number, pm: any) =>
-          pm.method !== "retenue" ? sum + (Number(pm.amount) || 0) : sum, 0)
+        pm.method !== "retenue" ? sum + (Number(pm.amount) || 0) : sum, 0)
       : 0;
 
     const acompteFromPaiements = bonCommande.paiements
       ? bonCommande.paiements
-          .filter((p: any) => p.modePaiement !== "Retention")
-          .reduce((sum: number, p: any) => sum + (Number(p.montant) || 0), 0)
+        .filter((p: any) => p.modePaiement !== "Retention")
+        .reduce((sum: number, p: any) => sum + (Number(p.montant) || 0), 0)
       : 0;
 
     const acompteTotal = acompteFromMethods + acompteFromPaiements;
@@ -632,7 +631,7 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
 
   const amountInWords = numberToWords(netAPayer);
 
-  const wrapClientText = (text: string, maxCharsPerLine: number = 40): string[] => {
+  const wrapTextHelper = (text: string, maxCharsPerLine: number = 45): string[] => {
     if (!text || text.trim() === "") return [];
     const cleanText = text.trim();
     if (cleanText.length <= maxCharsPerLine) return [cleanText];
@@ -650,6 +649,15 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
     });
     if (currentLine) lines.push(currentLine);
     return lines;
+  };
+
+  const formatPhoneNumber = (phone: string | null | undefined): string => {
+    if (!phone) return "";
+    const cleaned = phone.replace(/\D/g, "");
+    if (cleaned.length === 8) {
+      return `${cleaned.substring(0, 2)} ${cleaned.substring(2, 5)} ${cleaned.substring(5, 8)}`;
+    }
+    return phone;
   };
 
   const getMethodLabel = (method: string): string => {
@@ -762,8 +770,8 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
         const amount = Number(pm.amount) || 0;
         const date = pm.date ? moment(pm.date).format("DD/MM/YYYY")
           : pm.datePaiement ? moment(pm.datePaiement).format("DD/MM/YYYY")
-          : pm.createdAt ? moment(pm.createdAt).format("DD/MM/YYYY")
-          : null;
+            : pm.createdAt ? moment(pm.createdAt).format("DD/MM/YYYY")
+              : null;
         const elements: JSX.Element[] = [];
         if (pm.method === "cheque") {
           elements.push(<Text key="cheque">chèque </Text>);
@@ -833,7 +841,7 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
             </View>
             {Number(bonCommande.remise) > 0 && (
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Remise HT:</Text>
+                <Text style={styles.summaryLabel}>Remise sur HT:</Text>
                 <Text style={styles.summaryValue}>- {formatCurrency(discountAmount)} DT</Text>
               </View>
             )}
@@ -842,7 +850,7 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
               <Text style={styles.summaryValue}>{formatCurrency(netHT)} DT</Text>
             </View>
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>TVA:</Text>
+              <Text style={styles.summaryLabel}>Total TVA:</Text>
               <Text style={styles.summaryValue}>{formatCurrency(totalTax)} DT</Text>
             </View>
             <View style={styles.summaryRow}>
@@ -982,24 +990,27 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
             )}
           </View>
           <View style={styles.clientInfoContainer}>
-            <Text style={styles.sectionTitle}>CLIENT</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 3 }}>
+              <Text style={styles.sectionTitle}>CLIENT</Text>
+            </View>
             {bonCommande.client && (
               <>
                 {bonCommande.client.raison_sociale &&
-                  wrapClientText(bonCommande.client.raison_sociale, 35).map((line, idx) => (
+                  wrapTextHelper(bonCommande.client.raison_sociale, 45).map((line, idx) => (
                     <Text key={`rs-${idx}`} style={styles.clientLineItem}>{line}</Text>
                   ))}
                 {bonCommande.client.matricule_fiscal && (
                   <Text style={styles.clientLineItem}>MF: {bonCommande.client.matricule_fiscal}</Text>
                 )}
-                {bonCommande.client.adresse && (
-                  <Text style={styles.clientLineItem}>{bonCommande.client.adresse}</Text>
-                )}
+                {bonCommande.client.adresse &&
+                  wrapTextHelper(bonCommande.client.adresse, 45).map((line, idx) => (
+                    <Text key={`adr-${idx}`} style={styles.clientLineItem}>{line}</Text>
+                  ))}
                 {bonCommande.client.telephone1 && (
-                  <Text style={styles.clientLineItem}>Tél: {bonCommande.client.telephone1}</Text>
+                  <Text style={styles.clientLineItem}>Tél: {formatPhoneNumber(bonCommande.client.telephone1)}</Text>
                 )}
                 {bonCommande.client.telephone2 && (
-                  <Text style={styles.clientLineItem}>Tél: {bonCommande.client.telephone2}</Text>
+                  <Text style={styles.clientLineItem}>Tél: {formatPhoneNumber(bonCommande.client.telephone2)}</Text>
                 )}
               </>
             )}
@@ -1028,17 +1039,19 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
           companyInfo.city,
           companyInfo.phone,
           companyInfo.gsm,
-          companyInfo.taxId,
+          companyInfo.taxId ? "MF: " + companyInfo.taxId : "",
         ]
           .filter(Boolean)
           .join(" - ")}
       </Text>
       {companyInfo.email && companyInfo.website ? (
-        <Text style={styles.footerLine}>Email: {companyInfo.email} | Site: {companyInfo.website}</Text>
+        <Text style={styles.footerLine}>
+          Email: {companyInfo.email} | Site: {companyInfo.website.replace(/^https?:\/\//, "")}
+        </Text>
       ) : companyInfo.email ? (
         <Text style={styles.footerLine}>Email: {companyInfo.email}</Text>
       ) : companyInfo.website ? (
-        <Text style={styles.footerLine}>Site: {companyInfo.website}</Text>
+        <Text style={styles.footerLine}>Site: {companyInfo.website.replace(/^https?:\/\//, "")}</Text>
       ) : null}
     </View>
   );

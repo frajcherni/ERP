@@ -291,12 +291,12 @@ const formatPhoneDisplay = (phone: string | null | undefined): string => {
   return phone;
 };
 
-const UnifiedDashboard = () => {
+const UnifiedDashboard = ({ hideHeader = false }: { hideHeader?: boolean }) => {
   const [activeTab, setActiveTab] = useState("1");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState<Date | null>(null);
-  const [endDate, setEndDate] = useState<Date | null>(null);
+  const [startDate, setStartDate] = useState<Date | null>(moment().toDate());
+  const [endDate, setEndDate] = useState<Date | null>(moment().toDate());
   const [searchText, setSearchText] = useState("");
   const [searchPhone, setSearchPhone] = useState("");
   const [unifiedData, setUnifiedData] = useState<any[]>([]);
@@ -391,20 +391,7 @@ const UnifiedDashboard = () => {
 
   // Table columns - using the same pattern as existing pages
   const columns = useMemo(() => [
-    {
-      header: "Source",
-      accessorKey: "sourceType",
-      enableColumnFilter: false,
-      cell: (cell: any) => {
-        const item = cell.row.original;
-        return (
-          <Badge color={item.sourceColor} className="px-2 py-1">
-            <i className={`${item.sourceIcon} me-1 fs-11`}></i>
-            {item.sourceType}
-          </Badge>
-        );
-      },
-    },
+
     {
       header: "Numéro",
       accessorKey: "displayNumero",
@@ -428,12 +415,6 @@ const UnifiedDashboard = () => {
       cell: (cell: any) => cell.getValue()?.raison_sociale || "-",
     },
     {
-      header: "Téléphone",
-      accessorKey: "client",
-      enableColumnFilter: false,
-      cell: (cell: any) => formatPhoneDisplay(cell.getValue()?.telephone1) || "-",
-    },
-    {
       header: "Vendeur",
       accessorKey: "vendeur",
       enableColumnFilter: false,
@@ -442,16 +423,7 @@ const UnifiedDashboard = () => {
         return vendeur ? `${vendeur.nom || ""} ${vendeur.prenom || ""}` : "-";
       },
     },
-    {
-      header: "Articles",
-      accessorKey: "articles",
-      enableColumnFilter: false,
-      cell: (cell: any) => (
-        <Badge color="success" className="text-uppercase">
-          {cell.getValue()?.length || 0} articles
-        </Badge>
-      ),
-    },
+
     {
       header: "Net à Payer",
       accessorKey: "displayTotal",
@@ -496,9 +468,9 @@ const UnifiedDashboard = () => {
   };
 
   return (
-    <div className="page-content">
+    <div className={hideHeader ? "" : "page-content"}>
       <Container fluid style={{ maxWidth: "100%" }}>
-        <BreadCrumb title="Tableau de Bord Unifié" pageTitle="Dashboard" />
+        {!hideHeader && <BreadCrumb title="Tableau de Bord Unifié" pageTitle="Dashboard" />}
 
         <Row>
           <Col lg={12}>
@@ -507,7 +479,7 @@ const UnifiedDashboard = () => {
                 <Row className="align-items-center gy-3">
                   <div className="col-sm">
                     <h5 className="card-title mb-0">
-                      Gestion des Documents
+                      Gestion
                     </h5>
                   </div>
                   <div className="col-sm-auto">
@@ -635,6 +607,7 @@ const UnifiedDashboard = () => {
                           altFormat: "F j, Y",
                         }}
                         placeholder="Date de début"
+                        value={startDate ? [startDate] : []}
                         onChange={(dates) => setStartDate(dates[0])}
                       />
                     </InputGroup>
@@ -650,63 +623,14 @@ const UnifiedDashboard = () => {
                           altFormat: "F j, Y",
                         }}
                         placeholder="Date de fin"
+                        value={endDate ? [endDate] : []}
                         onChange={(dates) => setEndDate(dates[0])}
                       />
                     </InputGroup>
                   </Col>
                 </Row>
 
-                {/* Statistics Row */}
-                <Row className="mb-4">
-                  <Col md={2}>
-                    <div className="card border-0 shadow-sm bg-primary bg-opacity-10">
-                      <div className="card-body text-center py-2">
-                        <h6 className="text-muted mb-1">Documents</h6>
-                        <h4 className="mb-0 text-primary">{stats.total}</h4>
-                      </div>
-                    </div>
-                  </Col>
-                  <Col md={2}>
-                    <div className="card border-0 shadow-sm bg-success bg-opacity-10">
-                      <div className="card-body text-center py-2">
-                        <h6 className="text-muted mb-1">Montant Total</h6>
-                        <h6 className="mb-0 text-success">{stats.totalAmount.toFixed(3)} DT</h6>
-                      </div>
-                    </div>
-                  </Col>
-                  <Col md={2}>
-                    <div className="card border-0 shadow-sm bg-info bg-opacity-10">
-                      <div className="card-body text-center py-2">
-                        <h6 className="text-muted mb-1">Total Payé</h6>
-                        <h6 className="mb-0 text-info">{stats.totalPaid.toFixed(3)} DT</h6>
-                      </div>
-                    </div>
-                  </Col>
-                  <Col md={2}>
-                    <div className="card border-0 shadow-sm bg-danger bg-opacity-10">
-                      <div className="card-body text-center py-2">
-                        <h6 className="text-muted mb-1">Reste à Payer</h6>
-                        <h6 className="mb-0 text-danger">{stats.totalReste.toFixed(3)} DT</h6>
-                      </div>
-                    </div>
-                  </Col>
-                  <Col md={2}>
-                    <div className="card border-0 shadow-sm bg-warning bg-opacity-10">
-                      <div className="card-body text-center py-2">
-                        <h6 className="text-muted mb-1">Articles</h6>
-                        <h4 className="mb-0 text-warning">{stats.totalArticles}</h4>
-                      </div>
-                    </div>
-                  </Col>
-                  <Col md={2}>
-                    <div className="card border-0 shadow-sm bg-secondary bg-opacity-10">
-                      <div className="card-body text-center py-2">
-                        <h6 className="text-muted mb-1">Clients</h6>
-                        <h4 className="mb-0 text-secondary">{stats.uniqueClients}</h4>
-                      </div>
-                    </div>
-                  </Col>
-                </Row>
+
 
                 {/* Data Table */}
                 {loading ? (

@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     textAlign: "center",
-    fontSize: 8,
+    fontSize: 9,
     borderTop: "1pt solid #ddd",
     paddingTop: 3,
   },
@@ -506,9 +506,9 @@ const BonLivraisonPDF: React.FC<BonLivraisonPDFProps> = ({
         <View style={styles.totalsContainer}>
           <View style={styles.totalsBox}>
             <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Total H.T.:</Text><Text style={styles.summaryValue}>{formatCurrency(sousTotalHT)} DT</Text></View>
-            {Number(bonLivraison.remise) > 0 && (<View style={styles.summaryRow}><Text style={styles.summaryLabel}>Remise:</Text><Text style={styles.summaryValue}>- {formatCurrency(discountAmount)} DT</Text></View>)}
+            {Number(bonLivraison.remise) > 0 && (<View style={styles.summaryRow}><Text style={styles.summaryLabel}>Remise sur HT:</Text><Text style={styles.summaryValue}>- {formatCurrency(discountAmount)} DT</Text></View>)}
             <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Net H.T.:</Text><Text style={styles.summaryValue}>{formatCurrency(netHT)} DT</Text></View>
-            <View style={styles.summaryRow}><Text style={styles.summaryLabel}>TVA:</Text><Text style={styles.summaryValue}>{formatCurrency(totalTax)} DT</Text></View>
+            <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Total TVA:</Text><Text style={styles.summaryValue}>{formatCurrency(totalTax)} DT</Text></View>
             <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Total TTC:</Text><Text style={styles.summaryValue}>{formatCurrency(finalTotal)} DT</Text></View>
             <View style={styles.netAPayerContainer}><Text style={styles.netAPayerLabel}>NET À PAYER:</Text><Text style={styles.netAPayerValue}>{formatCurrency(finalTotal)} DT</Text></View>
           </View>
@@ -565,9 +565,29 @@ const BonLivraisonPDF: React.FC<BonLivraisonPDFProps> = ({
       <View style={styles.livraisonDetails}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
           <View>
-            <View style={styles.livraisonDetailItem}><Text style={styles.N}><Text style={styles.livraisonNumberValue}>{bonLivraison.numeroLivraison || "N/A"}</Text></Text></View>
-            <View style={styles.livraisonDetailItem}><Text style={styles.livraisonDetailLabel}>Date: <Text style={styles.boldText}>{bonLivraison.dateLivraison ? moment(bonLivraison.dateLivraison).format("DD/MM/YYYY") : "N/A"}</Text></Text></View>
-            {isLinkedToBC && (<View style={styles.livraisonDetailItem}><Text style={styles.livraisonDetailLabel}>Commande: <Text style={styles.boldText}>{bonLivraison.bonCommandeClient?.numeroCommande || "N/A"}</Text></Text></View>)}
+            <View style={styles.livraisonDetailItem}>
+              <Text style={styles.N}>
+                <Text style={styles.livraisonNumberValue}>{bonLivraison.numeroLivraison || "N/A"}</Text>
+              </Text>
+            </View>
+            <View style={[styles.livraisonDetailItem, { marginTop: 4 }]}>
+              <Text style={styles.livraisonDetailLabel}>
+                Date:{" "}
+                <Text style={styles.boldText}>
+                  {bonLivraison.dateLivraison ? moment(bonLivraison.dateLivraison).format("DD/MM/YYYY") : "N/A"}
+                </Text>
+              </Text>
+            </View>
+            {isLinkedToBC && (
+              <View style={[styles.livraisonDetailItem, { marginTop: 4 }]}>
+                <Text style={styles.livraisonDetailLabel}>
+                  Commande:{" "}
+                  <Text style={styles.boldText}>
+                    {bonLivraison.bonCommandeClient?.numeroCommande || "N/A"}
+                  </Text>
+                </Text>
+              </View>
+            )}
           </View>
           <View style={styles.clientInfoContainer}>
             <Text style={styles.sectionTitle}>CLIENT</Text>
@@ -599,16 +619,25 @@ const BonLivraisonPDF: React.FC<BonLivraisonPDFProps> = ({
   const renderFooter = () => (
     <View style={styles.footer}>
       <Text style={styles.footerLine}>
-        {[companyInfo.name, companyInfo.address, companyInfo.city, companyInfo.phone, companyInfo.gsm, companyInfo.taxId]
+        {[
+          companyInfo.name,
+          companyInfo.address,
+          companyInfo.city,
+          companyInfo.phone,
+          companyInfo.gsm,
+          companyInfo.taxId ? "MF: " + companyInfo.taxId : "",
+        ]
           .filter(Boolean)
           .join(" - ")}
       </Text>
-      {companyInfo.email || companyInfo.website ? (
+      {companyInfo.email && companyInfo.website ? (
         <Text style={styles.footerLine}>
-          {companyInfo.email ? `Email: ${companyInfo.email}` : ""}
-          {companyInfo.email && companyInfo.website ? " | " : ""}
-          {companyInfo.website ? `Site: ${companyInfo.website}` : ""}
+          Email: {companyInfo.email} | Site: {companyInfo.website.replace(/^https?:\/\//, "")}
         </Text>
+      ) : companyInfo.email ? (
+        <Text style={styles.footerLine}>Email: {companyInfo.email}</Text>
+      ) : companyInfo.website ? (
+        <Text style={styles.footerLine}>Site: {companyInfo.website.replace(/^https?:\/\//, "")}</Text>
       ) : null}
     </View>
   );

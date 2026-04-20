@@ -76,7 +76,6 @@ export const searchArticles = async (params: {
 }> => {
   try {
     console.log("🔍 POST Search request:", params);
-    debugger
     const response = await fetch(`${API_BASE}/articles/search`, {
       method: 'POST',
       headers: {

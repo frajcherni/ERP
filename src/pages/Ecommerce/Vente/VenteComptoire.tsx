@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   Fragment,
   useEffect,
   useState,
@@ -82,7 +82,6 @@ import VenteComptoireReceiptPDF from "./VenteComptoireReceiptPDF";
 import { useProfile } from "Components/Hooks/UserHooks";
 import logo from "../../../assets/images/imglogo.png";
 import DiscountAlertModal from "../../../Components/Common/DiscountAlertModal";
-
 import {
   createClient,
   createArticle,
@@ -866,17 +865,19 @@ const VenteComptoire = () => {
       setModalLoading(true);
       try {
         // Load only what's needed for the modal
-        const [depotsResult, categoriesResult] = await Promise.all([
+        const [depotsResult, categoriesResult, fournisseursResult] = await Promise.all([
           fetchDepots(),
           fetchCategories(),
+          fetchFournisseurs(),
         ]);
 
         setDepots(depotsResult);
         setCategories(categoriesResult);
+        setFournisseurs(fournisseursResult || []);
 
         // Auto-select "magazin" depot if not already selected
         if (depotsResult.length > 0 && !selectedDepot) {
-          const magazinDepot = depotsResult.find(d =>
+          const magazinDepot = depotsResult.find((d) =>
             d.nom.toLowerCase().includes("magazin")
           );
           if (magazinDepot) {

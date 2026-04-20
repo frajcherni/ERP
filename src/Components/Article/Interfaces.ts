@@ -149,6 +149,7 @@ export interface Fournisseur {
   telephone1: string;
   telephone2?: string;
   email: string;
+  code_barre_fournisseur?: string;
   status: "Actif" | "Inactif";
   createdAt?: string;
   updatedAt?: string;

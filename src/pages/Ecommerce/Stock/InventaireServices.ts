@@ -128,11 +128,13 @@ export const deleteInventaire = async (id: number): Promise<void> => {
     }
 };
 
-/** GET /api/articles  (reuse existing articles endpoint) */
+/** GET /api/articles - reuse existing articles endpoint */
 export const fetchAllArticles = async (): Promise<Article[]> => {
     try {
-        const response = await axios.get(`${API_BASE}/articles/getArticles`);
-        return response.data?.data ?? response.data;
+        const response = await axios.get(`${API_BASE}/articles/getarticle`);
+        // backend returns array directly or { data: [...] }
+        const raw = response.data?.data ?? response.data;
+        return Array.isArray(raw) ? raw : [];
     } catch (error: any) {
         throw error.response?.data?.message || error.message || "Network error";
     }
@@ -142,7 +144,8 @@ export const fetchAllArticles = async (): Promise<Article[]> => {
 export const fetchDepots = async (): Promise<{ id: number; nom: string }[]> => {
     try {
         const response = await axios.get(`${API_BASE}/depots/fetchDepots`);
-        return response.data?.data ?? response.data;
+        const raw = response.data?.data ?? response.data;
+        return Array.isArray(raw) ? raw : [];
     } catch (error: any) {
         throw error.response?.data?.message || error.message || "Network error";
     }

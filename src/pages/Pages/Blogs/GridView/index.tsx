@@ -11,10 +11,10 @@ const BlogGridView = () => {
 
      //pagination
      const [currentPage, setCurrentPage] = useState(1);
-     const perPageData = 8;
+     const [perPageData, setPerPageData] = useState(10);
      const indexOfLast = currentPage * perPageData;
      const indexOfFirst = indexOfLast - perPageData;
-     const currentdata = useMemo(() => gridData?.slice(indexOfFirst, indexOfLast), [indexOfFirst, indexOfLast])
+     const currentdata = useMemo(() => gridData?.slice(indexOfFirst, indexOfLast), [indexOfFirst, indexOfLast, perPageData])
 
     return (
         <React.Fragment>
@@ -64,21 +64,14 @@ const BlogGridView = () => {
                         ))}
                     </Row>
 
-                    <div className="row g-0 text-center text-sm-start align-items-center mb-4">
-                    <div className="col-sm-6">
-                        <div>
-                            <p className="mb-sm-0 text-muted">Showing <span className="fw-semibold">1</span> to <span className="fw-semibold">8</span> of <span className="fw-semibold text-decoration-underline">33</span> entries</p>
-                        </div>
-                    </div>
-                    <div className="col-sm-6">
-                        <Pagination
-                            perPageData={perPageData}
-                            data={gridData}
-                            currentPage={currentPage}
-                            setCurrentPage={setCurrentPage}
-                        />
-                    </div>
-                </div>
+                    <Pagination
+                        perPageData={perPageData}
+                        setPerPageData={setPerPageData}
+                        data={gridData}
+                        currentPage={currentPage}
+                        setCurrentPage={setCurrentPage}
+                        showingText={<p className="mb-0 text-muted">Showing <span className="fw-semibold">{indexOfFirst + 1}</span> to <span className="fw-semibold">{Math.min(indexOfLast, gridData.length)}</span> of <span className="fw-semibold text-decoration-underline">{gridData.length}</span> entries</p>}
+                    />
 
                 </Container>
             </div>

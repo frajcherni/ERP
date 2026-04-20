@@ -1,4 +1,4 @@
-﻿import React, { Fragment, useEffect, useState, useMemo, useCallback } from "react";
+import React, { Fragment, useEffect, useState, useMemo, useCallback } from "react";
 import {
     Card, CardBody, Col, Container, CardHeader, Row, Modal, ModalHeader, Nav,
     NavItem, NavLink, Form, ModalBody, ModalFooter, Label, Input, FormFeedback,
@@ -19,10 +19,12 @@ import {
     fetchBonsReception, createBonReception, updateBonReception, deleteBonReception,
     fetchNextReceptionNumberFromAPI
 } from "../../../Components/BonReception/BonReceptionServices";
-import { fetchArticles, fetchFournisseurs } from "../../../Components/Article/ArticleServices";
+import { fetchArticles, fetchFournisseurs, fetchCategories } from "../../../Components/Article/ArticleServices";
 import { createFacture, fetchNextFactureNumberFromAPI } from "../../../Components/Article/FactureServices";
 import { Article, Fournisseur, BonReception } from "../../../Components/Article/Interfaces";
 import classnames from "classnames";
+import CreateArticleModal from "./CreateArticleModal";
+import EditArticleModal from "./EditArticleModal";
 
 const BonReceptionList = () => {
     const [detailModal, setDetailModal] = useState(false);
@@ -34,6 +36,7 @@ const BonReceptionList = () => {
     const [filteredBonsReception, setFilteredBonsReception] = useState<BonReception[]>([]);
     const [bonReception, setBonReception] = useState<BonReception | null>(null);
     const [fournisseurs, setFournisseurs] = useState<Fournisseur[]>([]);
+    const [categories, setCategories] = useState<any[]>([]);
     const [articles, setArticles] = useState<Article[]>([]);
     const [isEdit, setIsEdit] = useState(false);
     const [isCreatingFacture, setIsCreatingFacture] = useState(false);
@@ -60,6 +63,7 @@ const [selectedArticles, setSelectedArticles] = useState<{
   tva?: number | null;
   remise?: number | null;
   articleDetails?: Article;
+  designation?: string;
 }[]>([]);
 
     const [showRemise, setShowRemise] = useState(false);
@@ -68,6 +72,11 @@ const [selectedArticles, setSelectedArticles] = useState<{
     const [nextNumeroFacture, setNextNumeroFacture] = useState("");
     const [nextNumeroReception, setNextNumeroReception] = useState("");
     const [timbreFiscal, setTimbreFiscal] = useState<boolean>(false);
+
+    // Modals for article creation/edition
+    const [createArticleModal, setCreateArticleModal] = useState(false);
+    const [editArticleModal, setEditArticleModal] = useState(false);
+    const [articleToEdit, setArticleToEdit] = useState<Article | null>(null);
 
     const conditionPaiementOptions = [
         { value: "7", label: "7 jours" },
@@ -141,16 +150,18 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
     const fetchData = useCallback(async () => {
         try {
             setLoading(true);
-            const [bonsData, fournisseursData, articlesData] = await Promise.all([
+            const [bonsData, fournisseursData, articlesData, categoriesData] = await Promise.all([
                 fetchBonsReception(),
                 fetchFournisseurs(),
-                fetchArticles()
+                fetchArticles(),
+                fetchCategories()
             ]);
 
             setBonsReception(bonsData);
             setFilteredBonsReception(bonsData);
             setFournisseurs(fournisseursData);
             setArticles(articlesData);
+            setCategories(categoriesData);
             setLoading(false);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Échec du chargement des données");
@@ -493,7 +504,8 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
               prixTTC: Math.round(initialTTC * 1000) / 1000, // Ensure proper rounding
               tva: initialTVA,
               remise: 0,
-              articleDetails: article
+              articleDetails: article,
+              designation: article.designation || ""
             }
           ]);
         }
@@ -720,7 +732,8 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                             prixUnitaire: parseFloat(item.prixUnitaire),
                                             tva: item.tva != null ? parseFloat(item.tva) : null,
                                             remise: item.remise != null ? parseFloat(item.remise) : null,
-                                            articleDetails: item.article
+                                            articleDetails: item.article,
+                                            designation: item.designation || item.article?.designation || ""
                                         })));
                                         setGlobalRemise(cellProps.row.original.remise || 0);
                                         setRemiseType(cellProps.row.original.remiseType || "percentage");
@@ -1207,7 +1220,8 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
             prixTTC: (Number(item.prixUnitaire) || 0) * (1 + ((Number(item.tva) || 0) / 100)),
             tva: item.tva != null ? Number(item.tva) : null,
             remise: item.remise != null ? Number(item.remise) : null,
-            articleDetails: item.article
+            articleDetails: item.article,
+            designation: item.designation || item.article?.designation || ""
           })));
           setGlobalRemise(selectedBonReception.remise || 0);
           setRemiseType((selectedBonReception.remiseType as "percentage" | "fixed" | undefined) ?? "percentage");
@@ -1446,15 +1460,20 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
           
           <div className="mb-4">
             <Label className="form-label-lg fw-semibold">Rechercher Article</Label>
-            <div className="search-box position-relative">
-              <Input
-                type="text"
-                placeholder="Rechercher article..."
-                value={articleSearch}
-                onChange={(e) => setArticleSearch(e.target.value)}
-                className="form-control-lg ps-5"
-              />
-              <i className="ri-search-line search-icon position-absolute top-50 start-0 translate-middle-y ms-3 fs-5 text-muted"></i>
+            <div className="d-flex gap-2">
+              <div className="search-box position-relative flex-grow-1">
+                <Input
+                  type="text"
+                  placeholder="Rechercher article..."
+                  value={articleSearch}
+                  onChange={(e) => setArticleSearch(e.target.value)}
+                  className="form-control-lg ps-5"
+                />
+                <i className="ri-search-line search-icon position-absolute top-50 start-0 translate-middle-y ms-3 fs-5 text-muted"></i>
+              </div>
+              <Button color="secondary" className="btn-icon" onClick={() => setCreateArticleModal(true)}>
+                <i className="ri-add-line fs-5"></i>
+              </Button>
             </div>
             
             {/* Scrollable Dropdown Results */}
@@ -1494,17 +1513,30 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                               HT: {(Number(article.pua_ht) || 0).toFixed(3)} DT
                             </small>
                           </div>
-                          {selectedArticles.some(item => item.article_id === article.id) ? (
-                            <Badge color="secondary" className="fs-6">
-                              <i className="ri-check-line me-1"></i>
-                              Ajouté
-                            </Badge>
-                          ) : (
-                            <Badge color="success" className="fs-6">
-                              <i className="ri-add-line me-1"></i>
-                              Ajouter
-                            </Badge>
-                          )}
+                          <div className="d-flex align-items-center gap-2">
+                            {selectedArticles.some(item => item.article_id === article.id) ? (
+                              <Badge color="secondary" className="fs-6">
+                                <i className="ri-check-line me-1"></i>
+                                Ajouté
+                              </Badge>
+                            ) : (
+                              <Badge color="success" className="fs-6">
+                                <i className="ri-add-line me-1"></i>
+                                Ajouter
+                              </Badge>
+                            )}
+                            <Button 
+                              color="link" 
+                              className="text-primary p-0" 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setArticleToEdit(article);
+                                setEditArticleModal(true);
+                              }}
+                            >
+                              <i className="ri-pencil-fill fs-5"></i>
+                            </Button>
+                          </div>
                         </div>
                       </li>
                     ))}
@@ -1532,6 +1564,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                       <th style={{ width: "12%", minWidth: "120px" }}>Prix Unitaire HT</th>
                       <th style={{ width: "12%", minWidth: "120px" }}>Prix Unitaire TTC</th>
                       <th style={{ width: "8%", minWidth: "80px" }}>TVA (%)</th>
+                      <th style={{ width: "8%", minWidth: "80px" }}>Remise (%)</th>
                       <th style={{ width: "10%", minWidth: "100px" }}>Total HT</th>
                       <th style={{ width: "10%", minWidth: "100px" }}>Total TTC</th>
                       <th style={{ width: "5%", minWidth: "60px" }}>Action</th>
@@ -1568,15 +1601,26 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                         }
                       }
 
-                      const montantHTLigne = (qty * priceHT).toFixed(3);
+                      const remiseRate = Number(item.remise) || 0;
+
+                      const montantHTLigne = (qty * priceHT * (1 - remiseRate / 100)).toFixed(3);
                       const montantTTCLigne = (qty * priceTTC).toFixed(3);
 
                       return (
-                        <tr key={`${item.article_id}-${index}`} className="align-middle">
+                        <tr key={`${item.article_id}-${index}`} className="align-middle article-row">
                           <td style={{ width: "25%" }}>
                             <div className="d-flex align-items-center">
                               <div className="flex-grow-1">
-                                <h6 className="mb-0 fw-semibold fs-6">{article?.designation}</h6>
+                                <Input
+                                  type="textarea"
+                                  rows="2"
+                                  value={item.designation || ""}
+                                  onChange={(e) => {
+                                    const newValue = e.target.value;
+                                    handleArticleChange(item.article_id, "designation", newValue);
+                                  }}
+                                  className="article-designation-input"
+                                />
                               </div>
                             </div>
                           </td>
@@ -1600,7 +1644,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                   handleArticleChange(item.article_id, "quantite", newQty);
                                 }
                               }}
-                              className="table-input text-center"
+                              className="table-input article-input article-input-number"
                               style={{ width: "100%", fontSize: "0.9rem" }}
                             />
                           </td>
@@ -1629,7 +1673,14 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                   }
                                 }
                               }}
-                              className="table-input text-end"
+                              onBlur={() => {
+                                setEditingHT((prev) => {
+                                  const newState = { ...prev };
+                                  delete newState[item.article_id];
+                                  return newState;
+                                });
+                              }}
+                              className="table-input article-input article-input-currency"
                               style={{ width: "100%", fontSize: "0.9rem" }}
                             />
                           </td>
@@ -1658,7 +1709,14 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                   }
                                 }
                               }}
-                              className="table-input text-end"
+                              onBlur={() => {
+                                setEditingTTC((prev) => {
+                                  const newState = { ...prev };
+                                  delete newState[item.article_id];
+                                  return newState;
+                                });
+                              }}
+                              className="table-input article-input article-input-currency"
                               style={{ width: "100%", fontSize: "0.9rem" }}
                             />
                           </td>
@@ -1670,7 +1728,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                 const newTva = e.target.value === "" ? null : Number(e.target.value);
                                 handleArticleChange(item.article_id, "tva", newTva);
                               }}
-                              className="table-input"
+                              className="table-input article-input article-select"
                               style={{ width: "100%", fontSize: "0.9rem" }}
                             >
                               <option value="">Sélectionner</option>
@@ -1681,6 +1739,17 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                               ))}
                             </Input>
                           </td>
+                          <td style={{ width: "8%" }}>
+                            <Input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={item.remise ?? 0}
+                              onChange={(e) => handleArticleChange(item.article_id, "remise", Number(e.target.value))}
+                              className="table-input text-center"
+                              style={{ width: "100%", fontSize: "0.9rem" }}
+                            />
+                          </td>
                           <td style={{ width: "10%" }} className="text-end fw-semibold">
                             {montantHTLigne} DT
                           </td>
@@ -1688,15 +1757,31 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                             {montantTTCLigne} DT
                           </td>
                           <td style={{ width: "5%" }}>
-                            <Button
-                              color="danger"
-                              size="sm"
-                              onClick={() => handleRemoveArticle(item.article_id)}
-                              className="btn-invoice-danger"
-                              style={{ padding: "0.25rem 0.5rem", fontSize: "0.8rem" }}
-                            >
-                              <i className="ri-delete-bin-line"></i>
-                            </Button>
+                            <div className="d-flex gap-2">
+                              <Button
+                                color="primary"
+                                size="sm"
+                                onClick={() => {
+                                  if (article) {
+                                    setArticleToEdit(article);
+                                    setEditArticleModal(true);
+                                  }
+                                }}
+                                className="btn-invoice-primary"
+                                style={{ padding: "0.25rem 0.5rem", fontSize: "0.8rem" }}
+                              >
+                                <i className="ri-pencil-fill"></i>
+                              </Button>
+                              <Button
+                                color="danger"
+                                size="sm"
+                                onClick={() => handleRemoveArticle(item.article_id)}
+                                className="btn-invoice-danger"
+                                style={{ padding: "0.25rem 0.5rem", fontSize: "0.8rem" }}
+                              >
+                                <i className="ri-delete-bin-line"></i>
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2574,6 +2659,36 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                     </Col>
                 </Row>
             </Container>
+
+            <CreateArticleModal 
+                isOpen={createArticleModal} 
+                toggle={() => setCreateArticleModal(!createArticleModal)} 
+                fournisseurs={fournisseurs}
+                categories={categories}
+                onSuccess={(newArticle) => {
+                    setArticles(prev => [...prev, newArticle]);
+                    handleAddArticle(newArticle.id.toString());
+                }}
+            />
+
+            <EditArticleModal 
+                isOpen={editArticleModal} 
+                toggle={() => { setEditArticleModal(!editArticleModal); if (editArticleModal) setArticleToEdit(null); }} 
+                fournisseurs={fournisseurs}
+                categories={categories}
+                article={articleToEdit}
+                onSuccess={(updatedArticle) => {
+                    setArticles(prev => prev.map(a => a.id === updatedArticle.id ? updatedArticle : a));
+                    setFilteredArticles(prev => prev.map(a => a.id === updatedArticle.id ? updatedArticle : a));
+                    setSelectedArticles(prev => prev.map(item => item.article_id === updatedArticle.id ? {
+                        ...item,
+                        articleDetails: updatedArticle,
+                        prixUnitaire: updatedArticle.pua_ht || updatedArticle.puv_ht || item.prixUnitaire,
+                        prixTTC: updatedArticle.pua_ttc || updatedArticle.puv_ttc || item.prixTTC,
+                        tva: updatedArticle.tva || item.tva
+                    } : item));
+                }}
+            />
         </div>
     );
 };

@@ -9,7 +9,7 @@ import {
 } from "@react-pdf/renderer";
 import moment from "moment";
 
-const ITEMS_PER_PAGE = 24;
+const ITEMS_PER_PAGE = 18;
 
 const styles = StyleSheet.create({
   page: {
@@ -48,19 +48,21 @@ const styles = StyleSheet.create({
   tableHeader: {
     flexDirection: "row",
     backgroundColor: "#00aeef",
-    paddingVertical: 8,
+    height: 32,
+    alignItems: "center",
   },
   tableRow: {
     flexDirection: "row",
     borderBottom: "1pt solid #ddd",
-    paddingVertical: 6,
+    height: 32,
+    alignItems: "center",
   },
 
-  colNumero: { width: "20%", paddingHorizontal: 4 },
-  colDate: { width: "15%", paddingHorizontal: 4 },
-  colClient: { width: "28%", paddingHorizontal: 4},
-  colTotal: { width: "15%", paddingHorizontal: 4, textAlign: "right" },
-  colStatus: { width: "17%", paddingHorizontal: 4, textAlign: "center" },
+  colNumero: { width: "20%", paddingHorizontal: 4, justifyContent: "center" },
+  colDate: { width: "12%", paddingHorizontal: 4, justifyContent: "center" },
+  colClient: { width: "30%", paddingHorizontal: 4, justifyContent: "center" },
+  colHT: { width: "20%", paddingHorizontal: 4, textAlign: "right", justifyContent: "center" },
+  colTTC: { width: "20%", paddingHorizontal: 4, textAlign: "right", justifyContent: "center" },
 
   headerText: { fontWeight: "bold", fontSize: 10, color: "#fff" },
   cellText: { fontSize: 9 },
@@ -83,7 +85,36 @@ const styles = StyleSheet.create({
     fontSize: 8,
   },
 
-   footerLine: {
+  summaryContainer: {
+    marginTop: 20,
+    borderTop: "2pt solid #00aeef",
+    paddingTop: 10,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  summaryBox: {
+    width: "40%",
+    backgroundColor: "#f9f9f9",
+    padding: 10,
+    borderRadius: 4,
+  },
+  summaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 5,
+  },
+  summaryLabel: {
+    fontSize: 10,
+    fontWeight: "bold",
+    color: "#555",
+  },
+  summaryValue: {
+    fontSize: 11,
+    fontWeight: "bold",
+    color: "#00aeef",
+  },
+
+  footerLine: {
     marginBottom: 1,
   },
 });
@@ -122,11 +153,25 @@ const FacturesListPDF: React.FC<Props> = ({
     pages.push(factures.slice(i, i + ITEMS_PER_PAGE));
   }
 
+  const totalHTSum = factures.reduce((sum, f) => {
+    const ht = f.remise && Number(f.remise) > 0
+      ? Number(f.totalHTAfterRemise) || Number(f.totalHT) || 0
+      : Number(f.totalHT) || 0;
+    return sum + ht;
+  }, 0);
+
+  const totalTTCSum = factures.reduce((sum, f) => {
+    const ttc = f.remise && Number(f.remise) > 0
+      ? Number(f.totalTTCAfterRemise) || Number(f.totalTTC) || 0
+      : Number(f.totalTTC) || 0;
+    return sum + ttc;
+  }, 0);
+
   return (
     <Document>
       {pages.map((pageData, pageIndex) => (
         <Page size="A4" style={styles.page} key={pageIndex}>
-          
+
           {/* HEADER */}
           <View style={styles.header}>
             <View style={styles.companyInfo}>
@@ -159,16 +204,21 @@ const FacturesListPDF: React.FC<Props> = ({
               <View style={styles.colClient}>
                 <Text style={styles.headerText}>CLIENT</Text>
               </View>
-              <View style={styles.colTotal}>
-                <Text style={styles.headerText}>TOTAL TTC</Text>
+              <View style={styles.colHT}>
+                <Text style={styles.headerText}>TOTAL HT</Text>
               </View>
-              <View style={styles.colStatus}>
-                <Text style={styles.headerText}>STATUT</Text>
+              <View style={styles.colTTC}>
+                <Text style={styles.headerText}>TOTAL TTC</Text>
               </View>
             </View>
 
             {pageData.map((facture, index) => {
-              const total =
+              const ht =
+                facture.remise && Number(facture.remise) > 0
+                  ? Number(facture.totalHTAfterRemise) || Number(facture.totalHT) || 0
+                  : Number(facture.totalHT) || 0;
+
+              const ttc =
                 facture.remise && Number(facture.remise) > 0
                   ? Number(facture.totalTTCAfterRemise) || Number(facture.totalTTC) || 0
                   : Number(facture.totalTTC) || 0;
@@ -188,14 +238,14 @@ const FacturesListPDF: React.FC<Props> = ({
                       {facture.client?.raison_sociale || "N/A"}
                     </Text>
                   </View>
-                  <View style={styles.colTotal}>
+                  <View style={styles.colHT}>
                     <Text style={styles.cellText}>
-                      {formatCurrency(total)} DT
+                      {formatCurrency(ht)} DT
                     </Text>
                   </View>
-                  <View style={styles.colStatus}>
+                  <View style={styles.colTTC}>
                     <Text style={styles.cellText}>
-                      {facture.status || "Brouillon"}
+                      {formatCurrency(ttc)} DT
                     </Text>
                   </View>
                 </View>
@@ -203,30 +253,46 @@ const FacturesListPDF: React.FC<Props> = ({
             })}
           </View>
 
-          {/* FOOTER */}
-            <View style={styles.footer}>
-                <Text style={styles.footerLine}>
-                  {[
-                    // safeCompanyInfo.name,
-                    safeCompanyInfo.address,
-                    safeCompanyInfo.city,
-                    safeCompanyInfo.phone,
-                    safeCompanyInfo.gsm,
-                    safeCompanyInfo.taxId,
-                  ]
-                    .filter(Boolean)
-                    .join(" - ")}
-                </Text>
-                {safeCompanyInfo.email && safeCompanyInfo.website ? (
-                  <Text style={styles.footerLine}>
-                    Email: {safeCompanyInfo.email} | Site: {safeCompanyInfo.website}
-                  </Text>
-                ) : safeCompanyInfo.email ? (
-                  <Text style={styles.footerLine}>Email: {safeCompanyInfo.email}</Text>
-                ) : safeCompanyInfo.website ? (
-                  <Text style={styles.footerLine}>Site: {safeCompanyInfo.website}</Text>
-                ) : null}
+          {/* TOTALS SUMMARY (On Last Page Only) */}
+          {pageIndex === pages.length - 1 && (
+            <View style={styles.summaryContainer}>
+              <View style={styles.summaryBox}>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>TOTAL HT GÉNÉRAL:</Text>
+                  <Text style={styles.summaryValue}>{formatCurrency(totalHTSum)} DT</Text>
+                </View>
+                <View style={[styles.summaryRow, { marginTop: 5, borderTop: "1pt solid #ddd", paddingTop: 5 }]}>
+                  <Text style={styles.summaryLabel}>TOTAL TTC GÉNÉRAL:</Text>
+                  <Text style={styles.summaryValue}>{formatCurrency(totalTTCSum)} DT</Text>
+                </View>
               </View>
+            </View>
+          )}
+
+          {/* FOOTER */}
+          <View style={styles.footer}>
+            <Text style={styles.footerLine}>
+              {[
+                // safeCompanyInfo.name,
+                safeCompanyInfo.address,
+                safeCompanyInfo.city,
+                safeCompanyInfo.phone,
+                safeCompanyInfo.gsm,
+                safeCompanyInfo.taxId,
+              ]
+                .filter(Boolean)
+                .join(" - ")}
+            </Text>
+            {safeCompanyInfo.email && safeCompanyInfo.website ? (
+              <Text style={styles.footerLine}>
+                Email: {safeCompanyInfo.email} | Site: {safeCompanyInfo.website}
+              </Text>
+            ) : safeCompanyInfo.email ? (
+              <Text style={styles.footerLine}>Email: {safeCompanyInfo.email}</Text>
+            ) : safeCompanyInfo.website ? (
+              <Text style={styles.footerLine}>Site: {safeCompanyInfo.website}</Text>
+            ) : null}
+          </View>
 
           {/* PAGE NUMBER */}
           <Text style={styles.pageNumber}>

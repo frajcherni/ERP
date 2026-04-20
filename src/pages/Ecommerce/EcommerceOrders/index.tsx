@@ -599,7 +599,10 @@ const ArticlesList = () => {
           safeToString(art.reference).includes(searchLower) ||
           safeToString(art.designation).includes(searchLower) ||
           safeToString(art.categorie?.nom).includes(searchLower) ||
-          safeToString(art.fournisseur?.raison_sociale).includes(searchLower)
+          safeToString(art.fournisseur?.raison_sociale).includes(searchLower) ||
+          safeToString(art.fournisseur?.code_barre_fournisseur).includes(searchLower) ||
+          safeToString(art.code_barre).includes(searchLower) ||
+          (Array.isArray(art.code_barres) && art.code_barres.some(cb => safeToString(cb).includes(searchLower)))
         );
       });
     }
@@ -828,7 +831,7 @@ const ArticlesList = () => {
 
     const fournisseurCode = fournisseurCodeParam !== undefined
       ? fournisseurCodeParam
-      : getFirstThreeLetters(article.fournisseur?.raison_sociale);
+      : (article.fournisseur?.code_barre_fournisseur || getFirstThreeLetters(article.fournisseur?.raison_sociale));
     const barcodeValue = getBarcodeValue(article);
 
     // Fonction de formatage des prix avec POINT comme séparateur décimal
@@ -1274,7 +1277,7 @@ const ArticlesList = () => {
 
     const fournisseurCode = fournisseurCodeParam !== undefined
       ? fournisseurCodeParam
-      : getFirstThreeLetters(article.fournisseur?.raison_sociale);
+      : (article.fournisseur?.code_barre_fournisseur || getFirstThreeLetters(article.fournisseur?.raison_sociale));
 
     const barcodeValue = getBarcodeValue(article);
 
@@ -1638,6 +1641,7 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                     const art = cellProps.row.original;
                     setArticle(art);
                     setFournisseurCodeOverride(
+                      art.fournisseur?.code_barre_fournisseur || 
                       getFirstThreeLetters(art.fournisseur?.raison_sociale)
                     );
                     setPrintModal(true);
@@ -2297,18 +2301,17 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                                     </div>
                                   </Col>
                                   <Col xs={12}>
-                                    <div className="text-muted small mt-2">Code Fournisseur (3 lettres max)</div>
+                                    <div className="text-muted small mt-2">Code Fournisseur</div>
                                     <div className="d-flex align-items-center gap-2 mt-1">
                                       <Input
                                         type="text"
                                         value={fournisseurCodeOverride}
                                         onChange={(e) =>
-                                          setFournisseurCodeOverride(e.target.value.toUpperCase().slice(0, 3))
+                                          setFournisseurCodeOverride(e.target.value.toUpperCase())
                                         }
                                         placeholder="ex: ROY"
-                                        maxLength={3}
                                         className="fw-semibold text-info"
-                                        style={{ width: "80px", textTransform: "uppercase" }}
+                                        style={{ width: "120px", textTransform: "uppercase" }}
                                       />
                                       {article.fournisseur?.raison_sociale && (
                                         <small className="text-muted">

@@ -6,19 +6,38 @@ import {
   Text,
   View,
   StyleSheet,
+  Font,
   Image,
 } from "@react-pdf/renderer";
 import moment from "moment";
 import { BonLivraison } from "../../../Components/Article/Interfaces";
 
-// Use the EXACT same styles from FacturePDF
+Font.register({
+  family: "Open Sans",
+  fonts: [
+    {
+      src: "https://cdn.jsdelivr.net/npm/open-sans-all@0.1.3/fonts/open-sans-regular.ttf",
+      fontWeight: 400,
+    },
+    {
+      src: "https://cdn.jsdelivr.net/npm/open-sans-all@0.1.3/fonts/open-sans-italic.ttf",
+      fontWeight: 400,
+      fontStyle: "italic",
+    },
+    {
+      src: "https://cdn.jsdelivr.net/npm/open-sans-all@0.1.3/fonts/open-sans-600.ttf",
+      fontWeight: 700,
+    },
+  ],
+});
+
 const styles = StyleSheet.create({
   page: {
     flexDirection: "column",
     backgroundColor: "#FFFFFF",
     padding: 20,
     fontSize: 11,
-    fontFamily: "Helvetica",
+    fontFamily: "Open Sans",
   },
   header: {
     flexDirection: "row",
@@ -27,19 +46,19 @@ const styles = StyleSheet.create({
     borderBottom: "1pt solid #000",
     paddingBottom: 6,
   },
-  commandeDetails: {
+  livraisonDetails: {
     marginBottom: 6,
   },
-  commandeDetailItem: {
+  livraisonDetailItem: {
     marginBottom: 2,
   },
-  commandeDetailLabel: {
+  livraisonDetailLabel: {
     fontSize: 13,
   },
   N: {
     fontSize: 15,
   },
-  commandeNumberValue: {
+  livraisonNumberValue: {
     fontSize: 16,
     fontWeight: "bold",
   },
@@ -50,25 +69,10 @@ const styles = StyleSheet.create({
     width: 200,
     marginBottom: 5,
   },
-  clientVendeurSection: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 8,
-    marginTop: 3,
-  },
-  vendeurInfo: {
-    width: "35%",
-    alignItems: "flex-start",
-  },
   sectionTitle: {
     fontSize: 12,
     marginBottom: 3,
     fontWeight: "normal",
-  },
-  clientText: {
-    fontSize: 10,
-    marginBottom: 1,
-    fontWeight: "bold",
   },
   vendeurText: {
     fontSize: 10,
@@ -77,7 +81,7 @@ const styles = StyleSheet.create({
   },
   tableContainer: {
     marginBottom: 15,
-    marginTop: 6,
+    marginTop: 8,
     borderTop: "1pt solid #ddd",
     borderLeft: "1pt solid #ddd",
     borderRight: "1pt solid #ddd",
@@ -85,30 +89,35 @@ const styles = StyleSheet.create({
   tableHeader: {
     flexDirection: "row",
     backgroundColor: "#00aeef",
-    paddingVertical: 5,
+    paddingVertical: 4,
   },
   tableRow: {
     flexDirection: "row",
     borderBottom: "1pt solid #ddd",
-    paddingVertical: 6,
-    minHeight: 24,
+    height: 32,
+    overflow: "hidden",
   },
   tableColHeader: {
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
     textAlign: "center",
     fontWeight: "bold",
     fontSize: 10,
     color: "#ffffff",
+    justifyContent: "center",
+    alignItems: "center",
   },
   tableCol: {
     paddingHorizontal: 4,
     fontSize: 10,
     textAlign: "center",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  colN: { width: "5%" },
-  colArticle: { width: "15%", textAlign: "left" },
-  colDesignation: { width: "29%", textAlign: "left" },
-  colQuantite: { width: "8%" },
+  colN: { width: "6%" },
+  colArticle: { width: "16%", textAlign: "left" },
+  colDesignation: { width: "38%", textAlign: "left" },
+  colQteC: { width: "8%" },
+  colQteLiv: { width: "8%" },
   colPUHT: { width: "10%", textAlign: "right" },
   colTVA: { width: "8%" },
   colPUTTC: { width: "10%", textAlign: "right" },
@@ -121,71 +130,50 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
   },
-  leftColumn: { 
-    width: "50%",
+  leftColumn: {
+    width: "100%", // Full width for non-valorised if no totals
     flexDirection: "column",
   },
-  tvaTable: {
-    borderTop: "1pt solid #ddd",
-    borderLeft: "1pt solid #ddd",
-    borderRight: "1pt solid #ddd",
-    width: "100%",
-  },
-  tvaHeader: {
-    flexDirection: "row",
-    backgroundColor: "#00aeef",
-    paddingVertical: 5,
-  },
-  tvaRow: {
-    flexDirection: "row",
-    borderBottom: "1pt solid #ddd",
-    paddingVertical: 5,
-  },
-  tvaHeaderTaux: { width: "25%", fontSize: 10, fontWeight: "bold", textAlign: "center", color: "#fff", paddingHorizontal: 4 },
-  tvaHeaderBase: { width: "35%", fontSize: 10, fontWeight: "bold", textAlign: "right", color: "#fff", paddingHorizontal: 4 },
-  tvaHeaderMontant: { width: "40%", fontSize: 10, fontWeight: "bold", textAlign: "right", color: "#fff", paddingHorizontal: 4 },
-  tvaColTaux: { width: "25%", fontSize: 10, textAlign: "center", paddingHorizontal: 4 },
-  tvaColBase: { width: "35%", fontSize: 10, textAlign: "right", paddingHorizontal: 4 },
-  tvaColMontant: { width: "40%", fontSize: 10, textAlign: "right", paddingHorizontal: 4 },
-  totalsContainer: { width: "40%" },
-  totalsBox: { 
-    padding: 8, 
+  deliveryInfoBox: {
+    padding: 8,
     border: "1pt solid #ddd",
-    width: "100%",
+    width: "50%", // Keep it half width like in valorised
+    marginBottom: 10,
   },
-  summaryRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 3 },
-  summaryLabel: { fontSize: 11 },
-  summaryValue: { fontSize: 11 },
-  netAPayerContainer: {
+  deliveryInfoHeader: {
+    backgroundColor: "#00aeef",
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    margin: -8,
+    marginBottom: 8,
+  },
+  deliveryInfoTitle: {
+    fontSize: 10,
+    fontWeight: "bold",
+    color: "#ffffff",
+    textAlign: "center",
+  },
+  deliveryInfoRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 8,
-    borderTop: "2pt solid #333",
-    marginHorizontal: -8,
-    marginBottom: -8,
+    marginBottom: 6,
   },
-  netAPayerLabel: { 
-    fontSize: 12, 
-    fontWeight: "bold", 
-    backgroundColor: "#00aeef",
-    color: "#ffffff", 
-    width: "50%",
-    paddingVertical: 8,
-    paddingLeft: 8,
+  deliveryInfoItem: {
+    width: "48%",
   },
-  netAPayerValue: { 
-    fontSize: 12, 
-    fontWeight: "bold", 
-    textAlign: "right", 
-    width: "50%",
-    paddingVertical: 6,
-    paddingRight: 8,
+  deliveryInfoLabel: {
+    fontSize: 10,
+    fontWeight: "bold",
+    marginBottom: 2,
+  },
+  deliveryInfoValue: {
+    fontSize: 10,
   },
   cachetSignatureSection: {
     flexDirection: "row",
     justifyContent: "space-around",
     position: "absolute",
-    bottom: 75,
+    bottom: 115,
     left: 20,
     right: 20,
   },
@@ -200,80 +188,32 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     textAlign: "center",
-    fontSize: 8,
+    fontSize: 9,
     borderTop: "1pt solid #ddd",
     paddingTop: 3,
   },
   footerLine: {
     marginBottom: 1,
   },
-  amountInWords: {
-    position: "absolute",
-    bottom: 115,
-    left: 20,
-    right: 20,
-    padding: 8,
-    border: "1pt solid #ddd",
-  },
-  amountText: { fontSize: 10, textAlign: "center" },
   pageNumber: { position: "absolute", bottom: 5, left: 20, fontSize: 8 },
   boldText: { fontWeight: "bold" },
   clientInfoContainer: {
-    width: "60%",
+    width: "50%",
+    border: "1pt solid #ddd",
+    padding: 8,
     alignItems: "flex-start",
-    left: "180",
+    marginLeft: 200,
   },
-  clientLine: { fontSize: 10, marginBottom: 1, fontWeight: "bold", flexWrap: "wrap" },
+  clientLineItem: { fontSize: 10, marginBottom: 1, fontWeight: "bold" },
   vendeurPaymentContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 8,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 6,
   },
   vendeurContainer: {
-    width: '55%',
+    width: "55%",
   },
-  paymentContainerAboveTable: {
-    width: '40%',
-  },
-
-
-deliveryInfoHeader: {
-  backgroundColor: "#00aeef",
-  paddingVertical: 4,
-  paddingHorizontal: 8,
-  margin: -8,
-  marginBottom: 8,
-},
-deliveryInfoTitle: {
-  fontSize: 11,
-  fontWeight: "bold",
-  color: "#ffffff",
-  textAlign: "center",
-},
-deliveryInfoRow: {
-  flexDirection: "row",
-  justifyContent: "space-between",
-  marginBottom: 6,
-},
-deliveryInfoItem: {
-  width: "48%",
-},
-deliveryInfoLabel: {
-  fontSize: 10,
-  fontWeight: "bold",
-  marginBottom: 2,
-},
-deliveryInfoValue: {
-  fontSize: 10,
-},
-deliveryInfoBox: {
-  padding: 8,
-  border: "1pt solid #ddd",
-  width: "100%",
-  marginBottom: 10,
-},
-
 });
 
 interface BonLivraisonPDFProps {
@@ -291,293 +231,201 @@ interface BonLivraisonPDFProps {
   };
 }
 
-const BonLivraisonNonValorisePDF: React.FC<BonLivraisonPDFProps> = ({ bonLivraison, companyInfo }) => {
-  const isLinkedToBC = !!bonLivraison.bonCommandeClient;
+const LAST_PAGE_MAX = 6;
+const INTER_PAGE_MAX = 15;
 
-  // Empty values for non-valorised version
-  const emptyTotals = {
-    sousTotalHT: 0,
-    netHT: 0,
-    totalTax: 0,
-    grandTotal: 0,
-    finalTotal: 0,
-    discountAmount: 0,
-  };
+interface PageGroup {
+  articles: any[];
+  isLast: boolean;
+  startIndex: number;
+}
 
-  const formatCurrency = (amount: number) => {
-    return amount.toFixed(3);
-  };
-
-  const wrapText = (text: string, maxLength: number = 25): string[] => {
-    if (!text || text.length <= maxLength) {
-      return [text];
+function buildPageGroups(articles: any[]): PageGroup[] {
+  if (!articles || articles.length === 0) {
+    return [{ articles: [], isLast: true, startIndex: 0 }];
+  }
+  if (articles.length <= LAST_PAGE_MAX) {
+    return [{ articles, isLast: true, startIndex: 0 }];
+  }
+  const groups: PageGroup[] = [];
+  let cursor = 0;
+  while (cursor < articles.length) {
+    const remaining = articles.length - cursor;
+    if (remaining <= LAST_PAGE_MAX) {
+      groups.push({ articles: articles.slice(cursor), isLast: true, startIndex: cursor });
+      cursor = articles.length;
+    } else {
+      const take = Math.min(INTER_PAGE_MAX, remaining);
+      groups.push({ articles: articles.slice(cursor, cursor + take), isLast: false, startIndex: cursor });
+      cursor += take;
     }
+  }
+  if (groups.length > 0 && !groups[groups.length - 1].isLast) {
+    groups.push({ articles: [], isLast: true, startIndex: articles.length });
+  }
+  return groups;
+}
 
-    const words = text.split(" ");
+const BonLivraisonNonValorisePDF: React.FC<BonLivraisonPDFProps> = ({
+  bonLivraison,
+  companyInfo,
+}) => {
+  const isLinkedToBC = !!bonLivraison.bonCommandeClient;
+  const hasDeliveryInfo = !!(bonLivraison.voiture || bonLivraison.serie || bonLivraison.chauffeur || bonLivraison.cin);
+
+  const wrapClientText = (text: string, maxCharsPerLine: number = 40): string[] => {
+    if (!text || text.trim() === "") return [];
+    const cleanText = text.trim();
+    if (cleanText.length <= maxCharsPerLine) return [cleanText];
+    const words = cleanText.split(" ");
     const lines: string[] = [];
     let currentLine = "";
-
     words.forEach((word) => {
-      if ((currentLine + " " + word).length > maxLength) {
-        if (currentLine) {
-          lines.push(currentLine);
-        }
-        currentLine = word;
-      } else {
-        currentLine = currentLine ? currentLine + " " + word : word;
-      }
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      if (testLine.length <= maxCharsPerLine) currentLine = testLine;
+      else { if (currentLine) lines.push(currentLine); currentLine = word; }
     });
-
-    if (currentLine) {
-      lines.push(currentLine);
-    }
-
+    if (currentLine) lines.push(currentLine);
     return lines;
   };
 
-
-  // Check if delivery information exists
-const hasDeliveryInfo = bonLivraison.voiture || bonLivraison.serie || bonLivraison.chauffeur || bonLivraison.cin;
-
-// Render delivery information box
-const renderDeliveryInfoBox = () => {
-  if (!hasDeliveryInfo) return null;
-
-  return (
-    <View style={styles.deliveryInfoBox}>
-      <View style={styles.deliveryInfoHeader}>
-        <Text style={styles.deliveryInfoTitle}>INFORMATIONS DE LIVRAISON</Text>
-      </View>
-      <View style={styles.deliveryInfoRow}>
-        <View style={styles.deliveryInfoItem}>
-          <Text style={styles.deliveryInfoLabel}>Voiture:</Text>
-          <Text style={styles.deliveryInfoValue}>{bonLivraison.voiture || "Non spécifié"}</Text>
-        </View>
-        <View style={styles.deliveryInfoItem}>
-          <Text style={styles.deliveryInfoLabel}>Série:</Text>
-          <Text style={styles.deliveryInfoValue}>{bonLivraison.serie || "Non spécifié"}</Text>
-        </View>
-      </View>
-      <View style={styles.deliveryInfoRow}>
-        <View style={styles.deliveryInfoItem}>
-          <Text style={styles.deliveryInfoLabel}>Chauffeur:</Text>
-          <Text style={styles.deliveryInfoValue}>{bonLivraison.chauffeur || "Non spécifié"}</Text>
-        </View>
-        <View style={styles.deliveryInfoItem}>
-          <Text style={styles.deliveryInfoLabel}>CIN:</Text>
-          <Text style={styles.deliveryInfoValue}>{bonLivraison.cin || "Non spécifié"}</Text>
-        </View>
-      </View>
-    </View>
-  );
-};
-
-
-
-
-  const renderSummarySection = () => {
-    const bottomPos = 160;
-    
+  const renderDeliveryInfoBox = () => {
+    if (!hasDeliveryInfo) return null;
     return (
-      <View style={[styles.summaryArea, { bottom: bottomPos }]}>
-        <View style={styles.leftColumn}>
-        {renderDeliveryInfoBox()}
+      <View style={styles.deliveryInfoBox}>
+        <View style={styles.deliveryInfoHeader}>
+          <Text style={styles.deliveryInfoTitle}>INFORMATIONS DE LIVRAISON</Text>
         </View>
-        <View style={styles.totalsContainer}>
-          {/* Completely remove the totals box */}
-          <View style={{ width: '100%' }}>
-            {/* Empty - no totals to display */}
+        <View style={styles.deliveryInfoRow}>
+          <View style={styles.deliveryInfoItem}>
+            <Text style={styles.deliveryInfoLabel}>Voiture:</Text>
+            <Text style={styles.deliveryInfoValue}>{bonLivraison.voiture || "N/A"}</Text>
+          </View>
+          <View style={styles.deliveryInfoItem}>
+            <Text style={styles.deliveryInfoLabel}>Série:</Text>
+            <Text style={styles.deliveryInfoValue}>{bonLivraison.serie || "N/A"}</Text>
+          </View>
+        </View>
+        <View style={styles.deliveryInfoRow}>
+          <View style={styles.deliveryInfoItem}>
+            <Text style={styles.deliveryInfoLabel}>Chauffeur:</Text>
+            <Text style={styles.deliveryInfoValue}>{bonLivraison.chauffeur || "N/A"}</Text>
+          </View>
+          <View style={styles.deliveryInfoItem}>
+            <Text style={styles.deliveryInfoLabel}>CIN:</Text>
+            <Text style={styles.deliveryInfoValue}>{bonLivraison.cin || "N/A"}</Text>
           </View>
         </View>
       </View>
     );
   };
 
-  const articlesPerPage = 12;
-  const articleChunks = [];
-  const articles = bonLivraison?.articles || [];
-  for (let i = 0; i < articles.length; i += articlesPerPage) {
-    articleChunks.push(articles.slice(i, i + articlesPerPage));
-  }
+  const renderSummarySection = (summaryBottom: number, floated: boolean = true) => {
+    const areaStyle: any = floated
+      ? [styles.summaryArea, { bottom: summaryBottom }]
+      : { flexDirection: "row", justifyContent: "space-between", marginTop: 80 };
+    return (
+      <View style={areaStyle}>
+        <View style={styles.leftColumn}>
+          {renderDeliveryInfoBox()}
+        </View>
+        {/* No totalsContainer for non-valorised */}
+      </View>
+    );
+  };
 
-  if (articleChunks.length === 0) {
-    articleChunks.push([]);
-  }
+  const renderTable = (group: PageGroup) => {
+    if (group.articles.length === 0) return null;
+    return (
+      <View style={styles.tableContainer}>
+        <View style={styles.tableHeader}>
+          <View style={[styles.colN, styles.tableColHeader]}><Text>N°</Text></View>
+          <View style={[styles.colArticle, styles.tableColHeader]}><Text>ARTICLE</Text></View>
+          <View style={[styles.colDesignation, styles.tableColHeader]}><Text>DESIGNATION</Text></View>
+          <View style={[styles.colQteLiv, styles.tableColHeader]}><Text>QTE L</Text></View>
+          <View style={[styles.colPUHT, styles.tableColHeader]}><Text>P.U.H.T</Text></View>
+          <View style={[styles.colTVA, styles.tableColHeader]}><Text>TVA</Text></View>
+          <View style={[styles.colPUTTC, styles.tableColHeader]}><Text>P.U.TTC</Text></View>
+          <View style={[styles.colMontantTTC, styles.tableColHeader]}><Text>M.TTC</Text></View>
+        </View>
+        {group.articles.map((item, index) => {
+          const globalRowNumber = group.startIndex + index + 1;
+          const qty = Number(item.quantite) || 0;
+          return (
+            <View style={styles.tableRow} key={index}>
+              <View style={[styles.colN, styles.tableCol]}><Text>{globalRowNumber}</Text></View>
+              <View style={[styles.colArticle, styles.tableCol]}><Text>{item.article?.reference || "-"}</Text></View>
+              <View style={[styles.colDesignation, styles.tableCol]}><Text>{item.designation || item.article?.designation || '-'}</Text></View>
+              <View style={[styles.colQteLiv, styles.tableCol]}><Text>{qty}</Text></View>
+              <View style={[styles.colPUHT, styles.tableCol]}><Text> </Text></View>
+              <View style={[styles.colTVA, styles.tableCol]}><Text> </Text></View>
+              <View style={[styles.colPUTTC, styles.tableCol]}><Text> </Text></View>
+              <View style={[styles.colMontantTTC, styles.tableCol]}><Text> </Text></View>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
 
-  const renderTable = (articles: any[], pageIndex: number) => (
-    <View style={styles.tableContainer}>
-      <View style={styles.tableHeader}>
-        <View style={[styles.colN, styles.tableColHeader]}>
-          <Text>N°</Text>
-        </View>
-        <View style={[styles.colArticle, styles.tableColHeader, { width: '25%' }]}>
-          <Text>ARTICLE</Text>
-        </View>
-        <View style={[styles.colDesignation, styles.tableColHeader, { width: '42%' }]}>
-          <Text>DESIGNATION</Text>
-        </View>
-        <View style={[styles.colQuantite, styles.tableColHeader]}>
-          <Text>QTE</Text>
-        </View>
-        <View style={[styles.colPUHT, styles.tableColHeader]}>
-          <Text>P.U.H.T</Text>
-        </View>
-        <View style={[styles.colTVA, styles.tableColHeader]}>
-          <Text>TVA</Text>
-        </View>
-        <View style={[styles.colPUTTC, styles.tableColHeader]}>
-          <Text>P.U.TTC</Text>
-        </View>
-        <View style={[styles.colMontantTTC, styles.tableColHeader]}>
-          <Text>M.TTC</Text>
-        </View>
-      </View>
-    
-      {articles.map((item, index) => {
-  const qty = Number(item.quantite) || 0;
-  
-  return (
-    <View style={styles.tableRow} key={index}>
-      <View style={[styles.colN, styles.tableCol]}>
-        <Text>{pageIndex * articlesPerPage + index + 1}</Text>
-      </View>
-      <View style={[styles.colArticle, styles.tableCol, { width: '25%' }]}>
-        <Text>{item.article?.reference || " "}</Text>
-      </View>
-      <View style={[styles.colDesignation, styles.tableCol, { width: '42%' }]}>
-      <Text>{item.designation || item.article?.designation || '-'}</Text>
-      </View>
-      <View style={[styles.colQuantite, styles.tableCol]}>
-        <Text>{qty}</Text>
-      </View>
-      <View style={[styles.colPUHT, styles.tableCol]}>
-        <Text> </Text>
-      </View>
-      <View style={[styles.colTVA, styles.tableCol]}>
-        <Text> </Text>
-      </View>
-      <View style={[styles.colPUTTC, styles.tableCol]}>
-        <Text> </Text>
-      </View>
-      <View style={[styles.colMontantTTC, styles.tableCol]}>
-        <Text> </Text>
-      </View>
-    </View>
-  );
-})}
-      {articles.length === 0 && (
-        <View style={styles.tableRow}>
-          <View
-            style={[styles.colDesignation, styles.tableCol, { width: "100%" }]}
-          >
-            <Text>Aucun article</Text>
-          </View>
-        </View>
-      )}
-    </View>
-  );
-
-  const safeBonLivraison = bonLivraison || {};
-  const safeCompanyInfo = companyInfo || {};
-
-  const renderPageHeader = (pageIndex: number) => (
+  const renderPageHeader = () => (
     <>
       <View style={styles.header}>
         <View style={styles.companyInfo}>
-          {safeCompanyInfo.logo && (
-            <Image src={safeCompanyInfo.logo} style={styles.logo} />
+          {companyInfo.logo && <Image src={companyInfo.logo} style={styles.logo} />}
+        </View>
+      </View>
+      <View style={styles.livraisonDetails}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <View>
+            <View style={styles.livraisonDetailItem}>
+              <Text style={styles.N}>
+                <Text style={styles.livraisonNumberValue}>{bonLivraison.numeroLivraison || "N/A"}</Text>
+              </Text>
+            </View>
+            <View style={[styles.livraisonDetailItem, { marginTop: 4 }]}>
+              <Text style={styles.livraisonDetailLabel}>
+                Date:{" "}
+                <Text style={styles.boldText}>
+                  {bonLivraison.dateLivraison ? moment(bonLivraison.dateLivraison).format("DD/MM/YYYY") : "N/A"}
+                </Text>
+              </Text>
+            </View>
+            {isLinkedToBC && (
+              <View style={[styles.livraisonDetailItem, { marginTop: 4 }]}>
+                <Text style={styles.livraisonDetailLabel}>
+                  Commande:{" "}
+                  <Text style={styles.boldText}>
+                    {bonLivraison.bonCommandeClient?.numeroCommande || "N/A"}
+                  </Text>
+                </Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.clientInfoContainer}>
+            <Text style={styles.sectionTitle}>CLIENT</Text>
+            {bonLivraison.client && (
+              <>
+                {bonLivraison.client.raison_sociale && wrapClientText(bonLivraison.client.raison_sociale, 35).map((line, idx) => (<Text key={`rs-${idx}`} style={styles.clientLineItem}>{line}</Text>))}
+                {bonLivraison.client.matricule_fiscal && (<Text style={styles.clientLineItem}>MF: {bonLivraison.client.matricule_fiscal}</Text>)}
+                {bonLivraison.client.adresse && wrapClientText(bonLivraison.client.adresse, 35).map((line, idx) => (<Text key={`adr-${idx}`} style={styles.clientLineItem}>{line}</Text>))}
+                {bonLivraison.client.telephone1 && (<Text style={styles.clientLineItem}>Tél: {bonLivraison.client.telephone1}</Text>)}
+                {bonLivraison.client.telephone2 && (<Text style={styles.clientLineItem}>Tél: {bonLivraison.client.telephone2}</Text>)}
+              </>
+            )}
+          </View>
+        </View>
+      </View>
+      <View style={styles.vendeurPaymentContainer}>
+        <View style={styles.vendeurContainer}>
+          <Text style={styles.sectionTitle}>VENDEUR</Text>
+          {bonLivraison.vendeur && (
+            <Text style={styles.vendeurText}>
+              {[bonLivraison.vendeur.nom, bonLivraison.vendeur.prenom].filter(Boolean).join(" ")}
+            </Text>
           )}
         </View>
       </View>
-      {pageIndex === 0 && (
-        <>
-          <View style={styles.commandeDetails}>
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-              }}
-            >
-              <View>
-                <View style={styles.commandeDetailItem}>
-                  <Text style={styles.N}>
-                   
-                    <Text style={styles.commandeNumberValue}>
-                      {safeBonLivraison.numeroLivraison || "N/A"}
-                    </Text>
-                  </Text>
-                </View>
-                <View style={styles.commandeDetailItem}>
-                  <Text style={styles.commandeDetailLabel}>
-                    Date:{" "}
-                    <Text style={styles.boldText}>
-                      {safeBonLivraison.dateLivraison
-                        ? moment(safeBonLivraison.dateLivraison).format("DD/MM/YYYY")
-                        : "N/A"}
-                    </Text>
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.clientInfoContainer}>
-                <Text style={styles.sectionTitle}>CLIENT</Text>
-                {safeBonLivraison.client?.raison_sociale &&
-                  wrapText(safeBonLivraison.client.raison_sociale).map(
-                    (line, index) => (
-                      <Text
-                        style={styles.clientLine}
-                        key={`raison-${index}`}
-                      >
-                        {line}
-                      </Text>
-                    )
-                  )}
-                {safeBonLivraison.client?.matricule_fiscal && (
-                  <Text style={styles.clientLine}>
-                    MF: {safeBonLivraison.client.matricule_fiscal}
-                  </Text>
-                )}
-                {safeBonLivraison.client?.adresse &&
-                  wrapText(safeBonLivraison.client.adresse).map(
-                    (line, index) => (
-                      <Text
-                        style={styles.clientLine}
-                        key={`adresse-${index}`}
-                      >
-                        {line}
-                      </Text>
-                    )
-                  )}
-                {safeBonLivraison.client?.telephone1 && (
-                  <Text style={styles.clientLine}>
-                    Tél: {safeBonLivraison.client.telephone1}
-                  </Text>
-                )}
-                  {safeBonLivraison.client?.telephone2 && (
-                  <Text style={styles.clientLine}>
-                    Tél: {safeBonLivraison.client.telephone2}
-                  </Text>
-                )}
-              </View>
-            </View>
-          </View>
-          <View style={styles.vendeurPaymentContainer}>
-            <View style={styles.vendeurContainer}>
-              <Text style={styles.sectionTitle}>VENDEUR</Text>
-              {safeBonLivraison.vendeur && (
-                <Text style={styles.vendeurText}>
-                  {[safeBonLivraison.vendeur.nom, safeBonLivraison.vendeur.prenom]
-                    .filter(Boolean)
-                    .join(" ")}
-                </Text>
-              )}
-            </View>
-            <View style={styles.paymentContainerAboveTable}>
-              {/* Empty - same as FacturePDF design */}
-            </View>
-          </View>
-        </>
-      )}
     </>
   );
 
@@ -585,92 +433,62 @@ const renderDeliveryInfoBox = () => {
     <View style={styles.footer}>
       <Text style={styles.footerLine}>
         {[
-          safeCompanyInfo.name,
-          safeCompanyInfo.address,
-          safeCompanyInfo.city,
-          safeCompanyInfo.phone,
-          safeCompanyInfo.gsm,
-          safeCompanyInfo.taxId,
+          companyInfo.name,
+          companyInfo.address,
+          companyInfo.city,
+          companyInfo.phone,
+          companyInfo.gsm,
+          companyInfo.taxId ? "MF: " + companyInfo.taxId : "",
         ]
           .filter(Boolean)
           .join(" - ")}
       </Text>
-      {safeCompanyInfo.email && safeCompanyInfo.website ? (
+      {companyInfo.email && companyInfo.website ? (
         <Text style={styles.footerLine}>
-          Email: {safeCompanyInfo.email} | Site: {safeCompanyInfo.website}
+          Email: {companyInfo.email} | Site: {companyInfo.website.replace(/^https?:\/\//, "")}
         </Text>
-      ) : safeCompanyInfo.email ? (
-        <Text style={styles.footerLine}>Email: {safeCompanyInfo.email}</Text>
-      ) : safeCompanyInfo.website ? (
-        <Text style={styles.footerLine}>Site: {safeCompanyInfo.website}</Text>
+      ) : companyInfo.email ? (
+        <Text style={styles.footerLine}>Email: {companyInfo.email}</Text>
+      ) : companyInfo.website ? (
+        <Text style={styles.footerLine}>Site: {companyInfo.website.replace(/^https?:\/\//, "")}</Text>
       ) : null}
     </View>
   );
 
-  const renderSummaryContent = () => {
-    const amountBottom = 115;
-    
-    return (
-      <>
-        {renderSummarySection()}
-       
-        <View style={styles.cachetSignatureSection}>
-          <View style={styles.signatureContainer}>
-            <Text style={styles.signatureText}>Signature & Cachet</Text>
-            <Text style={styles.subText}>Du Responsable</Text>
-          </View>
-          <View style={styles.cachetContainer}>
-            <Text style={styles.cachetText}>Le Client</Text>
-            <Text style={styles.subText}>Reçu conforme</Text>
-            <Text style={styles.subText}>Signature & Cachet</Text>
-          </View>
+  const renderSummaryContent = (floated: boolean = true) => (
+    <>
+      {renderSummarySection(205, floated)}
+      <View style={styles.cachetSignatureSection}>
+        <View style={styles.signatureContainer}>
+          <Text style={styles.signatureText}>Signature & Cachet</Text>
+          <Text style={styles.subText}>Du Responsable</Text>
         </View>
-      </>
-    );
-  };
+        <View style={styles.cachetContainer}>
+          <Text style={styles.cachetText}>Le Client</Text>
+          <Text style={styles.subText}>Reçu conforme</Text>
+          <Text style={styles.subText}>Signature & Cachet</Text>
+        </View>
+      </View>
+    </>
+  );
 
-  let addExtraSummaryPage = false;
-  
-  if (articleChunks.length > 1) {
-    addExtraSummaryPage = true;
-  } else if (articleChunks.length === 1) {
-    const articlesOnLastPage = articleChunks[0].length;
-    const maxArticlesForSinglePage = 10;
-    
-    if (articlesOnLastPage > maxArticlesForSinglePage) {
-      addExtraSummaryPage = true;
-    }
-  }
+  const allArticles = bonLivraison?.articles || [];
+  const pageGroups = buildPageGroups(allArticles);
+  const totalPages = pageGroups.length;
 
-  const totalPages = articleChunks.length + (addExtraSummaryPage ? 1 : 0);
-  
   return (
     <Document>
-      {articleChunks.map((articles, pageIndex) => (
-        <Page key={pageIndex} size="A4" style={styles.page}>
-          {renderPageHeader(pageIndex)}
-          {renderTable(articles, pageIndex)}
-          {!addExtraSummaryPage &&
-            pageIndex === articleChunks.length - 1 &&
-            renderSummaryContent()}
+      {pageGroups.map((group, pageIdx) => (
+        <Page key={pageIdx} size="A4" style={styles.page}>
+          {renderPageHeader()}
+          {renderTable(group)}
+          {group.isLast && renderSummaryContent(group.articles.length > 0)}
           {renderFooter()}
-          <Text style={styles.pageNumber}>
-            Page {pageIndex + 1} sur {totalPages}
-          </Text>
+          <Text style={styles.pageNumber}>Page {pageIdx + 1} sur {totalPages}</Text>
         </Page>
       ))}
-      {addExtraSummaryPage && (
-        <Page key={articleChunks.length} size="A4" style={styles.page}>
-          {renderPageHeader(articleChunks.length)}
-          {renderSummaryContent()}
-          {renderFooter()}
-          <Text style={styles.pageNumber}>
-            Page {articleChunks.length + 1} sur {totalPages}
-          </Text>
-        </Page>
-      )}
     </Document>
   );
 };
 
-export default BonLivraisonNonValorisePDF
+export default BonLivraisonNonValorisePDF;

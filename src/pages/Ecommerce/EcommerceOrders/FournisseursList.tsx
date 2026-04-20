@@ -168,6 +168,7 @@ const FournisseursList = () => {
       telephone1: fournisseur?.telephone1 || "",
       telephone2: fournisseur?.telephone2 || "",
       email: fournisseur?.email || "",
+      code_barre_fournisseur: fournisseur?.code_barre_fournisseur || "",
       status: fournisseur?.status || "Actif"
     },
     validationSchema: Yup.object({
@@ -181,6 +182,7 @@ const FournisseursList = () => {
       telephone1: Yup.string(),
       telephone2: Yup.string(),
       email: Yup.string().email("Email invalide"),
+      code_barre_fournisseur: Yup.string(),
       status: Yup.string()
     }),
     onSubmit: handleSubmit
@@ -216,6 +218,11 @@ const FournisseursList = () => {
       {
         header: "Email",
         accessorKey: "email",
+        enableColumnFilter: false,
+      },
+      {
+        header: "Code Barre",
+        accessorKey: "code_barre_fournisseur",
         enableColumnFilter: false,
       },
       {
@@ -580,6 +587,23 @@ const FournisseursList = () => {
                               invalid={validation.touched.telephone2 && !!validation.errors.telephone2}
                             />
                             <FormFeedback>{validation.errors.telephone2}</FormFeedback>
+                          </div>
+                        </Col>
+                      </Row>
+
+                      <Row>
+                        <Col md={12}>
+                          <div className="mb-3">
+                            <Label className="form-label">Code Barre Fournisseur</Label>
+                            <Input
+                              name="code_barre_fournisseur"
+                              placeholder="Entrer le code barre fournisseur"
+                              onChange={validation.handleChange}
+                              onBlur={validation.handleBlur}
+                              value={validation.values.code_barre_fournisseur}
+                              invalid={validation.touched.code_barre_fournisseur && !!validation.errors.code_barre_fournisseur}
+                            />
+                            <FormFeedback>{validation.errors.code_barre_fournisseur}</FormFeedback>
                           </div>
                         </Col>
                       </Row>
