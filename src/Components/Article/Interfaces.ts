@@ -13,6 +13,8 @@ export interface FactureClient {
   bonCommandeClient_id?: number;
   bonCommandeClient?: BonCommandeClient;
   venteComptoire?: BonCommandeClient;
+    depot_id: number;
+  depot?: Depot;
   numeroFacture: string;
   conditionPaiement: string;
   timbreFiscal: boolean
@@ -131,6 +133,8 @@ export interface Categorie {
   createdAt: string;
   updatedAt: string;
   image?: string;
+  on_website?: boolean;
+  website_order?: number;
   // Relations (optional - might not come from API)
   parent?: Categorie | null;
   subcategories?: Categorie[];
@@ -193,6 +197,8 @@ export interface BonReception {
   remiseType: "percentage" | "fixed";
   totalHT: any;
   id: number;
+    depot_id: number;
+  depot?: Depot;
   numeroReception: string;
   dateReception: string;
   status: "Brouillon" | "Recu" | "Partiellement Recu" | "Annule";
@@ -235,6 +241,8 @@ export interface BonLivraisonArticle {
 export interface BonLivraison {
   id: number;
   numeroLivraison: string;
+    depot_id: number;
+  depot?: Depot;
   dateLivraison: string;
   client?: Client;
   vendeur?: Vendeur;

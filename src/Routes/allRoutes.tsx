@@ -66,6 +66,8 @@ import PageBlogOverview from "pages/Pages/Blogs/Overview";
 import FournisseursList from "pages/Ecommerce/EcommerceOrders/FournisseursList";
 import CategoriesList from "pages/Ecommerce/EcommerceOrders/CategoriesList";
 import ClientsList from "pages/Ecommerce/EcommerceOrders/ClientList";
+import WebsiteCategories from "pages/Ecommerce/EcommerceOrders/WebsiteCategories";
+import WebsiteCarousel from "pages/Ecommerce/EcommerceOrders/WebsiteCarousel";
 import BonsCommandeList from "pages/Ecommerce/Achat/BonCommande";
 import BonReceptionList from "../pages/Ecommerce/Achat/BonReceptionList";
 import BonCommandeClientList from "../pages/Ecommerce/Vente/CommandeClientList";
@@ -146,6 +148,8 @@ const authProtectedRoutes = [
 
   //EMail
   { path: "/categories", component: <CategoriesList /> },
+  { path: "/website-categories", component: <WebsiteCategories /> },
+  { path: "/website-carousel", component: <WebsiteCarousel /> },
 
   //Projects
   { path: "/apps-projects-list", component: <ProjectList /> },

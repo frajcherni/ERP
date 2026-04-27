@@ -3,16 +3,66 @@ import { FactureClient , EncaissementClient} from "../../../Components/Article/I
 
 const API_BASE = process.env.REACT_APP_API_BASE;
 
+// ============================================================
+// PAGINATED FETCH - Optimized for list view (server-side computation)
+// ============================================================
+export interface PaginatedFacturesResponse {
+    factures: FactureClient[];
+    pagination: {
+        page: number;
+        limit: number;
+        totalCount: number;
+        totalPages: number;
+    };
+}
 
+export const fetchFacturesClientPaginated = async (params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    searchPhone?: string;
+    status?: string;
+    startDate?: string | null;
+    endDate?: string | null;
+} = {}): Promise<PaginatedFacturesResponse> => {
+    try {
+        const queryParams = new URLSearchParams();
+        if (params.page) queryParams.set('page', String(params.page));
+        if (params.limit) queryParams.set('limit', String(params.limit));
+        if (params.search) queryParams.set('search', params.search);
+        if (params.searchPhone) queryParams.set('searchPhone', params.searchPhone);
+        if (params.status) queryParams.set('status', params.status);
+        if (params.startDate) queryParams.set('startDate', params.startDate);
+        if (params.endDate) queryParams.set('endDate', params.endDate);
 
+        const response = await fetch(
+            `${API_BASE}/factures-client/paginated?${queryParams.toString()}`
+        );
+        if (!response.ok) throw new Error('Erreur lors de la récupération des factures');
+
+        const data = await response.json();
+        return {
+            factures: data.factures || [],
+            pagination: data.pagination || { page: 1, limit: 20, totalCount: 0, totalPages: 0 },
+        };
+    } catch (error) {
+        console.error('Error fetching paginated factures:', error);
+        return {
+            factures: [],
+            pagination: { page: 1, limit: 20, totalCount: 0, totalPages: 0 },
+        };
+    }
+};
+
+// ============================================================
+// ORIGINAL FETCH - Kept for journal export / backward compat
+// ============================================================
 export const fetchFacturesClient = async (): Promise<FactureClient[]> => {
-    debugger
     try {
         const response = await fetch(`${API_BASE}/factures-client/getAllFacturesClient`);
         if (!response.ok) throw new Error('Erreur lors de la récupération des factures');
         
         const data = await response.json();
-        console.log('Factures data:', data); // Debug log
         
         // The API returns an array directly
         if (Array.isArray(data)) {
@@ -47,8 +97,6 @@ export const createFacture = async (factureData: any): Promise<FactureClient> =>
 };
 
 export const updateFacture = async (id: number, factureData: Partial<FactureClient>): Promise<FactureClient> => {
-    console.log("Sending to backend:", factureData);
-
     try {
         const response = await fetch(`${API_BASE}/factures-client/updateFactureClient/${id}`, {
             method: 'PUT',
@@ -83,13 +131,11 @@ export const annulerFacture = async (id: number): Promise<void> => {
 };
 
 export const fetchEncaissementsClient = async (): Promise<EncaissementClient[]> => {
-    debugger
     try {
         const response = await fetch(`${API_BASE}/EncaissementClient/getAllEncaissements`);
         if (!response.ok) throw new Error('Erreur lors de la récupération des encaissements');
         
         const data = await response.json();
-        console.log(data)
         return Array.isArray(data) ? data : [];
     } catch (error) {
         console.error('Error fetching encaissements:', error);

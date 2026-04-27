@@ -38,10 +38,10 @@ import DeleteModal from "../../../Components/Common/DeleteModal";
 import Loader from "../../../Components/Common/Loader";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import Flatpickr from "react-flatpickr";
 import * as Yup from "yup";
 import { useFormik } from "formik";
 import moment from "moment";
-import Flatpickr from "react-flatpickr";
 import {
   createClient,
   createArticle,
@@ -52,6 +52,7 @@ import { Categorie, Fournisseur } from "../../../Components/Article/Interfaces";
 import FactureClientReceiptModal from "./FactureClientReceiptModal";
 import {
   fetchFacturesClient,
+  fetchFacturesClientPaginated,
   createFacture,
   updateFacture,
   deleteFacture,
@@ -71,6 +72,7 @@ import {
   FactureClient,
   EncaissementClient,
   Vendeur,
+  Depot,
 } from "../../../Components/Article/Interfaces";
 import classnames from "classnames";
 import { PDFDownloadLink } from "@react-pdf/renderer";
@@ -86,6 +88,8 @@ import "./InvoiceModal.css";
 import DiscountAlertModal from "../../../Components/Common/DiscountAlertModal";
 import "./ArticleTableStyles.css"; // Import unified table styles
 import FacturesListPDF from "./JournalFactures";
+import { calculateFactureTotals } from "../../../Utils/FactureHelper";
+import { fetchDepots } from "../Stock/DepotServices";
 const ListFactureClient = () => {
   const [detailModal, setDetailModal] = useState(false);
   const [encaissementModal, setEncaissementModal] = useState(false);
@@ -148,6 +152,8 @@ const ListFactureClient = () => {
   // Add these state variables near your existing states
   const [clientModal, setClientModal] = useState(false);
   const [articleModal, setArticleModal] = useState(false);
+  const [depots, setDepots] = useState<Depot[]>([]);
+  const [selectedDepot, setSelectedDepot] = useState<Depot | null>(null);
 
   const [editClientModal, setEditClientModal] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
@@ -184,7 +190,20 @@ const ListFactureClient = () => {
   // ===   // Function to generate PDF blob ===
 
   const generateJournalPDF = async () => {
-    if (filteredFactures.length === 0) {
+    // Fetch ALL factures matching the current date filters for the journal
+    // (the paginated list only shows 50 at a time, journal needs everything)
+    toast.info("Chargement des factures pour le journal...", { autoClose: 2000 });
+
+    const journalResult = await fetchFacturesClientPaginated({
+      page: 1,
+      limit: 10000, // Get all matching factures for the journal
+      startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
+      endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
+    });
+
+    const journalFactures = journalResult.factures;
+
+    if (journalFactures.length === 0) {
       toast.warning("Aucune facture à exporter pour la période sélectionnée");
       return null;
     }
@@ -192,7 +211,7 @@ const ListFactureClient = () => {
     const { pdf } = await import("@react-pdf/renderer");
     const pdfBlob = await pdf(
       <FacturesListPDF
-        factures={filteredFactures}
+        factures={journalFactures}
         startDate={startDate}
         endDate={endDate}
         companyInfo={companyInfo}
@@ -602,388 +621,43 @@ const ListFactureClient = () => {
     return () => clearTimeout(timer);
   }, [articleSearch, createEditModal]);
 
-  const fetchData = useCallback(async (skipSecondary = false) => {
+  // ============================================================
+  // OPTIMIZED: fetchData uses the paginated endpoint
+  // Server does encaissement calculation → no O(n*m) client-side loop
+  // ============================================================
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
 
-      // PHASE 1: Load critical data only
-      const [facturesData, encaissementsData, vendeursData] = await Promise.all(
-        [fetchFacturesClient(), fetchEncaissementsClient(), fetchVendeurs()]
-      );
+      // Map active tab to status filter for server-side filtering
+      const statusMap: Record<string, string> = {
+        "1": "", // All
+        "2": "Brouillon",
+        "3": "Validee",
+        "4": "Payee",
+        "5": "Annulee",
+      };
 
+      // PHASE 1: Load factures (server-side pagination + computation) + vendeurs
+      const [paginatedResult, vendeursData, depotsData] = await Promise.all([
+        fetchFacturesClientPaginated({
+          page: 1,
+          limit: 50,
+          search: searchText || undefined,
+          searchPhone: searchPhone || undefined,
+          status: statusMap[activeTab] || undefined,
+          startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : null,
+          endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : null,
+        }),
+        fetchVendeurs(),
+        fetchDepots(),
+      ]);
 
-      if (!skipSecondary) {
-        setSecondaryLoading(true);
-
-        try {
-          // Load articles and clients in parallel with limit (EXACT SAME AS BL)
-          const [articlesResult, clientsResult] = await Promise.all([
-            searchArticles({ query: "", page: 1, limit: 25 }),
-            searchClients({ query: "", page: 1, limit: 25 }),
-          ]);
-
-          setArticles(articlesResult.articles || []);
-          setClients(clientsResult.clients || []); // ADD THIS LINE - you were missing this
-          setFilteredClients(clientsResult.clients || []);
-        } catch (secondaryErr) {
-          console.error("Secondary data loading failed:", secondaryErr);
-          // Continue without secondary data
-        } finally {
-          setSecondaryLoading(false);
-        }
-      }
-      // ✅ Update the facturesWithCalculatedEncaissements calculation:
-      const facturesWithCalculatedEncaissements = facturesData.map(
-        (facture) => {
-          // Get encaissements for this facture
-          const relevantEncaissements = encaissementsData.filter(
-            (encaissement) =>
-              encaissement.factureClient &&
-              encaissement.factureClient.id === facture.id
-          );
-
-          // Calculate total encaissements from facture
-          const totalEncaissements = relevantEncaissements.reduce(
-            (sum, encaissement) => {
-              let encaissementAmount: number;
-              if (typeof encaissement.montant === "string") {
-                encaissementAmount = parseFloat(encaissement.montant) || 0;
-              } else {
-                encaissementAmount = encaissement.montant || 0;
-              }
-              return sum + encaissementAmount;
-            },
-            0
-          );
-
-          // ✅ 1. Get payment methods from FACTURE (excluding retention)
-          const facturePaymentMethodsTotal = facture.paymentMethods
-            ? facture.paymentMethods
-              .filter((pm: any) => pm.method !== "retenue")
-              .reduce((sum: number, pm: any) => {
-                let amountValue: number;
-                if (typeof pm.amount === "string") {
-                  amountValue = parseFloat(pm.amount) || 0;
-                } else if (typeof pm.amount === "number") {
-                  amountValue = pm.amount;
-                } else {
-                  amountValue = 0;
-                }
-                return sum + amountValue;
-              }, 0)
-            : 0;
-
-          // ✅ 2. Get payment methods from BON COMMANDE (excluding retention)
-          const bonCommandePaymentMethodsTotal = facture.bonCommandeClient
-            ?.paymentMethods
-            ? facture.bonCommandeClient.paymentMethods
-              .filter((pm: any) => pm.method !== "retenue")
-              .reduce((sum: number, pm: any) => {
-                let amountValue: number;
-                if (typeof pm.amount === "string") {
-                  amountValue = parseFloat(pm.amount) || 0;
-                } else if (typeof pm.amount === "number") {
-                  amountValue = pm.amount;
-                } else {
-                  amountValue = 0;
-                }
-                return sum + amountValue;
-              }, 0)
-            : 0;
-
-          // ✅ 3. Get paiements from BON COMMANDE
-          const bonCommandePaiementsTotal = facture.bonCommandeClient?.paiements
-            ? facture.bonCommandeClient.paiements.reduce(
-              (sum: number, paiement: any) => {
-                let amountValue: number;
-                if (typeof paiement.montant === "string") {
-                  amountValue = parseFloat(paiement.montant) || 0;
-                } else if (typeof paiement.montant === "number") {
-                  amountValue = paiement.montant;
-                } else {
-                  amountValue = 0;
-                }
-                return sum + amountValue;
-              },
-              0
-            )
-            : 0;
-
-          // ✅ 4. Get payment methods from VENTE COMPTOIRE (excluding retention)
-          const venteComptoirePaymentMethodsTotal = facture.venteComptoire
-            ?.paymentMethods
-            ? facture.venteComptoire.paymentMethods
-              .filter((pm: any) => pm.method !== "retenue")
-              .reduce((sum: number, pm: any) => {
-                let amountValue: number;
-                if (typeof pm.amount === "string") {
-                  amountValue = parseFloat(pm.amount) || 0;
-                } else if (typeof pm.amount === "number") {
-                  amountValue = pm.amount;
-                } else {
-                  amountValue = 0;
-                }
-                return sum + amountValue;
-              }, 0)
-            : 0;
-
-          // ✅ 4.1 Get payment methods from BON LIVRAISON (excluding retention)
-          const bonLivraisonPaymentMethodsTotal = facture.bonLivraison
-            ?.paymentMethods
-            ? facture.bonLivraison.paymentMethods
-              .filter((pm: any) => pm.method !== "retenue")
-              .reduce((sum: number, pm: any) => {
-                let amountValue: number;
-                if (typeof pm.amount === "string") {
-                  amountValue = parseFloat(pm.amount) || 0;
-                } else if (typeof pm.amount === "number") {
-                  amountValue = pm.amount;
-                } else {
-                  amountValue = 0;
-                }
-                return sum + amountValue;
-              }, 0)
-            : 0;
-
-          // ✅ 4.2 Get paiements from BON LIVRAISON
-          const bonLivraisonPaiementsTotal = facture.bonLivraison?.paiements
-            ? facture.bonLivraison.paiements.reduce(
-              (sum: number, paiement: any) => {
-                let amountValue: number;
-                if (typeof paiement.montant === "string") {
-                  amountValue = parseFloat(paiement.montant) || 0;
-                } else if (typeof paiement.montant === "number") {
-                  amountValue = paiement.montant;
-                } else {
-                  amountValue = 0;
-                }
-                return sum + amountValue;
-              },
-              0
-            )
-            : 0;
-
-          // ✅ 5. Calculate total payment methods from all sources
-          const totalPaymentMethods =
-            facturePaymentMethodsTotal +
-            bonCommandePaymentMethodsTotal +
-            venteComptoirePaymentMethodsTotal +
-            bonLivraisonPaymentMethodsTotal +
-            bonLivraisonPaiementsTotal;
-
-          // ✅ 6. Calculate retention from all sources
-          // Facture retention
-          const factureRetentionAmount = facture.paymentMethods
-            ? facture.paymentMethods
-              .filter((pm: any) => pm.method === "retenue")
-              .reduce((sum: number, pm: any) => {
-                const finalTotal =
-                  Number(facture.totalTTCAfterRemise) ||
-                  Number(facture.totalTTC) ||
-                  0;
-                const rate = pm.tauxRetention || 1;
-                const amount = finalTotal * (rate / 100);
-                return sum + amount;
-              }, 0)
-            : Number(facture.montantRetenue) || 0;
-
-          // Bon commande retention
-          const bonCommandeRetentionAmount = facture.bonCommandeClient
-            ?.paymentMethods
-            ? facture.bonCommandeClient.paymentMethods
-              .filter((pm: any) => pm.method === "retenue")
-              .reduce((sum: number, pm: any) => {
-                const finalTotal =
-                  Number(facture.totalTTCAfterRemise) ||
-                  Number(facture.totalTTC) ||
-                  0;
-                const rate = pm.tauxRetention || 1;
-                const amount = finalTotal * (rate / 100);
-                return sum + amount;
-              }, 0)
-            : Number(facture.bonCommandeClient?.montantRetenue) || 0;
-
-          // Vente comptoire retention
-          const venteComptoireRetentionAmount = facture.venteComptoire
-            ?.paymentMethods
-            ? facture.venteComptoire.paymentMethods
-              .filter((pm: any) => pm.method === "retenue")
-              .reduce((sum: number, pm: any) => {
-                const finalTotal =
-                  Number(facture.totalTTCAfterRemise) ||
-                  Number(facture.totalTTC) ||
-                  0;
-                const rate = pm.tauxRetention || 1;
-                const amount = finalTotal * (rate / 100);
-                return sum + amount;
-              }, 0)
-            : 0;
-
-          // Bon livraison retention
-          const bonLivraisonRetentionAmount = facture.bonLivraison
-            ?.paymentMethods
-            ? facture.bonLivraison.paymentMethods
-              .filter((pm: any) => pm.method === "retenue")
-              .reduce((sum: number, pm: any) => {
-                const finalTotal =
-                  Number(facture.totalTTCAfterRemise) ||
-                  Number(facture.totalTTC) ||
-                  0;
-                const rate = pm.tauxRetention || 1;
-                const amount = finalTotal * (rate / 100);
-                return sum + amount;
-              }, 0)
-            : Number(facture.bonLivraison?.montantRetenue) || 0;
-
-          // Total retention
-          const totalRetentionAmount =
-            factureRetentionAmount +
-            bonCommandeRetentionAmount +
-            venteComptoireRetentionAmount +
-            bonLivraisonRetentionAmount;
-
-          // Calculate article totals
-          let subTotal = 0;
-          let totalTax = 0;
-          let grandTotal = 0;
-
-          facture.articles.forEach((item) => {
-            const qty = Number(item.quantite) || 1;
-            const priceHT = Number(item.prixUnitaire) || 0;
-            const tvaRate = Number(item.tva ?? 0);
-            const remiseRate = Number(item.remise || 0);
-            const priceTTC =
-              Number(item.prix_ttc) || priceHT * (1 + tvaRate / 100);
-
-            const montantHTLigne =
-              Math.round(qty * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
-            const montantTTCLigne = Math.round(qty * priceTTC * 1000) / 1000;
-            const taxAmount =
-              Math.round((montantTTCLigne - montantHTLigne) * 1000) / 1000;
-
-            subTotal += montantHTLigne;
-            totalTax += taxAmount;
-            grandTotal += montantTTCLigne;
-          });
-
-          // Calculate final total with discount and timbre
-          let finalTotal = grandTotal;
-          const hasDiscount = facture.remise && Number(facture.remise) > 0;
-
-          if (hasDiscount) {
-            if (facture.remiseType === "percentage") {
-              finalTotal = grandTotal * (1 - Number(facture.remise) / 100);
-            } else {
-              finalTotal = Number(facture.remise);
-            }
-          }
-
-          if (facture.timbreFiscal) {
-            if (hasDiscount) {
-              finalTotal += 1;
-            } else {
-              grandTotal += 1;
-              finalTotal = grandTotal;
-            }
-          }
-
-          // Fix floating point issues
-          subTotal = Math.round(subTotal * 1000) / 1000;
-          totalTax = Math.round(totalTax * 1000) / 1000;
-          grandTotal = Math.round(grandTotal * 1000) / 1000;
-          finalTotal = Math.round(finalTotal * 1000) / 1000;
-
-          // ✅ CORRECTED: Calculate total payé from ALL sources
-          const totalPaye =
-            totalEncaissements +
-            totalPaymentMethods +
-            bonCommandePaiementsTotal;
-
-          // ✅ CORRECTED: Calculate reste à payer
-          let resteAPayer =
-            Math.round((finalTotal - totalRetentionAmount - totalPaye) * 1000) /
-            1000;
-          resteAPayer = Math.max(0, resteAPayer);
-
-          // Determine status
-          let status:
-            | "Brouillon"
-            | "Validee"
-            | "Payee"
-            | "Annulee"
-            | "Partiellement Payee" = facture.status;
-
-          if (facture.status === "Annulee") {
-            status = "Annulee";
-          } else if (resteAPayer === 0 && finalTotal > 0) {
-            status = "Payee";
-          } else if (
-            totalPaye > 0 &&
-            totalPaye < finalTotal - totalRetentionAmount
-          ) {
-            status = "Partiellement Payee";
-          }
-
-          // Combine all payment sources for display
-          const allPaymentMethods = [
-            ...(facture.paymentMethods || []),
-            ...(facture.bonCommandeClient?.paymentMethods || []),
-            ...(facture.venteComptoire?.paymentMethods || []),
-            ...(facture.bonLivraison?.paymentMethods || []),
-          ];
-
-          const allPaiements = [
-            ...(facture.bonCommandeClient?.paiements || []),
-            ...(facture.bonLivraison?.paiements || []),
-          ];
-
-          return {
-            ...facture,
-            totalHT: subTotal,
-            totalTVA: totalTax,
-            totalTTC: grandTotal,
-            totalTTCAfterRemise: finalTotal,
-            montantPaye: totalPaye,
-            resteAPayer: resteAPayer,
-            montantRetenue: totalRetentionAmount,
-            status,
-            hasPayments: totalPaye > 0,
-            // Store all payment sources for display
-            allPaymentMethods,
-            allPaiements,
-            // Keep original for reference
-            paymentMethods: allPaymentMethods,
-            bonCommandePaiements: allPaiements,
-          };
-        }
-      );
-
-      setFactures(facturesWithCalculatedEncaissements);
-      setFilteredFactures(facturesWithCalculatedEncaissements);
+      // ✅ Server already computed totalHT, totalTTC, montantPaye, resteAPayer, status, etc.
+      setFactures(paginatedResult.factures);
+      setFilteredFactures(paginatedResult.factures);
       setVendeurs(vendeursData);
-
-      // PHASE 2: Load secondary data
-      try {
-        // Load categories and fournisseurs first
-        const [categoriesData, fournisseursData] = await Promise.all([
-          fetchCategories(),
-          fetchFournisseurs(),
-        ]);
-
-        setCategories(categoriesData);
-        setFournisseurs(fournisseursData);
-
-        // ✅ CHANGED: Use searchClients and searchArticles instead of fetchClients and fetchArticles
-        const [clientsResult, articlesResult] = await Promise.all([
-          searchClients({ query: "", page: 1, limit: 25 }), // ✅ Changed to searchClients
-          searchArticles({ query: "", page: 1, limit: 25 }), // ✅ Changed to searchArticles
-        ]);
-
-        setClients(clientsResult.clients || []);
-        setArticles(articlesResult.articles || []);
-      } catch (secondaryErr) {
-        console.error("Secondary data loading failed:", secondaryErr);
-      }
+      setDepots(depotsData);
 
       setLoading(false);
       setError(null);
@@ -993,10 +667,16 @@ const ListFactureClient = () => {
       );
       setLoading(false);
     }
-  }, []);
+  }, [activeTab, searchText, searchPhone, startDate, endDate]);
 
+  // ============================================================
+  // OPTIMIZED: Debounced fetch when filters change
+  // ============================================================
   useEffect(() => {
-    fetchData(true); // true means skip secondary data initially
+    const timer = setTimeout(() => {
+      fetchData();
+    }, 400); // 400ms debounce to avoid hammering server on each keystroke
+    return () => clearTimeout(timer);
   }, [fetchData]);
 
 
@@ -1019,6 +699,18 @@ const ListFactureClient = () => {
           loadArticles("", 1, 15),
           loadClients("", 1, 15),
         ]);
+
+        // Auto-select default depot (Magasin) for new records
+        if (!isEdit && !selectedDepot) {
+          const magasinDepot = depots.find(d => 
+            d.nom.toLowerCase().includes("magasin") || 
+            d.nom.toLowerCase().includes("magazin")
+          );
+          if (magasinDepot) {
+            setSelectedDepot(magasinDepot);
+            validation.setFieldValue("depot_id", magasinDepot.id);
+          }
+        }
       } catch (err) {
         console.error("Modal data loading failed:", err);
       } finally {
@@ -1033,7 +725,12 @@ const ListFactureClient = () => {
     if (createEditModal || articleSearch) {
       setArticlesLoading(true);
       try {
-        const result = await searchArticles({ query, page, limit });
+        const result = await searchArticles({ 
+          query, 
+          page, 
+          limit,
+          depot_id: selectedDepot?.id
+        });
         if (query === "" && page === 1) {
           setArticles(result.articles || []);
         }
@@ -1073,63 +770,18 @@ const ListFactureClient = () => {
   }, [createEditModal]);
   // Load modal data only when modal opens
 
-  // Update the main search useEffect for factures
-  // Update your main search useEffect
+  // ============================================================
+  // OPTIMIZED: Filtering is now done server-side via fetchData
+  // The useEffect on fetchData already re-fetches when filters change
+  // This block is kept as a lightweight local filter fallback
+  // for instant tab switching (server data is already filtered)
+  // ============================================================
   useEffect(() => {
-    let result = [...factures];
-
-    if (activeTab === "2") {
-      result = result.filter((facture) => facture.status === "Brouillon");
-    } else if (activeTab === "3") {
-      result = result.filter((facture) => facture.status === "Validee");
-    } else if (activeTab === "4") {
-      result = result.filter((facture) => facture.status === "Payee");
-    } else if (activeTab === "5") {
-      result = result.filter((facture) => facture.status === "Annulee");
-    }
-
-    if (startDate && endDate) {
-      const start = moment(startDate).startOf("day");
-      const end = moment(endDate).endOf("day");
-      result = result.filter((facture) => {
-        const factureDate = moment(facture.dateFacture);
-        return factureDate.isBetween(start, end, null, "[]");
-      });
-    }
-
-    // Enhanced search functionality
-    if (searchText) {
-      const searchLower = searchText.toLowerCase();
-      result = result.filter(
-        (facture) =>
-          facture.numeroFacture.toLowerCase().includes(searchLower) ||
-          (facture.client?.raison_sociale &&
-            facture.client.raison_sociale
-              .toLowerCase()
-              .includes(searchLower)) ||
-          (facture.client?.designation &&
-            facture.client.designation.toLowerCase().includes(searchLower))
-      );
-    }
-
-    // Phone search functionality
-    if (searchPhone) {
-      const cleanPhoneSearch = searchPhone.replace(/\s/g, "").trim();
-
-      result = result.filter((facture) => {
-        if (!facture.client) return false;
-
-        const phone1 = facture.client.telephone1?.replace(/\s/g, "") || "";
-        const phone2 = facture.client.telephone2?.replace(/\s/g, "") || "";
-
-        return (
-          phone1.includes(cleanPhoneSearch) || phone2.includes(cleanPhoneSearch)
-        );
-      });
-    }
-
-    setFilteredFactures(result);
-  }, [activeTab, startDate, endDate, searchText, searchPhone, factures]);
+    // Since server-side filtering handles search/date/phone,
+    // we only need local tab filtering as an instant UI response
+    // while the server re-fetch debounce completes
+    setFilteredFactures(factures);
+  }, [factures]);
 
 
 
@@ -1620,12 +1272,7 @@ const ListFactureClient = () => {
       finalTotalValue = netHTAfterGlobalRemise;
     }
 
-    // ✅ STEP 4: Add timbre fiscal
-    if (timbreFiscal) {
-      finalTotalValue = Math.round((finalTotalValue + 1) * 1000) / 1000;
-    }
-
-    // ✅ STEP 5: Calculate retention
+    // ✅ STEP 4: Calculate retention (must be on TTC amount BEFORE timbre fiscal)
     let retentionMontantValue = 0;
     methodesReglement.forEach((pm) => {
       if (pm.method === "retenue") {
@@ -1638,6 +1285,11 @@ const ListFactureClient = () => {
         ) / 1000;
       }
     });
+
+    // ✅ STEP 5: Add timbre fiscal
+    if (timbreFiscal && finalTotalValue > 0) {
+      finalTotalValue = Math.round((finalTotalValue + 1) * 1000) / 1000;
+    }
 
     // ✅ STEP 6: Calculate net à payer
     let netAPayerValue = Math.round((finalTotalValue - retentionMontantValue) * 1000) / 1000;
@@ -2140,6 +1792,7 @@ const ListFactureClient = () => {
         ...values,
         taxMode,
         client_id: selectedClient?.id,
+        depot_id: values.depot_id,
         remise: globalRemise,
         remiseType: remiseType,
         articles: selectedArticles.map((item) => ({
@@ -2266,12 +1919,9 @@ const ListFactureClient = () => {
       status: facture?.status ?? "Brouillon",
       notes: facture?.notes ?? "",
       client_id: facture?.client?.id ?? "",
-      // conditionPaiement: facture?.conditionPaiement ?? "",
+      depot_id: facture?.depot?.id ?? "",
       vendeur_id: facture?.vendeur?.id ?? "",
       modeReglement: facture?.modeReglement ?? "Espece",
-      // dateEcheance: facture?.dateEcheance
-      // ? moment(facture.dateEcheance).format("YYYY-MM-DD")
-      // : "",
       montantPaye: facture?.montantPaye ?? 0,
     },
     validationSchema: Yup.object().shape({
@@ -2280,19 +1930,10 @@ const ListFactureClient = () => {
         .required("La date est requise")
         .typeError("Date invalide"),
       status: Yup.string().required("Le statut est requis"),
-      client_id: Yup.number().required("Le client est requis"),
-      // conditionPaiement: Yup.string().required(
-      // "La condition de paiement est requise"
-      // ),
-      vendeur_id: Yup.number().required("Le vendeur est requis"),
+      client_id: Yup.number().required("Veuillez sélectionner un client"),
+      vendeur_id: Yup.string().required("Veuillez sélectionner un vendeur"),
+      depot_id: Yup.string().required("Veuillez sélectionner un dépôt"),
       modeReglement: Yup.string().required("Le mode de règlement est requis"),
-      //dateEcheance: Yup.date()
-      // .required("La date d'échéance est requise")
-      // .min(
-      // Yup.ref("dateFacture"),
-      // "La date d'échéance ne peut pas être antérieure à la date de facture"
-      // )
-      // .typeError("Date d'échéance invalide"),
       montantPaye: Yup.number().min(
         0,
         "Le montant payé ne peut pas être négatif"
@@ -2338,7 +1979,7 @@ const ListFactureClient = () => {
       const initialMontant = availableAmount.toFixed(3).replace(".", ",");
 
       encaissementValidation.setValues({
-        montant: initialMontant,
+        montant: "",
         modePaiement: "Espece",
         numeroEncaissement: nextNumber,
         date: moment().format("YYYY-MM-DD"),
@@ -2405,7 +2046,7 @@ const ListFactureClient = () => {
       const defaultNumber = `ENC-C${year}${String(0 + 1).padStart(5, "0")}`;
 
       encaissementValidation.setValues({
-        montant: initialMontant,
+        montant: "",
         modePaiement: "Espece",
         numeroEncaissement: defaultNumber,
         date: moment().format("YYYY-MM-DD"),
@@ -2569,15 +2210,15 @@ const ListFactureClient = () => {
           "max-reste",
           "Le montant ne peut pas dépasser le reste à payer",
           function (value) {
-            if (!value || !selectedFacture) return false;
+            if (!value || !selectedFacture) return true;
             const numericValue = parseFloat(value.replace(",", "."));
 
-            // ✅ USE THE EXACT SAME CALCULATION AS TABLE - JUST USE RESTEAPAYER DIRECTLY
-            const availableAmount = Number(selectedFacture.resteAPayer) || 0;
+            const totals = calculateFactureTotals(selectedFacture);
+            const currentPaid = Number(selectedFacture.montantPaye) || 0;
+            const realAvailable = Math.round((totals.netAPayer - currentPaid) * 1000) / 1000;
 
             const roundedValue = Math.round(numericValue * 1000) / 1000;
-            const roundedAvailable = Math.round(availableAmount * 1000) / 1000;
-            return roundedValue <= roundedAvailable;
+            return roundedValue <= Math.max(0, realAvailable) + 0.001; // Small buffer for rounding if needed
           }
         )
         .required("Le montant est requis"),
@@ -2706,6 +2347,19 @@ const ListFactureClient = () => {
       </span>
     );
   };
+  const journalTotals = useMemo(() => {
+    return filteredFactures.reduce(
+      (acc, f) => {
+        const totals = calculateFactureTotals(f);
+        return {
+          totalHT: acc.totalHT + totals.netHT,
+          totalTTC: acc.totalTTC + totals.netAPayer,
+        };
+      },
+      { totalHT: 0, totalTTC: 0 }
+    );
+  }, [filteredFactures]);
+
   const columns = useMemo(
     () => [
       {
@@ -2766,40 +2420,65 @@ const ListFactureClient = () => {
         cell: (cell: any) => cell.getValue()?.raison_sociale || "N/A",
       },
       {
-        header: "Total TTC",
-        accessorKey: "totalTTC",
+        header: "Total HT (Net)",
+        accessorKey: "totalHT",
         enableColumnFilter: false,
         cell: (cell: any) => {
-          const total = Number(cell.getValue()) || 0;
-          return `${total.toFixed(3)} DT`; // ✅ Changed to 3 decimal places
+          const totals = calculateFactureTotals(cell.row.original);
+          return `${totals.netHT.toFixed(3)} DT`;
         },
       },
       {
-        header: "Total TTC Après Remise",
-        accessorKey: "totalTTCAfterRemise", // Use the calculated field
+        header: "Total TTC (Net à Payer)",
+        accessorKey: "netAPayer",
         enableColumnFilter: false,
         cell: (cell: any) => {
-          const total = Number(cell.getValue()) || 0;
-          return `${total.toFixed(3)} DT`; // ✅ Changed to 3 decimal places
+          const totals = calculateFactureTotals(cell.row.original);
+          return `${totals.netAPayer.toFixed(3)} DT`;
         },
       },
       {
         header: "Payé",
         accessorKey: "montantPaye",
         enableColumnFilter: false,
-        cell: (cell: any) => `${Number(cell.getValue()).toFixed(3)} DT`, // ✅ 3 decimal places
+        cell: (cell: any) => {
+          const totalPaye = Number(cell.row.original.montantPaye) || 0;
+          return `${totalPaye.toFixed(3)} DT`;
+        },
       },
       {
         header: "Reste à payer",
         accessorKey: "resteAPayer",
         enableColumnFilter: false,
-        cell: (cell: any) => `${Number(cell.getValue()).toFixed(3)} DT`, // ✅ 3 decimal places
+        cell: (cell: any) => {
+          const totals = calculateFactureTotals(cell.row.original);
+          const paye = Number(cell.row.original.montantPaye) || 0;
+          const reste = Math.round((totals.netAPayer - paye) * 1000) / 1000;
+          return `${Math.max(0, reste < 0.005 ? 0 : reste).toFixed(3)} DT`;
+        },
       },
       {
         header: "Statut",
         accessorKey: "status",
         enableColumnFilter: false,
-        cell: (cell: any) => <StatusBadge status={cell.getValue()} />,
+        cell: (cell: any) => {
+          const facture = cell.row.original;
+          const totals = calculateFactureTotals(facture);
+          const paye = Number(facture.montantPaye) || 0;
+          const reste = Math.round((totals.netAPayer - paye) * 1000) / 1000;
+
+          let status = facture.status;
+          if (status !== "Annulee") {
+            if ((reste <= 0.005 || reste <= 0) && totals.netAPayer > 0) {
+              status = "Payee";
+            } else if (paye > 0 && reste > 0) {
+              status = "Partiellement Payee";
+            } else {
+              status = "Validee";
+            }
+          }
+          return <StatusBadge status={status} />;
+        },
       },
       {
         header: "Action",
@@ -4161,7 +3840,7 @@ const ListFactureClient = () => {
                                     const remiseTypeValue = selectedFacture.remiseType || "fixed";
                                     const isExoneration = !!selectedFacture.exoneration;
                                     const hasTimbreFiscal = !!selectedFacture.timbreFiscal;
-                                    const retentionAmount = Number(selectedFacture.montantRetenue) || 0;
+                                    let retentionAmount = 0;
 
                                     // ✅ STEP 1: Calculate totals WITHOUT considering global remise
                                     let sousTotalHTValue = 0;
@@ -4287,12 +3966,27 @@ const ListFactureClient = () => {
                                       finalTotalValue = netHTAfterGlobalRemise;
                                     }
 
-                                    // ✅ STEP 4: Add timbre fiscal
-                                    if (hasTimbreFiscal) {
+                                    // ✅ STEP 4: Calculate retention BEFORE timbre fiscal
+                                    if (selectedFacture.paymentMethods) {
+                                      selectedFacture.paymentMethods.forEach((pm: any) => {
+                                        if (pm.method === "retenue") {
+                                          const tauxRetention = pm.tauxRetention || 1;
+                                          const calculatedRetention = Math.round(
+                                            (finalTotalValue * tauxRetention) / 100 * 1000
+                                          ) / 1000;
+                                          retentionAmount = Math.round(
+                                            (retentionAmount + calculatedRetention) * 1000
+                                          ) / 1000;
+                                        }
+                                      });
+                                    }
+
+                                    // ✅ STEP 5: Add timbre fiscal
+                                    if (hasTimbreFiscal && finalTotalValue > 0) {
                                       finalTotalValue = Math.round((finalTotalValue + 1) * 1000) / 1000;
                                     }
 
-                                    // ✅ STEP 5: Calculate net à payer (after retention)
+                                    // ✅ STEP 6: Calculate net à payer (after retention)
                                     let netAPayerValue = Math.round((finalTotalValue - retentionAmount) * 1000) / 1000;
                                     netAPayerValue = Math.max(0, netAPayerValue);
 
@@ -4846,6 +4540,8 @@ const ListFactureClient = () => {
                             selectedFacture.conditionPaiement
                           );
                           setSelectedVendeur(selectedFacture.vendeur || null); // FIXED: Handle undefined
+                          setSelectedDepot(selectedFacture.depot || null);
+                          validation.setFieldValue("depot_id", selectedFacture.depot?.id || "");
                           setDetailModal(false); // Close details modal
                         }}
                         className="btn-invoice btn-invoice-primary me-2"
@@ -5067,7 +4763,7 @@ const ListFactureClient = () => {
                       {/* Client and Vendeur Section */}
                       {/* Client and Vendeur Section */}
                       <Row className="g-3 mb-4">
-                        <Col md={6}>
+                        <Col md={4}>
                           <Card className="border-0 shadow-sm h-100">
                             <CardBody className="p-4">
                               <h6 className="fw-semibold mb-3 text-primary">
@@ -5096,7 +4792,7 @@ const ListFactureClient = () => {
                                 <div className="position-relative">
                                   <Input
                                     type="text"
-                                    placeholder="Rechercher par nom, raison sociale ou téléphone..."
+                                    placeholder="Rechercher ..."
                                     value={
                                       selectedClient
                                         ? selectedClient.raison_sociale
@@ -5307,7 +5003,7 @@ const ListFactureClient = () => {
                           </Card>
                         </Col>
 
-                        <Col md={6}>
+                        <Col md={4}>
                           <Card className="border-0 shadow-sm h-100">
                             <CardBody className="p-4">
                               <h6 className="fw-semibold mb-3 text-primary">
@@ -5354,7 +5050,53 @@ const ListFactureClient = () => {
                             </CardBody>
                           </Card>
                         </Col>
+
+                        {/* Depot Selection Section */}
+                        <Col md={4}>
+                          <Card className="border-0 shadow-sm h-100">
+                            <CardBody className="p-4">
+                              <h6 className="fw-semibold mb-3 text-primary">
+                                <i className="ri-database-2-line me-2"></i>
+                                Dépot et Stock
+                              </h6>
+                              <div className="mb-3">
+                                <Label className="form-label-lg fw-semibold">
+                                  Dépot de stockage<span className="text-danger"> *</span>
+                                </Label>
+                                <Input
+                                  type="select"
+                                  name="depot_id"
+                                  value={validation.values.depot_id}
+                                  onChange={(e) => {
+                                    const depotId = e.target.value;
+                                    validation.setFieldValue("depot_id", depotId);
+                                    const depot = depots.find(
+                                      (d) => d.id === parseInt(depotId)
+                                    );
+                                    setSelectedDepot(depot || null);
+                                  }}
+                                  invalid={
+                                    validation.touched.depot_id &&
+                                    !!validation.errors.depot_id
+                                  }
+                                  className="form-control-lg"
+                                >
+                                  <option value="">Sélectionner un dépot</option>
+                                  {depots.map((depot) => (
+                                    <option key={depot.id} value={depot.id}>
+                                      {depot.nom}
+                                    </option>
+                                  ))}
+                                </Input>
+                                <FormFeedback className="fs-6">
+                                  {validation.errors.depot_id}
+                                </FormFeedback>
+                              </div>
+                            </CardBody>
+                          </Card>
+                        </Col>
                       </Row>
+
                       {/* Payment Conditions and Options */}
 
                       {/* Global Discount Section <Card className="border-0 shadow-sm mb-4">
@@ -5844,7 +5586,7 @@ const ListFactureClient = () => {
                                     {selectedArticles.map((item, index) => {
                                       const article =
                                         articles.find(
-                                          (a) => a.id === item.article_id
+                                          (a) => Number(a.id) === Number(item.article_id)
                                         ) || item.articleDetails;
                                       const qty = Number(item.quantite) || 0;
 
@@ -6306,6 +6048,15 @@ const ListFactureClient = () => {
                                           </tr>
                                         )}
 
+                                        {retentionMontant > 0 && (
+                                          <tr className="real-time-update">
+                                            <th className="text-end text-muted fs-6">Retenue à la source:</th>
+                                            <td className="text-end text-info fw-bold fs-6">
+                                              - {retentionMontant.toFixed(3)} DT
+                                            </td>
+                                          </tr>
+                                        )}
+
                                         {/* Timbre Fiscal for Factures */}
                                         {timbreFiscal && (
                                           <tr className="real-time-update">
@@ -6323,7 +6074,7 @@ const ListFactureClient = () => {
                                             NET À PAYER:
                                           </th>
                                           <td className="text-end fw-bold fs-5 text-primary">
-                                            {finalTotal.toFixed(3)} DT
+                                            {netAPayer.toFixed(3)} DT
                                             {exoneration && (
                                               <i
                                                 className="ri-shield-check-line text-warning ms-1"
@@ -6754,23 +6505,15 @@ const ListFactureClient = () => {
                                   }, 0)
                                 : 0;
 
-                            // ✅ CHECK IF THERE'S REMISE AND USE THE APPROPRIATE TOTAL
-                            const hasRemise =
-                              selectedFacture.remise &&
-                              Number(selectedFacture.remise) > 0;
-                            const finalTotal = hasRemise
-                              ? Number(selectedFacture.totalTTCAfterRemise) ||
-                              Number(selectedFacture.totalTTC) ||
-                              0
-                              : Number(selectedFacture.totalTTC) || 0;
+                            const totals = calculateFactureTotals(selectedFacture);
+                            const finalTotal = totals.netAPayer;
 
-                            const retentionAmount =
-                              Number(selectedFacture.montantRetenue) || 0;
+                            // Note: netAPayer already factors in retention if present in paymentMethods
                             const totalPaye = selectedFacture.montantPaye || 0;
 
                             const availableAmount = Math.max(
                               0,
-                              finalTotal - retentionAmount - totalPaye
+                              finalTotal - totalPaye
                             );
 
                             return availableAmount.toFixed(3).replace(".", ",");

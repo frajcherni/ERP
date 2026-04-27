@@ -51,6 +51,13 @@ const WebsiteArticlesManager = () => {
     const [selectedImages, setSelectedImages] = useState<File[]>([]);
     const searchContainerRef = useRef<HTMLDivElement>(null);
     const API_BASE = process.env.REACT_APP_API_BASE;
+    const IMAGE_BASE = API_BASE ? API_BASE.replace('/api', '') : 'http://localhost:5000';
+
+    const getImageUrl = (path: string | null | undefined) => {
+        if (!path) return "";
+        if (path.startsWith('http')) return path;
+        return `${IMAGE_BASE}/${path.replace(/\\/g, "/")}`;
+    };
 
     // Add image preview modal state
 const [previewModal, setPreviewModal] = useState(false);
@@ -251,28 +258,11 @@ useEffect(() => {
 }, []);
 
 // Also update the handleOpenSettings to ensure fresh data
-const handleOpenSettings = useCallback(async (article: Article) => {
-    try {
-        // Refetch the specific article to ensure we have the latest data
-        const freshArticles = await fetchArticles();
-        const freshArticle = freshArticles.find(a => a.id === article.id);
-        
-        if (freshArticle) {
-            setSelectedArticle(freshArticle);
-            setImagePreviews(freshArticle.website_images || []);
-        } else {
-            setSelectedArticle(article);
-            setImagePreviews(article.website_images || []);
-        }
-        setSelectedImages([]);
-        setSettingsModal(true);
-    } catch (error) {
-        // Fallback to cached data
-        setSelectedArticle(article);
-        setImagePreviews(article.website_images || []);
-        setSelectedImages([]);
-        setSettingsModal(true);
-    }
+const handleOpenSettings = useCallback((article: Article) => {
+    setSelectedArticle(article);
+    setImagePreviews(article.website_images || []);
+    setSelectedImages([]);
+    setSettingsModal(true);
 }, []);
 
     // Form validation
@@ -343,14 +333,14 @@ const validation = useFormik({
                         <div className="d-flex align-items-center">
                             {mainImage ? (
                                 <img 
-                                    src={`${API_BASE}/${mainImage.replace(/\\/g, "/")}`}
+                                    src={getImageUrl(mainImage)}
                                     alt={article.nom}
                                     className="rounded"
                                     style={{ width: '50px', height: '50px', objectFit: 'cover' }}
                                 />
                             ) : hasAdditionalImages ? (
                                 <img 
-                                    src={`${API_BASE}/${article.website_images[0].replace(/\\/g, "/")}`}
+                                    src={getImageUrl(article.website_images[0])}
                                     alt={article.nom}
                                     className="rounded"
                                     style={{ width: '50px', height: '50px', objectFit: 'cover' }}
@@ -701,7 +691,7 @@ const validation = useFormik({
                 <Col md={3} key={index} className="mb-2">
                     <div className="position-relative">
                         <img 
-                            src={preview.startsWith('data:') ? preview : `${API_BASE}/${preview.replace(/\\/g, "/")}`}
+                            src={preview.startsWith('data:') ? preview : getImageUrl(preview)}
                             alt={`Preview ${index + 1}`}
                             className="img-fluid rounded border"
                             style={{ 
@@ -710,7 +700,7 @@ const validation = useFormik({
                                 width: '100%',
                                 cursor: 'pointer' 
                             }}
-                            onClick={() => handleImagePreview(preview.startsWith('data:') ? preview : `${API_BASE}/${preview.replace(/\\/g, "/")}`)}
+                            onClick={() => handleImagePreview(preview.startsWith('data:') ? preview : getImageUrl(preview))}
                         />
                         <Button
                             color="danger"
@@ -737,7 +727,7 @@ const validation = useFormik({
         <Label className="form-label">Image principale:</Label>
         <div className="border rounded p-2">
             <img 
-                src={`${API_BASE}/${selectedArticle.image.replace(/\\/g, "/")}`}
+                src={getImageUrl(selectedArticle.image)}
                 alt={selectedArticle.nom}
                 className="img-fluid rounded"
                 style={{ 
@@ -745,7 +735,7 @@ const validation = useFormik({
                     objectFit: 'cover',
                     cursor: 'pointer'
                 }}
-                onClick={() => handleImagePreview(`${API_BASE}/${selectedArticle.image.replace(/\\/g, "/")}`)}
+                onClick={() => handleImagePreview(getImageUrl(selectedArticle.image))}
             />
             <small className="text-muted d-block mt-1">
                 Image principale de l'article

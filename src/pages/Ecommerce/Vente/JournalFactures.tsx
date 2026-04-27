@@ -8,6 +8,7 @@ import {
   Image,
 } from "@react-pdf/renderer";
 import moment from "moment";
+import { calculateFactureTotals } from "../../../Utils/FactureHelper";
 
 const ITEMS_PER_PAGE = 18;
 
@@ -154,17 +155,13 @@ const FacturesListPDF: React.FC<Props> = ({
   }
 
   const totalHTSum = factures.reduce((sum, f) => {
-    const ht = f.remise && Number(f.remise) > 0
-      ? Number(f.totalHTAfterRemise) || Number(f.totalHT) || 0
-      : Number(f.totalHT) || 0;
-    return sum + ht;
+    const totals = calculateFactureTotals(f);
+    return sum + totals.netHT;
   }, 0);
 
   const totalTTCSum = factures.reduce((sum, f) => {
-    const ttc = f.remise && Number(f.remise) > 0
-      ? Number(f.totalTTCAfterRemise) || Number(f.totalTTC) || 0
-      : Number(f.totalTTC) || 0;
-    return sum + ttc;
+    const totals = calculateFactureTotals(f);
+    return sum + totals.netAPayer;
   }, 0);
 
   return (
@@ -213,15 +210,9 @@ const FacturesListPDF: React.FC<Props> = ({
             </View>
 
             {pageData.map((facture, index) => {
-              const ht =
-                facture.remise && Number(facture.remise) > 0
-                  ? Number(facture.totalHTAfterRemise) || Number(facture.totalHT) || 0
-                  : Number(facture.totalHT) || 0;
-
-              const ttc =
-                facture.remise && Number(facture.remise) > 0
-                  ? Number(facture.totalTTCAfterRemise) || Number(facture.totalTTC) || 0
-                  : Number(facture.totalTTC) || 0;
+              const totals = calculateFactureTotals(facture);
+              const ht = totals.netHT;
+              const ttc = totals.netAPayer;
 
               return (
                 <View style={styles.tableRow} key={index}>

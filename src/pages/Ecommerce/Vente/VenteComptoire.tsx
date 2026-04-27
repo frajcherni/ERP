@@ -119,6 +119,7 @@ const VenteComptoire = () => {
   const [nextNumeroCommande, setNextNumeroCommande] = useState("");
   const [remiseType, setRemiseType] = useState<"percentage" | "fixed">("fixed");
   const [globalRemise, setGlobalRemise] = useState<number>(0);
+  const [lockedPercentage, setLockedPercentage] = useState<number | null>(null);
   const [selectedArticles, setSelectedArticles] = useState<
     {
       article_id: number;
@@ -827,7 +828,12 @@ const VenteComptoire = () => {
     if (modal || articleSearch) {
       setArticlesLoading(true);
       try {
-        const result = await searchArticles({ query, page, limit });
+        const result = await searchArticles({ 
+          query, 
+          page, 
+          limit,
+          depot_id: selectedDepot?.id
+        });
         if (query === "" && page === 1) {
           setArticles(result.articles || []);
         }
@@ -906,6 +912,13 @@ const VenteComptoire = () => {
       loadModalData();
     }
   }, [modal]);
+
+  // Reload articles when depot changes
+  useEffect(() => {
+    if (modal && selectedDepot) {
+      loadArticles(articleSearch, 1, 20);
+    }
+  }, [selectedDepot]);
 
   // Update article search to use the new function
   useEffect(() => {
@@ -1173,6 +1186,19 @@ const VenteComptoire = () => {
       discountAmountValue =
         Math.round((sousTotalHTValue - netHTValue) * 1000) / 1000;
 
+      // Ensure discount is positive and valid
+      if (discountAmountValue <= 0.001) {
+        discountAmountValue = 0;
+        discountPercentageValue = 0;
+        // Reset totals if creating a "negative" discount
+        if (discountAmountValue < 0) {
+          netHTValue = sousTotalHTValue;
+          finalTotalValue = grandTotalValue;
+          // Note: totalTaxValue would need recalibration if we really wanted to be perfect here, 
+          // but for VenteComptoire with no items yet, it's fine.
+        }
+      }
+
       // ← ADD THIS - Round the percentage
       discountPercentageValue = Math.round(discountPercentageValue * 1000) / 1000;
     }
@@ -1187,6 +1213,19 @@ const VenteComptoire = () => {
       discountPercentage: discountPercentageValue, // ← ADD THIS
     };
   }, [selectedArticles, showRemise, globalRemise, remiseType, editingHT, editingTTC]);
+
+  // STEP 4: Auto-update global remise if locked percentage exists
+  // This effect ensures that a "Fixed" amount remains proportional to the items
+  useEffect(() => {
+    if (remiseType === "fixed" && lockedPercentage !== null && grandTotal > 0) {
+      const newTargetNet = grandTotal * (1 - lockedPercentage / 100);
+      const roundedTargetNet = Math.round(newTargetNet * 1000) / 1000;
+      if (Math.abs(globalRemise - roundedTargetNet) > 0.001) {
+        setGlobalRemise(roundedTargetNet);
+      }
+    }
+  }, [grandTotal, remiseType, lockedPercentage]);
+
 
   const handleDelete = async () => {
     if (!bonCommande) return;
@@ -1264,7 +1303,8 @@ const VenteComptoire = () => {
                 ? parseFloat(item.remise)
                 : item.remise
               : null,
-          designation: item.designation || item.article || "", // Use the UPDATED designation from vente
+          designation: item.designation || item.article?.designation || "", // Use the UPDATED designation from vente
+          articleDetails: item.article, // Add this to show reference and other details
         }))
       );
 
@@ -1414,8 +1454,8 @@ const VenteComptoire = () => {
         timbreFiscal: timbreFiscal,
         articles: articlesForFacture,
         notes: validation.values.notes,
-        remise: globalRemise,
-        remiseType: remiseType,
+        remise: (remiseType === "fixed" && lockedPercentage !== null) ? lockedPercentage : globalRemise,
+        remiseType: (remiseType === "fixed" && lockedPercentage !== null) ? "percentage" : remiseType,
         totalHT: sousTotalHTValue,
         totalTVA: totalTaxValue,
         totalTTC: grandTotalValue,
@@ -1499,8 +1539,8 @@ const VenteComptoire = () => {
           remise: item.remise,
           designation: item.designation, // Add this
         })),
-        remise: globalRemise,
-        remiseType: remiseType,
+        remise: (remiseType === "fixed" && lockedPercentage !== null) ? lockedPercentage : globalRemise,
+        remiseType: (remiseType === "fixed" && lockedPercentage !== null) ? "percentage" : remiseType,
         totalTVA: totalTax,
         totalTTC: grandTotal,
         totalTTCAfterRemise: finalTotal,
@@ -2072,8 +2112,26 @@ const VenteComptoire = () => {
                           item.designation || item.article?.designation || "", // Ensure designation is always a string
                       }))
                     );
-                    setGlobalRemise(bonCommande.remise || 0);
-                    setRemiseType(bonCommande.remiseType || "percentage");
+                    // FIXED: Convert fixed target net to percentage to avoid "big mistake" on partial delivery
+                    const bcTotalTTC = bonCommande.articles.reduce((sum: number, item: any) => {
+                      const qty = Number(item.quantite) || 0;
+                      const unitHT = Number(item.prixUnitaire) || 0;
+                      const tvaRate = Number(item.tva) || 0;
+                      const priceTTC = Number(item.prix_ttc) || (unitHT * (1 + tvaRate / 100));
+                      return sum + (qty * priceTTC);
+                    }, 0);
+                    const bcTargetNet = Number(bonCommande.remise) || 0;
+
+                    if (bonCommande.remiseType === "fixed" && bcTotalTTC > 0 && bcTargetNet > 0 && bcTargetNet < bcTotalTTC) {
+                      const perc = ((bcTotalTTC - bcTargetNet) / bcTotalTTC) * 100;
+                      setGlobalRemise(bcTargetNet);
+                      setRemiseType("fixed");
+                      setLockedPercentage(perc);
+                    } else {
+                      setGlobalRemise(bonCommande.remise || 0);
+                      setRemiseType(bonCommande.remiseType || "percentage");
+                      setLockedPercentage(null);
+                    }
                     setShowRemise(
                       !!bonCommande.remise && bonCommande.remise > 0
                     );
@@ -3037,10 +3095,26 @@ const VenteComptoire = () => {
                                   item.designation || item.article?.designation, // Map designation
                               }))
                             );
-                            setGlobalRemise(selectedBonCommande.remise || 0);
-                            setRemiseType(
-                              selectedBonCommande.remiseType || "percentage"
-                            );
+                            // FIXED: Convert fixed target net to percentage to avoid "big mistake" on partial delivery
+                            const bcTotalTTC = selectedBonCommande.articles.reduce((sum: number, item: any) => {
+                              const qty = Number(item.quantite) || 0;
+                              const unitHT = Number(item.prixUnitaire) || 0;
+                              const tvaRate = Number(item.tva) || 0;
+                              const priceTTC = Number(item.prix_ttc) || (unitHT * (1 + tvaRate / 100));
+                              return sum + (qty * priceTTC);
+                            }, 0);
+                            const bcTargetNet = Number(selectedBonCommande.remise) || 0;
+
+                            if (selectedBonCommande.remiseType === "fixed" && bcTotalTTC > 0 && bcTargetNet > 0 && bcTargetNet < bcTotalTTC) {
+                              const perc = ((bcTotalTTC - bcTargetNet) / bcTotalTTC) * 100;
+                              setGlobalRemise(bcTargetNet);
+                              setRemiseType("fixed");
+                              setLockedPercentage(perc);
+                            } else {
+                              setGlobalRemise(selectedBonCommande.remise || 0);
+                              setRemiseType(selectedBonCommande.remiseType || "percentage");
+                              setLockedPercentage(null);
+                            }
                             setShowRemise(
                               (selectedBonCommande.remise || 0) > 0
                             );
@@ -3901,7 +3975,7 @@ const VenteComptoire = () => {
                                     {selectedArticles.map((item, index) => {
                                       const article =
                                         articles.find(
-                                          (a) => a.id === item.article_id
+                                          (a: any) => Number(a.id) === Number(item.article_id)
                                         ) || item.articleDetails;
 
                                       const qty =
@@ -4285,6 +4359,7 @@ const VenteComptoire = () => {
                                                   numValue >= 0
                                                 ) {
                                                   setGlobalRemise(numValue);
+                                                  setLockedPercentage(null); // Clear proportionality if user manual edits
                                                 }
                                               }
                                             }}
@@ -4338,11 +4413,11 @@ const VenteComptoire = () => {
                                             {grandTotal.toFixed(3)} DT
                                           </td>
                                         </tr>
-                                        {showRemise && globalRemise > 0 && (
+                                        {showRemise && discountAmount > 0.001 && (
                                           <tr className={`real-time-update ${discountPercentage > 10 ? "table-danger" : "table-success"}`}>
                                             <th className={`text-end fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                               {remiseType === "percentage"
-                                                ? `Remise (${globalRemise}%)`
+                                                ? `Remise (Global) ${Number(globalRemise).toFixed(2)}%`
                                                 : `Remise (Montant fixe) ${discountPercentage.toFixed(
                                                   2
                                                 )}%`}

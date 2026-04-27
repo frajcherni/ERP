@@ -67,6 +67,7 @@ export const searchArticles = async (params: {
   query?: string;
   page?: number;
   limit?: number;
+  depot_id?: number;
 }): Promise<{ 
   articles: Article[]; 
   total: number; 
@@ -84,7 +85,8 @@ export const searchArticles = async (params: {
       body: JSON.stringify({
         q: params.query || '',
         page: params.page || 1,
-        limit: params.limit || 50
+        limit: params.limit || 50,
+        depot_id: params.depot_id
       })
     });
     
@@ -103,8 +105,6 @@ export const searchArticles = async (params: {
     throw error;
   }
 };
-
-// Add to your ArticleServices.ts or create a new ClientServices.ts
 
 export const searchClients = async (params: {
   query?: string;

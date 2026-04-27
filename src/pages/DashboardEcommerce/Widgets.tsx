@@ -552,7 +552,8 @@ const Trésorerie: React.FC = () => {
           <>
             {/* Payment Methods by Source */}
             <UnifiedDashboard hideHeader={true} />
-            <Row className="mb-3">
+
+            {/*     <Row className="mb-3">
               {paymentMethodsBySource.map((source, index) => (
                 <Col xl={4} md={6} key={index} className="mb-3">
                   <Card>
@@ -589,10 +590,11 @@ const Trésorerie: React.FC = () => {
                   </Card>
                 </Col>
               ))}
-            </Row>
+            </Row>*/}
 
-            {/* Retenue Information */}
-            <Row>
+
+            {/*  <Row>
+              
               <Col xs={12}>
                 <Card>
                   <CardBody className="p-3">
@@ -629,7 +631,8 @@ const Trésorerie: React.FC = () => {
                   </CardBody>
                 </Card>
               </Col>
-            </Row>
+            </Row> */}
+
           </>
         ) : (
           /* Transactions Tab */

@@ -185,6 +185,7 @@ const BonCommandeClientList = () => {
   const [selectedDepot, setSelectedDepot] = useState<Depot | null>(null);
   const [factureModal, setFactureModal] = useState(false); // For facture creation modal
   const [isCreatingFacture, setIsCreatingFacture] = useState(false);
+  const [factureSubmitAttempted, setFactureSubmitAttempted] = useState(false);
   const [nextFactureNumber, setNextFactureNumber] = useState("");
   const [editingDesignation, setEditingDesignation] = useState<{
     [key: number]: string;
@@ -421,6 +422,7 @@ const BonCommandeClientList = () => {
   >([]);
   const [remiseType, setRemiseType] = useState<"percentage" | "fixed">("fixed");
   const [globalRemise, setGlobalRemise] = useState<number>(0);
+  const [lockedPercentage, setLockedPercentage] = useState<number | null>(null);
   const [isCreatingLivraison, setIsCreatingLivraison] = useState(false);
 
   const [pdfModal, setPdfModal] = useState(false);
@@ -756,9 +758,7 @@ const BonCommandeClientList = () => {
       }
     } catch (err) {
       toast.error(
-        err instanceof Error
-          ? err.message
-          : "Échec de l'enregistrement du paiement"
+        err instanceof Error ? err.message : "Échec de l'enregistrement du paiement"
       );
     }
   };
@@ -1486,7 +1486,13 @@ const BonCommandeClientList = () => {
 
     // ✅ STEP 1: Calculate totals WITHOUT considering global remise
     selectedArticles.forEach((article) => {
-      const qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
+      let qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
+
+      // ✅ Use delivered quantity for totals if creating Bon Livraison
+      if (isCreatingLivraison) {
+        qty = newDeliveryQuantities[article.article_id] === "" ? 0 : Number(newDeliveryQuantities[article.article_id]) || 0;
+      }
+
       const articleRemise = Number(article.remise) || 0;
 
       // Get unit prices with proper handling of editing
@@ -1602,7 +1608,12 @@ const BonCommandeClientList = () => {
           let newTotalTVA = 0;
 
           selectedArticles.forEach((article) => {
-            const qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
+            let qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
+
+            // ✅ Use delivered quantity for totals if creating Bon Livraison
+            if (isCreatingLivraison) {
+              qty = newDeliveryQuantities[article.article_id] === "" ? 0 : Number(newDeliveryQuantities[article.article_id]) || 0;
+            }
             const articleRemise = Number(article.remise) || 0;
             const unitHT = Number(article.prixUnitaire) || 0;
             const tvaRate = Number(article.tva) || 0;
@@ -1626,15 +1637,31 @@ const BonCommandeClientList = () => {
         ) / 1000;
 
         // Calculate discount percentage for display
-        if (netHTBeforeGlobalRemise > 0) {
+        if (netHTBeforeGlobalRemise > 0 && discountAmountValue > 0.001) {
           discountPercentage = Math.round(
             (discountAmountValue / netHTBeforeGlobalRemise) * 100 * 1000
           ) / 1000;
+        } else {
+          discountPercentage = 0;
+          // If discount is not valid (negative or zero), ensure totals don't reflect a "negative discount"
+          if (discountAmountValue <= 0) {
+            netHTAfterGlobalRemise = netHTBeforeGlobalRemise;
+            totalTaxAfterGlobalRemise = totalTaxValue;
+            finalTotalValue = grandTotalValue;
+            discountAmountValue = 0;
+          }
         }
       }
     }
 
-    // ✅ STEP 3: Calculate retention
+    // ✅ STEP 3: Apply exoneration - IF exoneration is true, TVA should be 0
+    if (exoneration) {
+      totalTaxAfterGlobalRemise = 0;
+      // When exoneration is active, TTC = HT
+      finalTotalValue = netHTAfterGlobalRemise;
+    }
+
+    // ✅ STEP 4: Calculate retention (must be on TTC amount BEFORE timbre fiscal)
     let retentionMontantValue = 0;
     methodesReglement.forEach((pm) => {
       if (pm.method === "retenue") {
@@ -1648,7 +1675,12 @@ const BonCommandeClientList = () => {
       }
     });
 
-    // ✅ STEP 4: Calculate net à payer
+    // ✅ STEP 5: Add timbre fiscal
+    if (timbreFiscal && finalTotalValue > 0) {
+      finalTotalValue = Math.round((finalTotalValue + 1) * 1000) / 1000;
+    }
+
+    // ✅ STEP 6: Calculate net à payer
     let netAPayerValue = Math.round(
       (finalTotalValue - retentionMontantValue) * 1000
     ) / 1000;
@@ -1660,8 +1692,9 @@ const BonCommandeClientList = () => {
         showRemise && Number(globalRemise) > 0
           ? netHTAfterGlobalRemise
           : netHTBeforeGlobalRemise,
-      totalTax:
-        showRemise && Number(globalRemise) > 0
+      totalTax: exoneration
+        ? 0
+        : showRemise && Number(globalRemise) > 0
           ? totalTaxAfterGlobalRemise
           : totalTaxValue,
       grandTotal: grandTotalValue,
@@ -1679,8 +1712,22 @@ const BonCommandeClientList = () => {
     editingHT,
     editingTTC,
     methodesReglement,
+    isCreatingLivraison,
+    newDeliveryQuantities,
+    timbreFiscal,
+    exoneration,
   ]);
-
+  // STEP 4: Auto-update global remise if locked percentage exists
+  // This effect ensures that a "Fixed" amount remains proportional to the items
+  useEffect(() => {
+    if (remiseType === "fixed" && lockedPercentage !== null && grandTotal > 0) {
+      const newTargetNet = grandTotal * (1 - lockedPercentage / 100);
+      const roundedTargetNet = Math.round(newTargetNet * 1000) / 1000;
+      if (Math.abs(globalRemise - roundedTargetNet) > 0.001) {
+        setGlobalRemise(roundedTargetNet);
+      }
+    }
+  }, [grandTotal, remiseType, lockedPercentage]);
 
   const handleDelete = async () => {
     if (!bonCommande) return;
@@ -1798,6 +1845,7 @@ const BonCommandeClientList = () => {
     try {
       const nextNumero = await fetchNextFactureNumberFromAPI();
       setNextFactureNumber(nextNumero);
+      setFactureSubmitAttempted(false);
 
       setBonCommande(bonCommande);
       setSelectedClient(bonCommande.client || null);
@@ -1833,9 +1881,31 @@ const BonCommandeClientList = () => {
           designation: item.designation || item.article?.designation || "", // FIXED: Use article's designation
         }))
       );
-      setGlobalRemise(bonCommande.remise || 0);
-      setRemiseType(bonCommande.remiseType || "percentage");
+      // FIXED: Convert fixed target net to percentage to avoid "big mistake" on partial delivery
+      const bcTotalTTC = bonCommande.articles.reduce((sum: number, item: any) => {
+        const qty = Number(item.quantite) || 0;
+        const unitHT = Number(item.prixUnitaire) || 0;
+        const tvaRate = Number(item.tva) || 0;
+        const priceTTC = Number(item.prix_ttc) || (unitHT * (1 + tvaRate / 100));
+        return sum + (qty * priceTTC);
+      }, 0);
+      const bcTargetNet = Number(bonCommande.remise) || 0;
+
+      if (bonCommande.remiseType === "fixed" && bcTotalTTC > 0 && bcTargetNet > 0 && bcTargetNet < bcTotalTTC) {
+        const perc = ((bcTotalTTC - bcTargetNet) / bcTotalTTC) * 100;
+        setGlobalRemise(bcTargetNet);
+        setRemiseType("fixed");
+        setLockedPercentage(perc);
+      } else {
+        setGlobalRemise(bonCommande.remise || 0);
+        setRemiseType(bonCommande.remiseType || "percentage");
+        setLockedPercentage(null);
+      }
       setShowRemise((bonCommande.remise || 0) > 0);
+
+      // ✅ Set exoneration from the bon de commande if it exists, otherwise false
+      const isBonExonere = (bonCommande as any).exoneration === "OUI" || (bonCommande as any).exoneration === true;
+      setExoneration(isBonExonere);
 
       // Copy payment methods if they exist
       if (bonCommande.paymentMethods) {
@@ -1879,6 +1949,7 @@ const BonCommandeClientList = () => {
   // Function to submit facture
   const handleFactureSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFactureSubmitAttempted(true);
 
     try {
       // Validate required fields
@@ -1918,50 +1989,6 @@ const BonCommandeClientList = () => {
         return;
       }
 
-      // Calculate totals
-      let sousTotalHTValue = 0;
-      let totalTaxValue = 0;
-      let grandTotalValue = 0;
-
-      selectedArticles.forEach((article) => {
-        const qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
-        const tvaRate = Number(article.tva) || 0;
-        const remiseRate = Number(article.remise) || 0;
-        const priceHT = Number(article.prixUnitaire) || 0;
-        const priceTTC = Number(article.prixTTC) || 0;
-
-        const montantHTLigne =
-          Math.round(qty * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
-        const montantTTCLigne = Math.round(qty * priceTTC * 1000) / 1000;
-        const taxAmount =
-          Math.round((montantTTCLigne - montantHTLigne) * 1000) / 1000;
-
-        sousTotalHTValue += montantHTLigne;
-        totalTaxValue += taxAmount;
-        grandTotalValue += montantTTCLigne;
-      });
-
-      // Apply global discount
-      let finalTotalValue = grandTotalValue;
-      if (showRemise && Number(globalRemise) > 0) {
-        if (remiseType === "percentage") {
-          finalTotalValue = grandTotalValue * (1 - Number(globalRemise) / 100);
-        } else {
-          finalTotalValue = Number(globalRemise);
-        }
-      }
-
-      // Add timbre fiscal
-      if (timbreFiscal) {
-        finalTotalValue += 1;
-      }
-
-      // Round all values
-      sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
-      totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-      grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
-      finalTotalValue = Math.round(finalTotalValue * 1000) / 1000;
-
       // Create facture data EXACTLY matching what createFacture expects
       const factureData = {
         // Fields from your createFacture service function
@@ -1977,19 +2004,21 @@ const BonCommandeClientList = () => {
         bonLivraison_id: undefined, // Add if you have this
         articles: articles,
         modeReglement: "Espece",
-        totalHT: Number(sousTotalHTValue),
-        totalTVA: Number(totalTaxValue),
-        totalTTC: Number(grandTotalValue),
-        totalTTCAfterRemise: Number(finalTotalValue),
+        totalHT: Number(sousTotalHT),
+        totalTVA: Number(totalTax),
+        totalTTC: Number(grandTotal),
+        totalTTCAfterRemise: Number(finalTotal),
         notes: validation.values.notes || undefined,
         remise: Number(globalRemise || 0),
         remiseType: remiseType || "percentage",
         montantPaye: 0,
         timbreFiscal: timbreFiscal ?? false,
+        exoneration: exoneration,
         conditionPaiement: "30 jours",
 
         // NEW FIELD: This is what you need to send
         boncommandeclientid: Number(bonCommande.id), // <-- THIS IS CRITICAL
+        depot_id: selectedDepot?.id, // <-- ADD THIS
 
         // Other fields from your service function
         paymentMethods: [], // Add if you have payment methods
@@ -2173,7 +2202,13 @@ const BonCommandeClientList = () => {
       let grandTotalValue = 0;
 
       selectedArticles.forEach((article) => {
-        const qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
+        let qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
+
+        // ✅ If creating Bon Livraison, calculate totals based on delivered quantity
+        if (isCreatingLivraison) {
+          qty = newDeliveryQuantities[article.article_id] === "" ? 0 : Number(newDeliveryQuantities[article.article_id]) || 0;
+        }
+
         const tvaRate = Number(article.tva) || 0;
         const remiseRate = Number(article.remise) || 0;
 
@@ -2272,6 +2307,12 @@ const BonCommandeClientList = () => {
         });
 
       if (isCreatingLivraison) {
+        // ✅ For the Bon Livraison itself, "quantite" should be ONLY what is being delivered NOW
+        const blArticles = articlesForSubmission.map(art => ({
+          ...art,
+          quantite: newDeliveryQuantities[art.article_id] === "" ? 0 : Number(newDeliveryQuantities[art.article_id]) || 0
+        })).filter(art => art.quantite > 0);
+
         const livraisonData = {
           numeroLivraison: values.numeroLivraison,
           dateLivraison: values.dateLivraison,
@@ -2280,10 +2321,10 @@ const BonCommandeClientList = () => {
           status: values.status,
           notes: values.notes,
           taxMode,
-          remise: globalRemise,
-          remiseType: remiseType,
+          remise: (remiseType === "fixed" && lockedPercentage !== null) ? lockedPercentage : globalRemise,
+          remiseType: (remiseType === "fixed" && lockedPercentage !== null) ? "percentage" : remiseType,
           bonCommandeClient_id: bonCommande?.id,
-          articles: articlesForSubmission,
+          articles: blArticles,
           totalHT: sousTotalHTValue,
           totalTVA: totalTaxValue,
           totalTTC: grandTotalValue,
@@ -2298,6 +2339,7 @@ const BonCommandeClientList = () => {
           voiture: "",
           chauffeur: "",
           serie: "",
+          depot_id: values.depot_id,
         };
 
         await createBonLivraison(livraisonData);
@@ -2309,8 +2351,8 @@ const BonCommandeClientList = () => {
           ...values,
           taxMode,
           articles: articlesForSubmission,
-          remise: globalRemise,
-          remiseType: remiseType,
+          remise: (remiseType === "fixed" && lockedPercentage !== null) ? lockedPercentage : globalRemise,
+          remiseType: (remiseType === "fixed" && lockedPercentage !== null) ? "percentage" : remiseType,
           autoGenerateLivraison: shouldGenerateBL,
           totalHT: sousTotalHTValue,
           totalTVA: totalTaxValue,
@@ -3093,8 +3135,10 @@ const BonCommandeClientList = () => {
                         accessorKey: "totalTTC",
                         enableColumnFilter: false,
                         cell: (cell: any) => {
+                          const bon = cell.row.original;
                           const total = Number(cell.getValue()) || 0;
-                          return `${total.toFixed(3)} DT`;
+                          const retenue = getSafeNumber(bon.montantRetenue);
+                          return `${Math.max(0, total - retenue).toFixed(3)} DT`;
                         },
                       },
                       {
@@ -3102,8 +3146,10 @@ const BonCommandeClientList = () => {
                         accessorKey: "totalTTCAfterRemise",
                         enableColumnFilter: false,
                         cell: (cell: any) => {
+                          const bon = cell.row.original;
                           const total = Number(cell.getValue()) || 0;
-                          return `${total.toFixed(3)} DT`;
+                          const retenue = getSafeNumber(bon.montantRetenue);
+                          return `${Math.max(0, total - retenue).toFixed(3)} DT`;
                         },
                       },
                       {
@@ -3448,7 +3494,7 @@ const BonCommandeClientList = () => {
                                     </option>
                                   ))}
                                 </Input>
-                                {!selectedDepot && (
+                                {factureSubmitAttempted && !selectedDepot && (
                                   <small className="text-danger">
                                     Le dépôt est requis
                                   </small>
@@ -3470,7 +3516,7 @@ const BonCommandeClientList = () => {
                               <div className="mb-3 position-relative">
                                 <Label className="form-label-lg fw-semibold">
                                   Client*
-                                  {!selectedClient && (
+                                  {factureSubmitAttempted && !selectedClient && (
                                     <button
                                       type="button"
                                       className="btn btn-link text-primary p-0 ms-2"
@@ -3532,7 +3578,7 @@ const BonCommandeClientList = () => {
                                     </button>
                                   )}
                                   {/* Add button when no client is selected */}
-                                  {!selectedClient && (
+                                  {factureSubmitAttempted && !selectedClient && (
                                     <button
                                       type="button"
                                       className="btn btn-link text-primary position-absolute end-0 top-50 translate-middle-y p-0 me-3"
@@ -3687,7 +3733,7 @@ const BonCommandeClientList = () => {
                                     )}
                                   </div>
                                 )}
-                                {!selectedClient && (
+                                {factureSubmitAttempted && !selectedClient && (
                                   <div className="text-danger mt-1 fs-6">
                                     <i className="ri-error-warning-line me-1"></i>
                                     Le client est requis
@@ -3736,7 +3782,7 @@ const BonCommandeClientList = () => {
                                     </option>
                                   ))}
                                 </Input>
-                                {!validation.values.vendeur_id && (
+                                {factureSubmitAttempted && !validation.values.vendeur_id && (
                                   <small className="text-danger">
                                     Le vendeur est requis
                                   </small>
@@ -4521,8 +4567,10 @@ const BonCommandeClientList = () => {
                                               const numValue = parseFloat(value);
                                               if (value === "" || isNaN(numValue)) {
                                                 setGlobalRemise(0);
+                                                setLockedPercentage(null);
                                               } else {
                                                 setGlobalRemise(numValue);
+                                                setLockedPercentage(null); // Clear proportionality if user manual edits
                                               }
                                             }}
                                             placeholder={
@@ -4595,7 +4643,7 @@ const BonCommandeClientList = () => {
                                         <tr className="final-total real-time-update border-top">
                                           <th className="text-end fs-5">NET À PAYER:</th>
                                           <td className="text-end fw-bold fs-5 text-primary">
-                                            {(netAPayer + (timbreFiscal ? 1 : 0)).toFixed(3)} DT
+                                            {netAPayer.toFixed(3)} DT
                                           </td>
                                         </tr>
                                       </tbody>
@@ -5457,11 +5505,11 @@ const BonCommandeClientList = () => {
                                               {grandTotalValue.toFixed(3)} DT
                                             </td>
                                           </tr>
-                                          {remiseValue > 0 && (
+                                          {discountAmountValue > 0.001 && (
                                             <tr className={`real-time-update ${discountPercentage > 10 ? "table-danger" : "table-success"}`}>
                                               <th className={`text-end fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                                 {remiseTypeValue === "percentage"
-                                                  ? `Remise (${remiseValue}%)`
+                                                  ? `Remise (Global) ${Number(remiseValue).toFixed(2)}%`
                                                   : `Remise (Montant fixe) ${discountPercentage.toFixed(2)}%`}
                                               </th>
                                               <td className={`text-end fw-bold fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
@@ -5565,10 +5613,26 @@ const BonCommandeClientList = () => {
                           );
 
                           setSelectedClient(selectedBonCommande.client || null);
-                          setGlobalRemise(selectedBonCommande.remise || 0);
-                          setRemiseType(
-                            selectedBonCommande.remiseType || "percentage"
-                          );
+                          // FIXED: Convert fixed target net to percentage to avoid "big mistake" on partial delivery
+                          const bcTotalTTC = selectedBonCommande.articles.reduce((sum: number, item: any) => {
+                            const qty = Number(item.quantite) || 0;
+                            const unitHT = Number(item.prixUnitaire) || 0;
+                            const tvaRate = Number(item.tva) || 0;
+                            const priceTTC = Number(item.prix_ttc) || (unitHT * (1 + tvaRate / 100));
+                            return sum + (qty * priceTTC);
+                          }, 0);
+                          const bcTargetNet = Number(selectedBonCommande.remise) || 0;
+
+                          if (selectedBonCommande.remiseType === "fixed" && bcTotalTTC > 0 && bcTargetNet > 0 && bcTargetNet < bcTotalTTC) {
+                            const perc = ((bcTotalTTC - bcTargetNet) / bcTotalTTC) * 100;
+                            setGlobalRemise(bcTargetNet);
+                            setRemiseType("fixed");
+                            setLockedPercentage(perc);
+                          } else {
+                            setGlobalRemise(selectedBonCommande.remise || 0);
+                            setRemiseType(selectedBonCommande.remiseType || "percentage");
+                            setLockedPercentage(null);
+                          }
                           setShowRemise((selectedBonCommande.remise || 0) > 0);
                           setIsCreatingLivraison(true);
                           setIsEdit(false);
@@ -7998,15 +8062,25 @@ const BonCommandeClientList = () => {
                                             {grandTotal.toFixed(3)} DT
                                           </td>
                                         </tr>
-                                        {showRemise && globalRemise > 0 && (
+                                        {showRemise && discountAmount > 0.001 && (
                                           <tr className={`real-time-update ${(discountPercentage ?? 0) > 10 ? "table-danger" : "table-success"}`}>
                                             <th className={`text-end fs-6 ${(discountPercentage ?? 0) > 10 ? "text-danger" : "text-success"}`}>
                                               {remiseType === "percentage"
-                                                ? `Remise (${globalRemise}%)`
+                                                ? `Remise (Global) ${Number(globalRemise).toFixed(2)}%`
                                                 : `Remise (Montant fixe) ${(discountPercentage ?? 0).toFixed(2)}%`}
                                             </th>
                                             <td className={`text-end fw-bold fs-6 ${(discountPercentage ?? 0) > 10 ? "text-danger" : "text-success"}`}>
                                               - {discountAmount.toFixed(3)} DT
+                                            </td>
+                                          </tr>
+                                        )}
+                                        {retentionMontant > 0 && (
+                                          <tr className="real-time-update">
+                                            <th className="text-end text-muted fs-6">
+                                              Retenue à la source:
+                                            </th>
+                                            <td className="text-end text-info fw-bold fs-6">
+                                              - {retentionMontant.toFixed(3)} DT
                                             </td>
                                           </tr>
                                         )}
@@ -8015,7 +8089,7 @@ const BonCommandeClientList = () => {
                                             NET À PAYER:
                                           </th>
                                           <td className="text-end fw-bold fs-5 text-primary">
-                                            {finalTotal.toFixed(3)} DT
+                                            {netAPayer.toFixed(3)} DT
                                           </td>
                                         </tr>
                                       </tbody>

@@ -21,7 +21,8 @@ import {
 } from "../../../Components/BonReception/BonReceptionServices";
 import { fetchArticles, fetchFournisseurs, fetchCategories } from "../../../Components/Article/ArticleServices";
 import { createFacture, fetchNextFactureNumberFromAPI } from "../../../Components/Article/FactureServices";
-import { Article, Fournisseur, BonReception } from "../../../Components/Article/Interfaces";
+import { Article, Fournisseur, BonReception, Depot } from "../../../Components/Article/Interfaces";
+import { fetchDepots } from "../Stock/DepotServices";
 import classnames from "classnames";
 import CreateArticleModal from "./CreateArticleModal";
 import EditArticleModal from "./EditArticleModal";
@@ -72,6 +73,8 @@ const [selectedArticles, setSelectedArticles] = useState<{
     const [nextNumeroFacture, setNextNumeroFacture] = useState("");
     const [nextNumeroReception, setNextNumeroReception] = useState("");
     const [timbreFiscal, setTimbreFiscal] = useState<boolean>(false);
+    const [depots, setDepots] = useState<Depot[]>([]);
+    const [selectedDepot, setSelectedDepot] = useState<Depot | null>(null);
 
     // Modals for article creation/edition
     const [createArticleModal, setCreateArticleModal] = useState(false);
@@ -150,18 +153,30 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
     const fetchData = useCallback(async () => {
         try {
             setLoading(true);
-            const [bonsData, fournisseursData, articlesData, categoriesData] = await Promise.all([
+            const [bonsData, fournisseursData, articlesData, categoriesData, depotsData] = await Promise.all([
                 fetchBonsReception(),
                 fetchFournisseurs(),
                 fetchArticles(),
-                fetchCategories()
+                fetchCategories(),
+                fetchDepots()
             ]);
-
+    
             setBonsReception(bonsData);
             setFilteredBonsReception(bonsData);
             setFournisseurs(fournisseursData);
             setArticles(articlesData);
             setCategories(categoriesData);
+            setDepots(depotsData);
+
+            // Auto-select "magazin" depot
+            if (depotsData.length > 0 && !selectedDepot) {
+                const magazinDepot = depotsData.find((d: any) =>
+                  d.nom.toLowerCase().includes("magazin")
+                );
+                if (magazinDepot) {
+                  setSelectedDepot(magazinDepot);
+                }
+            }
             setLoading(false);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Échec du chargement des données");
@@ -394,6 +409,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
             totalTVA: totalTax,
             totalTTC: grandTotal,
             totalTTCAfterRemise: finalTotal,
+            depot_id: values.depot_id,
             timbreFiscal: isCreatingFacture ? timbreFiscal : false
           };
       
@@ -429,6 +445,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
             //dateEcheance ,
            // conditionPaiement: "",
             notes: bonReception?.notes ?? "",
+            depot_id: bonReception?.depot?.id ?? "",
             isCreatingFacture: isCreatingFacture
         },
         validationSchema: Yup.object({
@@ -449,7 +466,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                 is: true,
                 then: (schema) => schema.required("La date de facture est requise")
             }),
-        
+            depot_id: Yup.number().required("Le dépôt est requis"),
         }),
         onSubmit: handleSubmit
     });
@@ -739,6 +756,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                         setRemiseType(cellProps.row.original.remiseType || "percentage");
                                         setShowRemise((cellProps.row.original.remise || 0) > 0);
                                         setSelectedFournisseur(cellProps.row.original.fournisseur || null);
+                                        setSelectedDepot(cellProps.row.original.depot || null);
                                         setIsEdit(true);
                                         setModal(true);
                                     }}
@@ -1439,6 +1457,51 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                   <div className="text-danger mt-1 fs-6">
                     <i className="ri-error-warning-line me-1"></i>
                     {validation.errors.fournisseur_id}
+                  </div>
+                )}
+              </div>
+            </CardBody>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Depot Section */}
+      <Row className="g-3 mb-4">
+        <Col md={12}>
+          <Card className="border-0 shadow-sm h-100">
+            <CardBody className="p-4">
+              <h6 className="fw-semibold mb-3 text-primary">
+                <i className="ri-store-2-line me-2"></i>
+                Dépôt de Réception
+              </h6>
+              <div className="mb-3">
+                <Label className="form-label-lg fw-semibold">Dépôt*</Label>
+                <Input
+                  type="select"
+                  name="depot_id"
+                  value={selectedDepot?.id || ""}
+                  onChange={(e) => {
+                    const id = parseInt(e.target.value);
+                    const depot = depots.find(d => d.id === id);
+                    setSelectedDepot(depot || null);
+                    validation.setFieldValue("depot_id", id);
+                  }}
+                  invalid={
+                    validation.touched.depot_id &&
+                    !!validation.errors.depot_id
+                  }
+                  className="form-control-lg"
+                >
+                  <option value="">Sélectionner un dépôt</option>
+                  {depots.map((depot) => (
+                    <option key={depot.id} value={depot.id}>
+                      {depot.nom}
+                    </option>
+                  ))}
+                </Input>
+                {validation.touched.depot_id && validation.errors.depot_id && (
+                  <div className="text-danger mt-1 small">
+                    {validation.errors.depot_id}
                   </div>
                 )}
               </div>

@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   Fragment,
   useEffect,
   useState,
@@ -42,6 +42,8 @@ import * as Yup from "yup";
 import { useFormik } from "formik";
 import moment from "moment";
 import Flatpickr from "react-flatpickr";
+import { fetchDepots } from "../Stock/DepotServices";
+import { Depot } from "../../../Components/Article/Interfaces";
 import {
   FetchBonLivraison,
   createBonLivraison,
@@ -118,6 +120,9 @@ const BonLivraisonList = () => {
   const [nextPaiementNumber, setNextPaiementNumber] = useState("");
   const [selectedBonForPaiement, setSelectedBonForPaiement] =
     useState<BonLivraison | null>(null);
+  const [depots, setDepots] = useState<Depot[]>([]);
+  const [selectedDepot, setSelectedDepot] = useState<Depot | null>(null);
+  const [isModalLoading, setIsModalLoading] = useState(false);
 
   const getSafeNumber = useCallback((value: any): number => {
     if (value === null || value === undefined) return 0;
@@ -245,6 +250,7 @@ const BonLivraisonList = () => {
     "percentage"
   );
   const [globalRemise, setGlobalRemise] = useState(0);
+  const [lockedPercentage, setLockedPercentage] = useState<number | null>(null);
   const [timbreFiscal, setTimbreFiscal] = useState<boolean>(false);
   const [editingTTC, setEditingTTC] = useState<{ [key: number]: string }>({});
   const [editingHT, setEditingHT] = useState<{ [key: number]: string }>({});
@@ -1101,14 +1107,27 @@ const BonLivraisonList = () => {
     if (modal) {
       setModalLoading(true);
       try {
-
-        const [categoriesResult, fournisseursData] = await Promise.all([
+        const [depotsResult, categoriesResult, fournisseursResult] = await Promise.all([
+          fetchDepots(),
           fetchCategories(),
-          fetchFournisseurs(), // ADD THIS LINE
+          fetchFournisseurs(),
         ]);
 
+        setDepots(depotsResult);
         setCategories(categoriesResult);
-        setFournisseurs(fournisseursData);
+        setFournisseurs(fournisseursResult || []);
+
+        // Auto-select "magazin" depot ONLY if not in edit mode and no depot is selected
+        if (!isEdit && depotsResult.length > 0 && !selectedDepot) {
+          const magazinDepot = depotsResult.find((d) =>
+            d.nom.toLowerCase().includes("magazin")
+          );
+          if (magazinDepot) {
+            setSelectedDepot(magazinDepot);
+            validation.setFieldValue("depot_id", magazinDepot.id);
+          }
+        }
+
         // Load initial articles and clients for modal
         await Promise.all([
           loadArticles("", 1, 15),
@@ -1128,12 +1147,23 @@ const BonLivraisonList = () => {
       loadModalData();
     }
   }, [modal]);
+  useEffect(() => {
+    if (modal && selectedDepot) {
+      loadArticles(articleSearch, 1, 50);
+    }
+  }, [selectedDepot, modal]);
+
   // Load articles only when needed (modal opens or search)
   const loadArticles = async (query = "", page = 1, limit = 15) => {
     if (modal || articleSearch) {
       setArticlesLoading(true);
       try {
-        const result = await searchArticles({ query, page, limit });
+        const result = await searchArticles({ 
+          query, 
+          page, 
+          limit,
+          depot_id: selectedDepot?.id
+        });
         if (query === "" && page === 1) {
           setArticles(result.articles || []);
         }
@@ -1417,10 +1447,19 @@ const BonLivraisonList = () => {
         ) / 1000;
 
         // Calculate discount percentage for display
-        if (netHTBeforeGlobalRemise > 0) {
+        if (netHTBeforeGlobalRemise > 0 && discountAmountValue > 0.001) {
           discountPercentageValue = Math.round(
             (discountAmountValue / netHTBeforeGlobalRemise) * 100 * 1000
           ) / 1000;
+        } else {
+          discountPercentageValue = 0;
+          // If discount is not valid (negative or zero), ensure totals don't reflect a "negative discount"
+          if (discountAmountValue <= 0) {
+            netHTAfterGlobalRemise = netHTBeforeGlobalRemise;
+            totalTaxAfterGlobalRemise = totalTaxValue;
+            finalTotalValue = grandTotalValue;
+            discountAmountValue = 0;
+          }
         }
       }
     }
@@ -1474,6 +1513,19 @@ const BonLivraisonList = () => {
     timbreFiscal,
     methodesReglement,
   ]);
+
+  // STEP 4: Auto-update global remise if locked percentage exists
+  // This effect ensures that a "Fixed" amount remains proportional to the items
+  useEffect(() => {
+    if (remiseType === "fixed" && lockedPercentage !== null && grandTotal > 0) {
+      const newTargetNet = grandTotal * (1 - lockedPercentage / 100);
+      const roundedTargetNet = Math.round(newTargetNet * 1000) / 1000;
+      if (Math.abs(globalRemise - roundedTargetNet) > 0.001) {
+        setGlobalRemise(roundedTargetNet);
+      }
+    }
+  }, [grandTotal, remiseType, lockedPercentage]);
+
 
   const handleDelete = async () => {
     if (!bonLivraison) return;
@@ -1737,8 +1789,8 @@ const BonLivraisonList = () => {
           designation: item.designation || "", // Add this line
 
         })),
-        remise: globalRemise,
-        remiseType: remiseType,
+        remise: (remiseType === "fixed" && lockedPercentage !== null) ? lockedPercentage : globalRemise,
+        remiseType: (remiseType === "fixed" && lockedPercentage !== null) ? "percentage" : remiseType,
         bonCommandeClient_id: selectedBonCommande?.id || null,
         totalHT: netHT,
         totalTVA: totalTax,
@@ -1758,6 +1810,7 @@ const BonLivraisonList = () => {
         cin: livraisonInfo.cin || "",
         voiture: livraisonInfo.voiture || "",
         serie: livraisonInfo.serie || "",
+        depot_id: selectedDepot?.id || null,
       };
 
       if (isCreatingFacture) {
@@ -1796,6 +1849,7 @@ const BonLivraisonList = () => {
       // conditionPaiement: "",
       client_id: bonLivraison?.client?.id ?? "",
       vendeur_id: bonLivraison?.vendeur?.id ?? "",
+      depot_id: bonLivraison?.depot?.id ?? "",
       status: bonLivraison?.status ?? "Brouillon",
       notes: bonLivraison?.notes ?? "",
       bonCommandeClient_id: bonLivraison?.bonCommandeClient?.id ?? "",
@@ -1822,6 +1876,7 @@ const BonLivraisonList = () => {
 
       client_id: Yup.number().required("Client requis"),
       vendeur_id: Yup.number().required("Vendeur requis"),
+      depot_id: Yup.number().required("Dépôt requis"),
       //  status: Yup.string().required("Statut requis"),
       bonCommandeClient_id: Yup.number().nullable(),
       isCreatingFacture: Yup.boolean(),
@@ -2212,8 +2267,26 @@ const BonLivraisonList = () => {
       }))
     );
 
-    setGlobalRemise(bon.remise || 0);
-    setRemiseType(bon.remiseType || "percentage");
+    // FIXED: Convert fixed target net to percentage to avoid "big mistake" on partial delivery
+    const bcTotalTTC = bon.articles.reduce((sum: number, item: any) => {
+      const qty = Number(item.quantite) || 0;
+      const unitHT = Number(item.prixUnitaire) || 0;
+      const tvaRate = Number(item.tva) || 0;
+      const priceTTC = Number(item.prix_ttc) || (unitHT * (1 + tvaRate / 100));
+      return sum + (qty * priceTTC);
+    }, 0);
+    const bcTargetNet = Number(bon.remise) || 0;
+
+    if (bon.remiseType === "fixed" && bcTotalTTC > 0 && bcTargetNet > 0 && bcTargetNet < bcTotalTTC) {
+      const perc = ((bcTotalTTC - bcTargetNet) / bcTotalTTC) * 100;
+      setGlobalRemise(bcTargetNet);
+      setRemiseType("fixed");
+      setLockedPercentage(perc);
+    } else {
+      setGlobalRemise(bon.remise || 0);
+      setRemiseType(bon.remiseType || "percentage");
+      setLockedPercentage(null);
+    }
     setShowRemise((bon.remise || 0) > 0);
   };
 
@@ -2445,6 +2518,7 @@ const BonLivraisonList = () => {
                       cellProps.row.original.bonCommandeClient || null
                     );
                     setSelectedClient(cellProps.row.original.client || null);
+                    setSelectedDepot(cellProps.row.original.depot || null);
                     setIsEdit(true);
                     setModal(true);
                   }}
@@ -4320,7 +4394,6 @@ const BonLivraisonList = () => {
                                     </FormFeedback>
                                   </div>
                                 </Col>
-
                                 {/* Date de Livraison */}
                                 <Col md={4}>
                                   <div className="mb-3">
@@ -4347,10 +4420,44 @@ const BonLivraisonList = () => {
                                   </div>
                                 </Col>
 
-                                {/* Espace vide pour alignement */}
-                                <Col md={4}>
-                                  {/* Espace réservé pour maintenir l'alignement */}
-                                </Col>
+                                {/* Depot Selection */}
+                                {!isCreatingFacture && (
+                                  <Col md={4}>
+                                    <div className="mb-3">
+                                      <Label className="form-label-lg fw-semibold">
+                                        Dépôt de Sortie*
+                                      </Label>
+                                      <Input
+                                        type="select"
+                                        name="depot_id"
+                                        value={selectedDepot?.id || ""}
+                                        onChange={(e) => {
+                                          const id = parseInt(e.target.value);
+                                          const depot = depots.find(d => d.id === id);
+                                          setSelectedDepot(depot || null);
+                                          validation.setFieldValue("depot_id", id);
+                                        }}
+                                        invalid={
+                                          validation.touched.depot_id &&
+                                          !!validation.errors.depot_id
+                                        }
+                                        className="form-control-lg border-primary border-opacity-25"
+                                      >
+                                        <option value="">Sélectionner un dépôt</option>
+                                        {depots.map((depot) => (
+                                          <option key={depot.id} value={depot.id}>
+                                            {depot.nom}
+                                          </option>
+                                        ))}
+                                      </Input>
+                                      {validation.touched.depot_id && validation.errors.depot_id && (
+                                        <div className="text-danger mt-1 small">
+                                          {validation.errors.depot_id}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </Col>
+                                )}
                               </>
                             )}
                           </Row>
@@ -5458,6 +5565,7 @@ const BonLivraisonList = () => {
                                                   numValue >= 0
                                                 ) {
                                                   setGlobalRemise(numValue);
+                                                  setLockedPercentage(null); // Clear proportionality if user manual edits
                                                 }
                                               }
                                             }}
@@ -5511,11 +5619,11 @@ const BonLivraisonList = () => {
                                             {grandTotal.toFixed(3)} DT
                                           </td>
                                         </tr>
-                                        {showRemise && globalRemise > 0 && (
+                                        {showRemise && discountAmount > 0.001 && (
                                           <tr className={`real-time-update ${discountPercentage > 10 ? "table-danger" : "table-success"}`}>
                                             <th className={`text-end fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                               {remiseType === "percentage"
-                                                ? `Remise (${globalRemise}%)`
+                                                ? `Remise (Global) ${Number(globalRemise).toFixed(2)}%`
                                                 : `Remise (Montant fixe) ${discountPercentage.toFixed(2)}%`}
                                             </th>
                                             <td className={`text-end fw-bold fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>

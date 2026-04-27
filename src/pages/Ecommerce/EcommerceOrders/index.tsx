@@ -89,6 +89,9 @@ const ArticlesList = () => {
     smallTicket: {
       showPrice: true,
     },
+    mediumTicket: {
+      showPrice: true,
+    },
     smallLabel: {
       showPrice: true,
     },
@@ -1542,11 +1545,281 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
     win.document.close();
   }, [article, toast]);
 
+  // NEW: Function specifically for medium ticket printing (50mm × 30mm portrait)
+  const handlePrintMediumTicket = useCallback((showPrice = true, fournisseurCodeParam?: string) => {
+    if (!article) return;
+
+    const categoryName =
+      article.sousCategorie?.nom || article.categorie?.nom || "";
+
+    const fournisseurCode = fournisseurCodeParam !== undefined
+      ? fournisseurCodeParam
+      : (article.fournisseur?.code_barre_fournisseur || getFirstThreeLetters(article.fournisseur?.raison_sociale));
+
+    const barcodeValue = getBarcodeValue(article);
+
+    const formatPrice = (price: number): string => {
+      const v = Math.round(price * 1000) / 1000;
+      return v.toFixed(3).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    };
+
+    const formattedPrice = formatPrice(Number(article.puv_ttc || 0));
+    const prixAchat = Number(article.pua_ttc || 0).toFixed(3);
+
+    const encryptPrice = (price: string | number): string => {
+      if (!price || Number(price) === 0) return "";
+
+      const priceNum =
+        typeof price === "number"
+          ? price.toFixed(3)
+          : Number(price.replace(",", ".")).toFixed(3);
+
+      const [intPart, decPart] = priceNum.split(".");
+      const millimesValue = Number(intPart) * 1000 + Number(decPart);
+
+      const encryptionMap: Record<string, string> = {
+        "0": "X",
+        "1": "E",
+        "2": "A",
+        "3": "V",
+        "4": "B",
+        "5": "D",
+        "6": "T",
+        "7": "S",
+        "8": "R",
+        "9": "F",
+      };
+
+      const encryptedInt = intPart
+        .split("")
+        .map(d => encryptionMap[d])
+        .join("");
+
+      let encryptedDec = "";
+
+      if (decPart !== "000") {
+        encryptedDec = decPart
+          .split("")
+          .map(d => encryptionMap[d])
+          .join("");
+      } else if (millimesValue >= 1000) {
+        encryptedDec = "XXX";
+      }
+
+      return encryptedInt + encryptedDec;
+    };
 
 
+    const encryptedPrixAchat = encryptPrice(prixAchat);
 
+    const printContent = `
+  <!DOCTYPE html>
+  <html>
+  <head>
+  <meta charset="UTF-8">
+  <title>Medium Label</title>
+  
+ <style>
+ @page {
+  size: 42mm 25mm;
+  margin: 0;
+}
 
+/* RESET */
+* {
+  box-sizing: border-box;
+}
 
+html,
+body {
+  width: 42mm;
+  height: 25mm;
+  margin: 0;
+  padding: 0;
+}
+
+/* PAGE CENTERING */
+body {
+  display: flex;
+  justify-content: center; /* horizontal center */
+  align-items: center; /* vertical center */
+  font-family: Arial, sans-serif;
+  color: black;
+  overflow: hidden;
+}
+
+/* MAIN CONTAINER */
+.container {
+  width: 40mm; /* slightly smaller than paper */
+  height: 22mm; /* strictly bounded to prevent 2nd page overflow */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0mm; /* physical push downwards */
+  overflow: hidden; /* Prevent text line-height from secretly pushing past 22mm */
+
+  /* 🔧 printer mechanical bias correction */
+  transform: translate(-0.2mm, 0); 
+}
+
+/* BARCODE - HAUTEUR AUGMENTÉE POUR UN ASPECT PLUS GRAND */
+.barcode {
+  width: 100%;
+  height: 10mm;         /* réduit pour éviter le débordement */
+  margin: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.barcode svg {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+}
+
+/* REFERENCE */
+.ref {
+  font-size: 9.5pt;
+  line-height: 1;
+  text-align: center;
+  margin-top: 0.5mm;
+  white-space: nowrap;
+}
+
+/* CATEGORY */
+.category {
+  font-size: 8pt;
+  line-height: 1;
+  text-align: center;
+  margin-top: 0;
+  white-space: nowrap;
+}
+
+/* SUPPLIER + ENCRYPTED PRICE */
+.supplier-line {
+  font-size: 8.5pt;
+  line-height: 1;
+  display: flex;
+  justify-content: center;
+  gap: 1.5mm;
+  margin-top: 0.5mm;
+  white-space: nowrap;
+}
+
+/* PUBLIC PRICE */
+.price {
+  font-size: 10pt;
+  line-height: 1;
+  text-align: center;
+  margin-top: 0.5mm;
+  white-space: nowrap;
+}
+    </style>
+  </head>
+  
+  <body>
+  <div class="container">
+    <div class="barcode"><svg id="barcode"></svg></div>
+    <div class="ref"><strong>${(article.reference || "").toUpperCase()}</strong></div>
+    ${categoryName ? `<div class="category">${categoryName.toUpperCase()}</div>` : ""}
+    <div class="supplier-line">
+  <span>${(fournisseurCode || "").toUpperCase()} :</span>
+  <span>${encryptedPrixAchat}</span>
+</div>
+
+${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div>` : ""}
+</div>
+  
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<script>
+  (function() {
+    function generateBarcode() {
+      try {
+        const barcodeElement = document.getElementById('barcode');
+        if (!barcodeElement) return false;
+
+        // Nettoyer
+        while (barcodeElement.firstChild) {
+          barcodeElement.removeChild(barcodeElement.firstChild);
+        }
+
+        // BARRES ENCORE PLUS ÉPAISSES ET PLUS HAUTES → aspect beaucoup plus grand et bold
+        JsBarcode("#barcode", "${barcodeValue}", {
+          format: "CODE128",
+          width: 3.5,        // très épais (augmenté pour un effet "plus large")
+          height: 80,       // hauteur interne très grande → bars remplissent plus verticalement
+          displayValue: false,
+          margin: 10,
+          background: "transparent",
+          lineColor: "#000000"
+        });
+
+        // Forcer le remplissage exact du conteneur avec centrage parfait
+        const svg = document.querySelector('#barcode');
+        if (svg) {
+          svg.removeAttribute('width');
+          svg.removeAttribute('height');
+          svg.setAttribute('width', '100%');
+          svg.setAttribute('height', '100%');
+          svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        }
+
+        return true;
+      } catch (e) {
+        console.error(e);
+        return false;
+      }
+    }
+
+    function startPrint() {
+      let attempts = 0;
+      const maxAttempts = 5;
+
+      function tryGenerate() {
+        attempts++;
+        const success = generateBarcode();
+
+        if (success || attempts >= maxAttempts) {
+          setTimeout(() => {
+            window.print();
+            setTimeout(() => window.close(), 300);
+          }, 100);
+        } else {
+          setTimeout(tryGenerate, 100);
+        }
+      }
+
+      tryGenerate();
+    }
+
+    if (typeof JsBarcode !== 'undefined') {
+      startPrint();
+    } else {
+      const interval = setInterval(() => {
+        if (typeof JsBarcode !== 'undefined') {
+          clearInterval(interval);
+          startPrint();
+        }
+      }, 50);
+
+      setTimeout(() => clearInterval(interval), 3000);
+    }
+  })();
+</script>
+  
+  </body>
+  </html>
+  `;
+
+    const win = window.open("", "_blank", "width=400,height=300");
+    if (!win) return toast.error("Autorisez les popups pour l'impression");
+    win.document.write(printContent);
+    win.document.close();
+  }, [article, toast]);
 
   // Fixed columns - MODIFIÉ pour ajouter le bouton d'impression
   const columns = useMemo(
@@ -2275,6 +2548,38 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                               >
                                 <i className="ri-printer-line me-2"></i>
                                 Imprimer Petit Ticket
+                              </Button>
+                            </div>
+                            {/* Section Medium Ticket */}
+                            <div className="mb-4 border rounded p-3">
+                              <div className="d-flex justify-content-between align-items-center mb-3">
+                                <div>
+                                  <h6 className="mb-1 fw-semibold">Ticket Moyen</h6>
+                                  <small className="text-muted">4.2×2.6 cm</small>
+                                </div>
+                                <div className="form-check form-switch">
+                                  <Input
+                                    type="checkbox"
+                                    className="form-check-input"
+                                    checked={printSettings.mediumTicket.showPrice}
+                                    onChange={(e) => setPrintSettings(prev => ({
+                                      ...prev,
+                                      mediumTicket: { showPrice: e.target.checked }
+                                    }))}
+                                    id="modalMediumTicketSwitch"
+                                  />
+                                  <Label className="form-check-label" htmlFor="modalMediumTicketSwitch">
+                                    {printSettings.mediumTicket.showPrice ? 'Valorisé' : 'Non Valorisé'}
+                                  </Label>
+                                </div>
+                              </div>
+                              <Button
+                                color="outline-primary"
+                                onClick={() => handlePrintMediumTicket(printSettings.mediumTicket.showPrice, fournisseurCodeOverride)}
+                                className="w-100"
+                              >
+                                <i className="ri-printer-line me-2"></i>
+                                Imprimer Ticket Moyen
                               </Button>
                             </div>
                           </div>

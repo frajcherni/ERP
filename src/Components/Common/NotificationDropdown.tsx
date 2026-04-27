@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Col, 
   Dropdown, 
@@ -16,11 +16,10 @@ import { Link } from 'react-router-dom';
 import classnames from 'classnames';
 import SimpleBar from "simplebar-react";
 
-// Images (vous pouvez les garder ou les remplacer)
-import avatar2 from "../../assets/images/users/avatar-2.jpg";
-import avatar8 from "../../assets/images/users/avatar-8.jpg";
-import avatar3 from "../../assets/images/users/avatar-3.jpg";
-import avatar6 from "../../assets/images/users/avatar-6.jpg";
+import moment from 'moment';
+
+import { fetchBonsCommandeClient } from 'Components/CommandeClient/CommandeClientServices';
+import { FetchBonLivraison } from 'Components/CommandeClient/BonLivraisonServices';
 
 const NotificationDropdown = () => {
   // State pour le dropdown
@@ -29,13 +28,92 @@ const NotificationDropdown = () => {
   // State pour le tab actif
   const [activeTab, setActiveTab] = useState<string>('1');
   
-  // État pour le nombre de notifications (0 pour l'instant)
+  // État pour les notifications réelles
+  const [notificationsData, setNotificationsData] = useState<any[]>([]);
+  const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
+
+  // État pour le nombre de notifications
   const [notificationCount, setNotificationCount] = useState<number>(0);
-  
-  // Exemple de données de notifications (vide pour l'instant)
+
+  // Charger les notifications
+  useEffect(() => {
+    const loadNotifications = async () => {
+      try {
+        const [bonsCommande, bonsLivraison] = await Promise.all([
+          fetchBonsCommandeClient(),
+          FetchBonLivraison()
+        ]);
+
+        const today = moment().format('YYYY-MM-DD');
+        const newNotifications: any[] = [];
+
+        // Traiter les Bons de Commande
+        bonsCommande.forEach((bc: any) => {
+          if (bc.dateLivBonCommande === today && bc.status !== 'Annule' && bc.status !== 'Livre') {
+            newNotifications.push({
+              id: `bc-${bc.id}`,
+              title: 'Livraison prévue (Commande)',
+              description: `BC ${bc.numeroCommande} - ${bc.client?.raison_sociale || 'Client inconnu'}`,
+              time: 'Aujourd\'hui',
+              icon: 'bx-package',
+              color: 'primary',
+              link: '/CommandeClient'
+            });
+          }
+        });
+
+        // Traiter les Bons de Livraison
+        bonsLivraison.forEach((bl: any) => {
+          if (bl.dateLivraison === today && bl.status !== 'Annulee' && bl.status !== 'Livree') {
+            newNotifications.push({
+              id: `bl-${bl.id}`,
+              title: 'Livraison prévue (BL)',
+              description: `BL ${bl.numeroLivraison} - ${bl.client?.raison_sociale || 'Client inconnu'}`,
+              time: 'Aujourd\'hui',
+              icon: 'bx-truck',
+              color: 'success',
+              link: '/BonLivraison'
+            });
+          }
+        });
+
+        setNotificationsData(newNotifications);
+
+        // Gérer le statut "lu"
+        const readIdsJson = localStorage.getItem('read-notifications');
+        const readIds = readIdsJson ? JSON.parse(readIdsJson) : [];
+        const unread = newNotifications
+          .filter(n => !readIds.includes(n.id))
+          .map(n => n.id);
+        
+        setUnreadIds(new Set(unread));
+        setNotificationCount(unread.length);
+      } catch (error) {
+        console.error("Erreur lors du chargement des notifications:", error);
+      }
+    };
+
+    loadNotifications();
+    // Rafraîchir toutes les 30 minutes (optionnel, mais l'utilisateur a dit "pas besoin de call chaque 1h")
+    // On peut le laisser juste au montage.
+  }, []);
+
+  // Marquer comme lu lors de l'ouverture
+  useEffect(() => {
+    if (isNotificationDropdown && unreadIds.size > 0) {
+      const readIdsJson = localStorage.getItem('read-notifications');
+      const readIds = readIdsJson ? JSON.parse(readIdsJson) : [];
+      const newReadIds = Array.from(new Set([...readIds, ...Array.from(unreadIds)]));
+      
+      localStorage.setItem('read-notifications', JSON.stringify(newReadIds));
+      setUnreadIds(new Set());
+      setNotificationCount(0);
+    }
+  }, [isNotificationDropdown, unreadIds]);
+
   const notifications = {
-    all: [],
-    alerts: [],
+    all: notificationsData,
+    alerts: notificationsData.filter(n => n.color === 'primary' || n.color === 'success'),
     orders: []
   };
 
@@ -147,8 +225,26 @@ const NotificationDropdown = () => {
                     </p>
                   </div>
                 ) : (
-                  // Liste des notifications (vide pour l'instant)
-                  <div></div>
+                  notifications.all.map((item, key) => (
+                    <div className="text-reset notification-item d-block dropdown-item position-relative" key={key}>
+                      <div className="d-flex">
+                        <div className="avatar-xs me-3 flex-shrink-0">
+                          <span className={`avatar-title bg-soft-${item.color} text-${item.color} rounded-circle fs-16`}>
+                            <i className={`bx ${item.icon}`}></i>
+                          </span>
+                        </div>
+                        <div className="flex-grow-1">
+                          <Link to={item.link} className="stretched-link" onClick={() => setIsNotificationDropdown(false)}>
+                            <h6 className="mt-0 mb-2 lh-base">{item.title}</h6>
+                          </Link>
+                          <p className="mb-0 fs-11 fw-medium text-uppercase text-muted">
+                            <span><i className="mdi mdi-clock-outline"></i> {item.time}</span>
+                          </p>
+                          <p className="text-muted mb-0">{item.description}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))
                 )}
               </SimpleBar>
             </TabPane>
@@ -169,7 +265,23 @@ const NotificationDropdown = () => {
                     </p>
                   </div>
                 ) : (
-                  <div></div>
+                  notifications.alerts.map((item, key) => (
+                    <div className="text-reset notification-item d-block dropdown-item position-relative" key={key}>
+                      <div className="d-flex">
+                        <div className="avatar-xs me-3 flex-shrink-0">
+                          <span className={`avatar-title bg-soft-${item.color} text-${item.color} rounded-circle fs-16`}>
+                            <i className={`bx ${item.icon}`}></i>
+                          </span>
+                        </div>
+                        <div className="flex-grow-1">
+                          <Link to={item.link} className="stretched-link" onClick={() => setIsNotificationDropdown(false)}>
+                            <h6 className="mt-0 mb-2 lh-base">{item.title}</h6>
+                          </Link>
+                          <p className="text-muted mb-0">{item.description}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))
                 )}
               </SimpleBar>
             </TabPane>
