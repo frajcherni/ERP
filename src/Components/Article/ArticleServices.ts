@@ -68,6 +68,11 @@ export const searchArticles = async (params: {
   page?: number;
   limit?: number;
   depot_id?: number;
+  type?: string;
+  startDate?: string;
+  endDate?: string;
+  sortBy?: string;
+  sortOrder?: 'ASC' | 'DESC';
 }): Promise<{ 
   articles: Article[]; 
   total: number; 
@@ -86,7 +91,12 @@ export const searchArticles = async (params: {
         q: params.query || '',
         page: params.page || 1,
         limit: params.limit || 50,
-        depot_id: params.depot_id
+        depot_id: params.depot_id,
+        type: params.type,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        sortBy: params.sortBy,
+        sortOrder: params.sortOrder
       })
     });
     

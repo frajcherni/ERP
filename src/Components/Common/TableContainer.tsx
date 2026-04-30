@@ -110,10 +110,13 @@ interface TableContainerProps {
   thClass?: any;
   divClass?: any;
   SearchPlaceholder?: any;
-  handleLeadClick?: any;
-  handleCompanyClick?: any;
   handleContactClick?: any;
   handleTicketClick?: any;
+  isPagination?: boolean;
+  totalDataCount?: number;
+  onPageChange?: (page: number) => void;
+  onPageSizeChange?: (size: number) => void;
+  currentPage?: number;
 }
 
 const TableContainer = ({
@@ -138,7 +141,11 @@ const TableContainer = ({
   thClass,
   divClass,
   SearchPlaceholder,
-
+  isPagination,
+  totalDataCount,
+  onPageChange,
+  onPageSizeChange,
+  currentPage,
 }: TableContainerProps) => {
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
@@ -189,8 +196,8 @@ const TableContainer = ({
 
   // Enhanced pagination with limits and ellipsis
   const getVisiblePages = () => {
-    const totalPages = getPageOptions().length;
-    const currentPage = getState().pagination.pageIndex;
+    const totalPages = isPagination ? Math.ceil((totalDataCount || 0) / (customPageSize || 10)) : getPageOptions().length;
+    const current = isPagination ? (currentPage || 0) : getState().pagination.pageIndex;
     const delta = 2; // Number of pages to show on each side of current page
     const range = [];
     const rangeWithDots = [];
@@ -199,7 +206,7 @@ const TableContainer = ({
       if (
         i === 0 || // First page
         i === totalPages - 1 || // Last page
-        (i >= currentPage - delta && i <= currentPage + delta) // Pages around current page
+        (i >= current - delta && i <= current + delta) // Pages around current page
       ) {
         range.push(i);
       }
@@ -219,13 +226,18 @@ const TableContainer = ({
 
   // Calculate showing range
   const getShowingRange = () => {
+    if (isPagination) {
+      const start = (currentPage || 0) * (customPageSize || 10) + 1;
+      const end = Math.min(((currentPage || 0) + 1) * (customPageSize || 10), totalDataCount || 0);
+      return { start, end, total: totalDataCount || 0 };
+    }
     const { pageIndex, pageSize } = getState().pagination;
     const start = pageIndex * pageSize + 1;
     const end = Math.min((pageIndex + 1) * pageSize, data.length);
-    return { start, end };
+    return { start, end, total: data.length };
   };
 
-  const { start, end } = getShowingRange();
+  const { start, end, total } = getShowingRange();
 
   return (
     <Fragment>
@@ -341,7 +353,7 @@ const TableContainer = ({
           <div className="d-flex gap-3 flex-wrap align-items-center justify-content-between">
             {/* Showing Results */}
             <div className="text-muted">
-              Showing <span className="fw-semibold">{start}</span> to <span className="fw-semibold">{end}</span> of <span className="fw-semibold">{data.length}</span> Results
+              Showing <span className="fw-semibold">{start}</span> to <span className="fw-semibold">{end}</span> of <span className="fw-semibold">{total}</span> Results
             </div>
 
             <div className="d-flex gap-3 flex-wrap align-items-center">
@@ -351,14 +363,19 @@ const TableContainer = ({
                 <select
                   className="form-select form-select-sm"
                   style={{ width: "auto" }}
-                  value={getState().pagination.pageSize}
+                  value={isPagination ? customPageSize : getState().pagination.pageSize}
                   onChange={e => {
-                    setPageSize(Number(e.target.value));
+                    const size = Number(e.target.value);
+                    if (isPagination) {
+                      onPageSizeChange?.(size);
+                    } else {
+                      setPageSize(size);
+                    }
                   }}
                 >
-                  {[10, 25, 50, 100].map(pageSize => (
-                    <option key={pageSize} value={pageSize}>
-                      {pageSize}
+                  {[10, 25, 50, 100].map(pageSizeOption => (
+                    <option key={pageSizeOption} value={pageSizeOption}>
+                      {pageSizeOption}
                     </option>
                   ))}
                 </select>
@@ -366,25 +383,25 @@ const TableContainer = ({
 
               {/* Pagination Buttons */}
               <ul className="pagination pagination-separated pagination-md justify-content-center justify-content-sm-start mb-0">
-                <li className={!getCanPreviousPage() ? "page-item disabled" : "page-item"}>
-                  <Link to="#" className="page-link" onClick={() => setPageIndex(0)} title="First Page">
+                <li className={(isPagination ? (currentPage === 0) : !getCanPreviousPage()) ? "page-item disabled" : "page-item"}>
+                  <Link to="#" className="page-link" onClick={() => isPagination ? onPageChange?.(0) : setPageIndex(0)} title="First Page">
                     «
                   </Link>
                 </li>
 
-                <li className={!getCanPreviousPage() ? "page-item disabled" : "page-item"}>
-                  <Link to="#" className="page-link" onClick={previousPage}>Previous</Link>
+                <li className={(isPagination ? (currentPage === 0) : !getCanPreviousPage()) ? "page-item disabled" : "page-item"}>
+                  <Link to="#" className="page-link" onClick={() => isPagination ? onPageChange?.((currentPage || 0) - 1) : previousPage()}>Previous</Link>
                 </li>
 
                 {getVisiblePages().map((page: any, key: number) => (
-                  <li className={`page-item ${getState().pagination.pageIndex === page ? "active" : ""} ${page === '...' ? "disabled" : ""}`} key={key}>
+                  <li className={`page-item ${(isPagination ? currentPage : getState().pagination.pageIndex) === page ? "active" : ""} ${page === '...' ? "disabled" : ""}`} key={key}>
                     {page === '...' ? (
                       <span className="page-link">...</span>
                     ) : (
                       <Link
                         to="#"
                         className="page-link"
-                        onClick={() => setPageIndex(page)}
+                        onClick={() => isPagination ? onPageChange?.(page) : setPageIndex(page)}
                       >
                         {page + 1}
                       </Link>
@@ -392,15 +409,15 @@ const TableContainer = ({
                   </li>
                 ))}
 
-                <li className={!getCanNextPage() ? "page-item disabled" : "page-item"}>
-                  <Link to="#" className="page-link" onClick={nextPage}>Next</Link>
+                <li className={(isPagination ? ((currentPage || 0) >= Math.ceil((totalDataCount || 0) / (customPageSize || 10)) - 1) : !getCanNextPage()) ? "page-item disabled" : "page-item"}>
+                  <Link to="#" className="page-link" onClick={() => isPagination ? onPageChange?.((currentPage || 0) + 1) : nextPage()}>Next</Link>
                 </li>
 
-                <li className={!getCanNextPage() ? "page-item disabled" : "page-item"}>
+                <li className={(isPagination ? ((currentPage || 0) >= Math.ceil((totalDataCount || 0) / (customPageSize || 10)) - 1) : !getCanNextPage()) ? "page-item disabled" : "page-item"}>
                   <Link
                     to="#"
                     className="page-link"
-                    onClick={() => setPageIndex(getPageOptions().length - 1)}
+                    onClick={() => isPagination ? onPageChange?.(Math.ceil((totalDataCount || 0) / (customPageSize || 10)) - 1) : setPageIndex(getPageOptions().length - 1)}
                     title="Last Page"
                   >
                     »

@@ -44,6 +44,7 @@ import {
   deleteArticle,
   fetchCategories,
   fetchFournisseurs,
+  searchArticles,
 } from "../../../Components/Article/ArticleServices";
 
 import {
@@ -68,10 +69,15 @@ const ArticlesList = () => {
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [isExportCSV, setIsExportCSV] = useState(false);
   const [searchText, setSearchText] = useState("");
-  const [detailsModal, setDetailsModal] = useState(false);
-  const [subcategories, setSubcategories] = useState<Categorie[]>([]);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalArticles, setTotalArticles] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
+  const [debouncedSearchText, setDebouncedSearchText] = useState("");
+  const [detailsModal, setDetailsModal] = useState(false);
+  const [subcategories, setSubcategories] = useState<Categorie[]>([]);
   const [printModal, setPrintModal] = useState(false); // NOUVEAU: Modal pour l'impression
   const [barcodeSize, setBarcodeSize] = useState<"small" | "large">("small"); // NOUVEAU: Taille du code-barre
   const API_BASE = process.env.REACT_APP_API_BASE;
@@ -496,18 +502,33 @@ const ArticlesList = () => {
   };
 
   // Fetch all data
-  // Fetch all data
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [articlesData, categoriesData, fournisseursData] =
+      
+      const typeMap: Record<string, string> = {
+        "1": "All",
+        "2": "Consigné",
+        "3": "Non Consigné"
+      };
+
+      const [articlesResponse, categoriesData, fournisseursData] =
         await Promise.all([
-          fetchArticles(),
+          searchArticles({
+            query: debouncedSearchText,
+            page: currentPage + 1,
+            limit: pageSize,
+            type: typeMap[activeTab],
+            startDate: startDate ? startDate.toISOString() : undefined,
+            endDate: endDate ? endDate.toISOString() : undefined,
+            sortBy: "article.id",
+            sortOrder: "DESC"
+          }),
           fetchCategories(),
           fetchFournisseurs(),
         ]);
 
-      const formattedArticles = articlesData.map((a: any) => ({
+      const formattedArticles = articlesResponse.articles.map((a: any) => ({
         ...a,
         type:
           a.type?.toLowerCase() === "consigné" ? "Consigné" : "Non Consigné",
@@ -532,6 +553,8 @@ const ArticlesList = () => {
 
       setArticles(formattedArticles);
       setFilteredArticles(formattedArticles);
+      setTotalArticles(articlesResponse.total);
+      setTotalPages(articlesResponse.totalPages);
       setCategories(categoriesData);
       setFournisseurs(fournisseursData);
       setLoading(false);
@@ -541,7 +564,7 @@ const ArticlesList = () => {
       );
       setLoading(false);
     }
-  }, []);
+  }, [debouncedSearchText, currentPage, pageSize, activeTab, startDate, endDate]);
 
   useEffect(() => {
     fetchData();
@@ -569,49 +592,18 @@ const ArticlesList = () => {
     return article.reference || "";
   };
 
-  // Filter articles by type, date and search text
+  // Reset page when search or tab changes
   useEffect(() => {
-    let result = [...articles];
+    setCurrentPage(0);
+  }, [debouncedSearchText, activeTab]);
 
-    if (activeTab === "2") {
-      result = result.filter((art) => art.type === "Consigné");
-    } else if (activeTab === "3") {
-      result = result.filter((art) => art.type === "Non Consigné");
-    }
-
-    if (startDate && endDate) {
-      const start = moment(startDate).startOf("day");
-      const end = moment(endDate).endOf("day");
-
-      result = result.filter((art) => {
-        const artDate = moment(art.createdAt);
-        return artDate.isBetween(start, end, null, "[]");
-      });
-    }
-
-    if (searchText != null && searchText) {
-      const searchLower = searchText.toLowerCase();
-      result = result.filter((art) => {
-        const safeToString = (value: any) => {
-          if (value === null || value === undefined) return "";
-          return String(value).toLowerCase();
-        };
-
-        return (
-          safeToString(art.nom).includes(searchLower) ||
-          safeToString(art.reference).includes(searchLower) ||
-          safeToString(art.designation).includes(searchLower) ||
-          safeToString(art.categorie?.nom).includes(searchLower) ||
-          safeToString(art.fournisseur?.raison_sociale).includes(searchLower) ||
-          safeToString(art.fournisseur?.code_barre_fournisseur).includes(searchLower) ||
-          safeToString(art.code_barre).includes(searchLower) ||
-          (Array.isArray(art.code_barres) && art.code_barres.some(cb => safeToString(cb).includes(searchLower)))
-        );
-      });
-    }
-
-    setFilteredArticles(result);
-  }, [activeTab, startDate, endDate, searchText, articles]);
+  // Debounce search text
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchText(searchText);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchText]);
 
   // Delete article
   const handleDelete = async () => {
@@ -2012,8 +2004,8 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                     <div className="text-success">
                       <span className="fw-semibold fs-16">
                         {" "}
-                        nombre des articles :{filteredArticles.length} article
-                        {filteredArticles.length !== 1 ? "s" : ""}
+                        nombre des articles :{totalArticles} article
+                        {totalArticles !== 1 ? "s" : ""}
                       </span>
                     </div>
                   </div>
@@ -2153,9 +2145,14 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                   ) : (
                     <TableContainer
                       columns={columns}
-                      data={filteredArticles}
+                      data={filteredArticles || []}
                       isGlobalFilter={false}
-                      customPageSize={100}
+                      isPagination={true}
+                      totalDataCount={totalArticles}
+                      currentPage={currentPage}
+                      onPageChange={(page: number) => setCurrentPage(page)}
+                      onPageSizeChange={(size: number) => setPageSize(size)}
+                      customPageSize={pageSize}
                       divClass="table-responsive table-card mb-1 mt-0"
                       tableClass="align-middle table-nowrap"
                       theadClass="table-light text-muted text-uppercase"
