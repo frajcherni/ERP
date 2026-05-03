@@ -47,6 +47,7 @@ import { fetchDepots } from "../Stock/DepotServices";
 import { Depot } from "../../../Components/Article/Interfaces";
 import {
   FetchBonLivraison,
+  FetchBonLivraisonPaginated,
   createBonLivraison,
   updateBonLivraison,
   deleteBonLivraison,
@@ -68,7 +69,6 @@ import classnames from "classnames";
 import {
   createPaiementClient,
   fetchNextPaiementNumberFromAPI,
-  fetchPaiementsClient
 } from "./PaiementBcClientServices";
 import {
   Article,
@@ -76,7 +76,6 @@ import {
   Vendeur,
   BonCommandeClient,
   BonLivraison,
-  PaiementClient,
 } from "../../../Components/Article/Interfaces";
 import BonLivraisonPDFModal from "./BonLivraisonPDFModal";
 import { useProfile } from "Components/Hooks/UserHooks";
@@ -125,6 +124,11 @@ const BonLivraisonList = () => {
   const [depots, setDepots] = useState<Depot[]>([]);
   const [selectedDepot, setSelectedDepot] = useState<Depot | null>(null);
   const [isModalLoading, setIsModalLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalPages, setTotalPages] = useState(0);
+  const isFirstRender = useRef(true);
 
   const getSafeNumber = useCallback((value: any): number => {
     if (value === null || value === undefined) return 0;
@@ -298,7 +302,7 @@ const BonLivraisonList = () => {
 
       await createPaiementClient(paiementData);
       setPaiementModal(false);
-      fetchData();
+      fetchData(currentPage, pageSize, true);
 
       toast.success("Paiement enregistré avec succès");
     } catch (err) {
@@ -871,175 +875,208 @@ const BonLivraisonList = () => {
     return () => clearTimeout(timer);
   }, [clientSearch, modal]);
 
-  const fetchData = useCallback(async (skipSecondary = false) => {
-    try {
-      setLoading(true);
+  const fetchData = useCallback(
+    async (page = currentPage, limit = pageSize, skipSecondary = false) => {
+      try {
+        setLoading(true);
 
-      // PHASE 1: Load critical data
-      const [livraisonData, vendeursData, paiementsData] = await Promise.all([
-        FetchBonLivraison(),
-        fetchVendeurs(),
-        fetchPaiementsClient(),   // ← ADD THIS
-      ]);
+        // Map activeTab to status for backend
+        let statusFilter = "";
+        if (activeTab === "2") statusFilter = "Brouillon";
+        else if (activeTab === "3") statusFilter = "Livré";
+        else if (activeTab === "4") statusFilter = "Partiellement Livré";
+        else if (activeTab === "5") statusFilter = "Annule";
 
-      // Map paiements to each bon livraison (same logic as BonCommandeClientList)
-      const livraisonsWithPayments = livraisonData.map((bon: any) => {
-        const relevantPaiements = paiementsData.filter(
-          (paiement: PaiementClient) => paiement.bonLivraison_id === bon.id
-        );
+        const paginatedPromise = FetchBonLivraisonPaginated({
+          page,
+          limit,
+          search: searchText || undefined,
+          status: statusFilter || undefined,
+          startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
+          endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
+        });
 
-
-
-        // Regular payments from paiements table (EXCLUDING Retention)
-        const regularPaiements = relevantPaiements
-          .filter((p: PaiementClient) => p.modePaiement !== "Retention")
-          .reduce((sum: number, p: PaiementClient) => {
-            const amount =
-              typeof p.montant === "string"
-                ? parseFloat(p.montant) || 0
-                : p.montant || 0;
-            return sum + amount;
-          }, 0);
-
-        // Retention from paiements table (ONLY Retention)
-        const retentionFromPaiements = relevantPaiements
-          .filter((p: PaiementClient) => p.modePaiement === "Retention")
-          .reduce((sum: number, p: PaiementClient) => {
-            const amount =
-              typeof p.montant === "string"
-                ? parseFloat(p.montant) || 0
-                : p.montant || 0;
-            return sum + amount;
-          }, 0);
-
-        // Regular payments from paymentMethods JSON (EXCLUDING retenue)
-        const regularPaymentMethods = bon.paymentMethods
-          ? bon.paymentMethods
-            .filter((pm: any) => pm.method !== "retenue")
-            .reduce(
-              (sum: number, pm: any) => sum + (Number(pm.amount) || 0),
-              0
-            )
-          : 0;
-
-        // Retention from paymentMethods JSON (ONLY retenue)
-        let retentionFromMethods = 0;
-        if (bon.paymentMethods) {
-          bon.paymentMethods
-            .filter((pm: any) => pm.method === "retenue")
-            .forEach((pm: any) => {
-              const amount = Number(pm.amount) || 0;
-              if (amount === 0 && pm.tauxRetention) {
-                // Calculate based on total if amount is 0 but rate exists
-                // We'll recalculate after finalTotal is known
-              } else {
-                retentionFromMethods += amount;
-              }
-            });
+        let paginatedResult;
+        if (!skipSecondary) {
+          const [resPaginated, resVendeurs, resDepots] = await Promise.all([
+            paginatedPromise,
+            fetchVendeurs(),
+            fetchDepots(),
+          ]);
+          paginatedResult = resPaginated;
+          setVendeurs(resVendeurs);
+          setDepots(resDepots);
+        } else {
+          paginatedResult = await paginatedPromise;
         }
 
-        // Calculate article totals
-        let grandTotal = 0;
-        bon.articles.forEach((item: any) => {
-          const qty = Number(item.quantite) || 1;
-          const priceHT = Number(item.prix_unitaire) || 0;
-          const tvaRate = Number(item.tva ?? 0);
-          const priceTTC =
-            Number(item.prix_ttc) || priceHT * (1 + tvaRate / 100);
-          grandTotal += Math.round(qty * priceTTC * 1000) / 1000;
-        });
-        grandTotal = Math.round(grandTotal * 1000) / 1000;
+        const livraisonData = paginatedResult.bons;
 
-        // Apply global remise
-        let finalTotal = grandTotal;
-        const hasDiscount = bon.remise && Number(bon.remise) > 0;
-        if (hasDiscount) {
+        // Map paiements to each bon livraison
+        const livraisonsWithPayments = livraisonData.map((bon: any) => {
+          const relevantPaiements = bon.paiements || [];
+
+          // Regular payments from paiements table (EXCLUDING Retention)
+          const regularPaiements = relevantPaiements
+            .filter((p: any) => p.modePaiement !== "Retention")
+            .reduce((sum: number, p: any) => {
+              const amount =
+                typeof p.montant === "string"
+                  ? parseFloat(p.montant) || 0
+                  : p.montant || 0;
+              return sum + amount;
+            }, 0);
+
+          // Retention from paiements table (ONLY Retention)
+          const retentionFromPaiements = relevantPaiements
+            .filter((p: any) => p.modePaiement === "Retention")
+            .reduce((sum: number, p: any) => {
+              const amount =
+                typeof p.montant === "string"
+                  ? parseFloat(p.montant) || 0
+                  : p.montant || 0;
+              return sum + amount;
+            }, 0);
+
+          // Regular payments from paymentMethods JSON (EXCLUDING retenue)
+          const regularPaymentMethods = bon.paymentMethods
+            ? bon.paymentMethods
+              .filter((pm: any) => pm.method !== "retenue")
+              .reduce(
+                (sum: number, pm: any) => sum + (Number(pm.amount) || 0),
+                0
+              )
+            : 0;
+
+          // Retention from paymentMethods JSON (ONLY retenue)
+          let retentionFromMethods = 0;
+          if (bon.paymentMethods) {
+            bon.paymentMethods
+              .filter((pm: any) => pm.method === "retenue")
+              .forEach((pm: any) => {
+                const amount = Number(pm.amount) || 0;
+                retentionFromMethods += amount;
+              });
+          }
+
+          // Calculate article totals
+          let grandTotal = 0;
+          bon.articles.forEach((item: any) => {
+            const qty = Number(item.quantite) || 1;
+            const priceHT = Number(item.prix_unitaire) || 0;
+            const tvaRate = Number(item.tva ?? 0);
+            const priceTTC =
+              Number(item.prix_ttc) || priceHT * (1 + tvaRate / 100);
+            grandTotal += Math.round(qty * priceTTC * 1000) / 1000;
+          });
+
+          // Apply global discount
+          const discount = Number(bon.remise) || 0;
+          let finalTotal = grandTotal;
           if (bon.remiseType === "percentage") {
-            finalTotal = grandTotal * (1 - Number(bon.remise) / 100);
+            finalTotal = grandTotal * (1 - discount / 100);
           } else {
-            finalTotal = Number(bon.remise);
+            finalTotal = Math.max(0, grandTotal - discount);
+          }
+
+          // Add timbre fiscal if applicable
+          if (bon.timbreFiscal) {
+            finalTotal += 1.0;
+          }
+
+          // Authoritative sums
+          const authoritativeMontantPaye = regularPaiements + regularPaymentMethods;
+          const authoritativeMontantRetenue = retentionFromPaiements + retentionFromMethods;
+
+          return {
+            ...bon,
+            montantPaye: authoritativeMontantPaye,
+            montantRetenue: authoritativeMontantRetenue,
+            resteAPayer: Math.round(Math.max(0, finalTotal - authoritativeMontantRetenue - authoritativeMontantPaye) * 1000) / 1000,
+            finalTotal: Math.round(finalTotal * 1000) / 1000,
+            hasPayments: authoritativeMontantPaye > 0,
+            hasRetention: authoritativeMontantRetenue > 0,
+            paiements: relevantPaiements,
+          };
+        });
+
+        setBonsLivraison(livraisonsWithPayments);
+        setFilteredBonsLivraison(livraisonsWithPayments);
+        setTotalCount(paginatedResult.pagination.totalCount);
+        setTotalPages(paginatedResult.pagination.totalPages);
+        setCurrentPage(paginatedResult.pagination.page);
+        setPageSize(limit);
+
+        if (!skipSecondary) {
+          setSecondaryLoading(true);
+          try {
+            const [categoriesData, articlesResult, clientsResult, fournisseursData] =
+              await Promise.all([
+                fetchCategories(),
+                searchArticles({ query: "", page: 1, limit: 10 }),
+                searchClients({ query: "", page: 1, limit: 10 }),
+                fetchFournisseurs(),
+              ]);
+
+            setCategories(categoriesData);
+            setArticles(articlesResult.articles || []);
+            setFilteredClients(clientsResult.clients || []);
+            setFournisseurs(fournisseursData);
+
+            // Auto-select "magazin" depot
+            const depotsData = (await fetchDepots());
+            if (depotsData.length > 0 && !selectedDepot) {
+              const magazinDepot = depotsData.find(d =>
+                d.nom.toLowerCase().includes("magazin")
+              );
+              if (magazinDepot) {
+                setSelectedDepot(magazinDepot);
+              }
+            }
+          } catch (secondaryErr) {
+            console.error("Secondary data loading failed:", secondaryErr);
+          } finally {
+            setSecondaryLoading(false);
           }
         }
-        finalTotal = Math.round(finalTotal * 1000) / 1000;
 
-        // Now calculate retention from methods with tauxRetention if amount was 0
-        let calculatedRetentionFromMethods = 0;
-        if (bon.paymentMethods) {
-          bon.paymentMethods
-            .filter((pm: any) => pm.method === "retenue")
-            .forEach((pm: any) => {
-              const amount = Number(pm.amount) || 0;
-              if (amount === 0 && pm.tauxRetention) {
-                calculatedRetentionFromMethods +=
-                  (finalTotal * pm.tauxRetention) / 100;
-              } else {
-                calculatedRetentionFromMethods += amount;
-              }
-            });
-        }
-
-        // Total retention from both sources
-        const totalRetention =
-          retentionFromPaiements + calculatedRetentionFromMethods;
-
-        // Total regular payments (NO retention)
-        const totalRegularPayments = regularPaiements + regularPaymentMethods;
-
-        // Reste à payer: finalTotal - regularPayments - retention
-        let resteAPayer =
-          Math.round(
-            (finalTotal - totalRegularPayments - totalRetention) * 1000
-          ) / 1000;
-        resteAPayer = Math.max(0, resteAPayer);
-
-        return {
-          ...bon,
-          montantPaye: totalRegularPayments,
-          montantRetenue: totalRetention,
-          resteAPayer,
-          hasPayments: totalRegularPayments > 0,
-          hasRetention: totalRetention > 0,
-          paiements: relevantPaiements,
-        };
-      });
-      console.log(livraisonsWithPayments, "livraisonsWithPayments")
-
-      setBonsLivraison(livraisonsWithPayments);
-      setFilteredBonsLivraison(livraisonsWithPayments);
-      setVendeurs(vendeursData);
-
-      // PHASE 2: Secondary data
-      if (!skipSecondary) {
-        setSecondaryLoading(true);
-        try {
-          const [articlesResult, clientsResult] = await Promise.all([
-            searchArticles({ query: "", page: 1, limit: 25 }),
-            searchClients({ query: "", page: 1, limit: 25 }),
-          ]);
-          setArticles(articlesResult.articles || []);
-          setFilteredClients(clientsResult.clients || []);
-        } catch (secondaryErr) {
-          console.error("Secondary data loading failed:", secondaryErr);
-        } finally {
-          setSecondaryLoading(false);
-        }
+        setLoading(false);
+        setError(null);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Échec du chargement des données"
+        );
+        setLoading(false);
       }
-
-      setLoading(false);
-      setError(null);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Échec du chargement des données"
-      );
-      setLoading(false);
-      setSecondaryLoading(false);
-    }
-  }, []);
+    },
+    [searchText, startDate, endDate, pageSize, activeTab]
+  );
 
   // Initial load - only critical data
+  // Initial load
   useEffect(() => {
-    fetchData(true); // true means skip secondary data initially
-  }, [fetchData]);
+    fetchData(1, pageSize, false);
+  }, []); // eslint-disable-line
+
+  // Re-fetch whenever filters change (debounced)
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    setCurrentPage(1);
+    const timer = setTimeout(() => {
+      // Map activeTab to status for backend
+      let statusFilter = "";
+      if (activeTab === "2") statusFilter = "Brouillon";
+      else if (activeTab === "3") statusFilter = "Livré";
+      else if (activeTab === "4") statusFilter = "Partiellement Livré";
+      else if (activeTab === "5") statusFilter = "Annule";
+
+      fetchData(1, pageSize, true);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchText, startDate, endDate, activeTab, phoneSearch]);
 
 
   // Load modal data only when modal opens
@@ -1136,63 +1173,6 @@ const BonLivraisonList = () => {
   };
 
 
-  useEffect(() => {
-    let result = [...bonsLivraison];
-
-    if (activeTab === "2") {
-      result = result.filter((bon) => bon.status === "Brouillon");
-    } else if (activeTab === "3") {
-      result = result.filter((bon) => bon.status === "Livree");
-    } else if (activeTab === "4") {
-      result = result.filter((bon) => bon.status === "Partiellement Livree");
-    } else if (activeTab === "5") {
-      result = result.filter((bon) => bon.status === "Annulee");
-    }
-
-    if (startDate && endDate) {
-      const start = moment(startDate).startOf("day");
-      const end = moment(endDate).endOf("day");
-      result = result.filter((bon) => {
-        const bonDate = moment(bon.dateLivraison);
-        return bonDate.isBetween(start, end, null, "[]");
-      });
-    }
-
-    // Apply regular text search
-    if (searchText) {
-      const searchLower = searchText.toLowerCase().trim();
-
-      result = result.filter((bon) => {
-        const bonNumero = bon.numeroLivraison?.toLowerCase() || "";
-        const clientName = bon.client?.raison_sociale?.toLowerCase() || "";
-        const clientDesignation = bon.client?.designation?.toLowerCase() || "";
-
-        return (
-          bonNumero.includes(searchLower) ||
-          clientName.includes(searchLower) ||
-          clientDesignation.includes(searchLower)
-        );
-      });
-    }
-
-    // Apply phone number search separately
-    if (phoneSearch) {
-      const cleanPhoneSearch = phoneSearch.replace(/\s/g, "").trim();
-
-      result = result.filter((bon) => {
-        if (!bon.client) return false;
-
-        const phone1 = bon.client.telephone1?.replace(/\s/g, "") || "";
-        const phone2 = bon.client.telephone2?.replace(/\s/g, "") || "";
-
-        return (
-          phone1.includes(cleanPhoneSearch) || phone2.includes(cleanPhoneSearch)
-        );
-      });
-    }
-
-    setFilteredBonsLivraison(result);
-  }, [activeTab, startDate, endDate, searchText, phoneSearch, bonsLivraison]);
 
   const openDetailModal = (bonLivraison: BonLivraison) => {
     setSelectedBonLivraison(bonLivraison);
@@ -1285,7 +1265,7 @@ const BonLivraisonList = () => {
     try {
       await deleteBonLivraison(bonLivraison.id);
       setDeleteModal(false);
-      fetchData();
+      fetchData(currentPage, pageSize, true);
       toast.success("Bon de livraison supprimé avec succès");
     } catch (err) {
       toast.error(
@@ -1588,7 +1568,7 @@ const BonLivraisonList = () => {
       }
 
       setModal(false);
-      fetchData();
+      fetchData(currentPage, pageSize, true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Échec de l'opération");
     }
@@ -2508,7 +2488,12 @@ const BonLivraisonList = () => {
                     columns={columns}
                     data={filteredBonsLivraison}
                     isGlobalFilter={false}
-                    customPageSize={10}
+                    isPagination={true}
+                    totalDataCount={totalCount}
+                    currentPage={currentPage - 1}
+                    onPageChange={(page) => fetchData(page + 1, pageSize, true)}
+                    onPageSizeChange={(size) => fetchData(1, size, true)}
+                    customPageSize={pageSize}
                     divClass="table-responsive table-card mb-1 mt-0"
                     tableClass="align-middle table-nowrap"
                     theadClass="table-light text-muted text-uppercase"

@@ -5,7 +5,6 @@ const API_BASE = process.env.REACT_APP_API_BASE;
 
 // *************************************** BON COMMANDE CLIENT
 export const fetchBonsCommandeClient = async (): Promise<BonCommandeClient[]> => {
-    debugger
     try {
         const response = await fetch(`${API_BASE}/bons-commande-client/getAllBonCommandeClient`);
         if (!response.ok) {
@@ -14,6 +13,42 @@ export const fetchBonsCommandeClient = async (): Promise<BonCommandeClient[]> =>
         return await response.json();
     } catch (error) {
         console.error('Error fetching client orders:', error);
+        throw error;
+    }
+};
+
+export const fetchBonsCommandeClientPaginated = async (params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+}): Promise<{
+    bons: BonCommandeClient[];
+    pagination: {
+        totalCount: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+    };
+}> => {
+    try {
+        const queryParams = new URLSearchParams();
+        if (params.page) queryParams.append("page", params.page.toString());
+        if (params.limit) queryParams.append("limit", params.limit.toString());
+        if (params.search) queryParams.append("search", params.search);
+        if (params.status) queryParams.append("status", params.status);
+        if (params.startDate) queryParams.append("startDate", params.startDate);
+        if (params.endDate) queryParams.append("endDate", params.endDate);
+
+        const response = await fetch(`${API_BASE}/bons-commande-client/paginated?${queryParams.toString()}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch paginated client orders');
+        }
+        return await response.json();
+    } catch (error) {
+        console.error('Error fetching paginated client orders:', error);
         throw error;
     }
 };
@@ -158,6 +193,42 @@ export const fetchDevis = async (): Promise<BonCommandeClient[]> => {
     }
 };
 
+export const fetchDevisPaginated = async (params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+}): Promise<{
+    devis: BonCommandeClient[];
+    pagination: {
+        totalCount: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+    };
+}> => {
+    try {
+        const queryParams = new URLSearchParams();
+        if (params.page) queryParams.append("page", params.page.toString());
+        if (params.limit) queryParams.append("limit", params.limit.toString());
+        if (params.search) queryParams.append("search", params.search);
+        if (params.status) queryParams.append("status", params.status);
+        if (params.startDate) queryParams.append("startDate", params.startDate);
+        if (params.endDate) queryParams.append("endDate", params.endDate);
+
+        const response = await fetch(`${API_BASE}/devis/paginated?${queryParams.toString()}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch paginated devis');
+        }
+        return await response.json();
+    } catch (error) {
+        console.error('Error fetching paginated devis:', error);
+        throw error;
+    }
+};
+
 export const updateDevis = async (id: number, bonCommande: Partial<BonCommandeClient>): Promise<BonCommandeClient> => {
     debugger
     try {
@@ -198,6 +269,42 @@ export const fetchVenteComptoire = async (): Promise<BonCommandeClient[]> => {
         return await response.json();
     } catch (error) {
         console.error('Error fetching client orders:', error);
+        throw error;
+    }
+};
+
+export const fetchVenteComptoirePaginated = async (params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+}): Promise<{
+    bons: BonCommandeClient[];
+    pagination: {
+        totalCount: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+    };
+}> => {
+    try {
+        const queryParams = new URLSearchParams();
+        if (params.page) queryParams.append("page", params.page.toString());
+        if (params.limit) queryParams.append("limit", params.limit.toString());
+        if (params.search) queryParams.append("search", params.search);
+        if (params.status) queryParams.append("status", params.status);
+        if (params.startDate) queryParams.append("startDate", params.startDate);
+        if (params.endDate) queryParams.append("endDate", params.endDate);
+
+        const response = await fetch(`${API_BASE}/VenteComptoire/paginated?${queryParams.toString()}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch paginated vente comptoire');
+        }
+        return await response.json();
+    } catch (error) {
+        console.error('Error fetching paginated vente comptoire:', error);
         throw error;
     }
 };

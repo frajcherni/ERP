@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   Fragment,
   useEffect,
   useState,
@@ -45,6 +45,7 @@ import moment from "moment";
 import Flatpickr from "react-flatpickr";
 import {
   fetchBonsCommandeClient,
+  fetchBonsCommandeClientPaginated,
   createBonCommandeClient,
   updateBonCommandeClient,
   deleteBonCommandeClient,
@@ -144,6 +145,13 @@ const BonCommandeClientList = () => {
   // Add ref for article search input
   const articleSearchRef = useRef<HTMLInputElement>(null);
   const [phoneSearch, setPhoneSearch] = useState("");
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
   const [showRetention, setShowRetention] = useState(false);
   const [retentionRate, setRetentionRate] = useState<number>(1); // Default %
   const [retentionAmount, setRetentionAmount] = useState<number>(0);
@@ -878,204 +886,104 @@ const BonCommandeClientList = () => {
   }, [clientSearch, modal]);
 
 
-  const fetchData = useCallback(async (skipSecondary = false) => {
-    try {
-      setLoading(true);
+  const statusForTab: Record<string, string> = {
+    "1": "", // All
+    "2": "Brouillon",
+    "3": "Confirme",
+    "4": "Partiellement Livre",
+    "5": "Livre",
+    "6": "Annule",
+  };
 
-      // PHASE 1: Load critical data only
-      const [bonsData, vendeursData, paiementsData] = await Promise.all([
-        fetchBonsCommandeClient(),
-        fetchVendeurs(),
-        fetchPaiementsClient(),
-      ]);
+  const fetchData = useCallback(
+    async (page = currentPage, limit = pageSize, skipSecondary = false) => {
+      try {
+        setLoading(true);
 
-      const bonsWithPayments = bonsData.map((bon) => {
-        const relevantPaiements = paiementsData.filter(
-          (paiement: PaiementClient) => paiement.bonCommandeClient_id === bon.id
-        );
+        const statusParam = statusForTab[activeTab] || "";
 
-        // --- Calculate regular payments from paiements (EXCLUDING Retention) ---
-        const regularPaiements = relevantPaiements
-          .filter((p: PaiementClient) => p.modePaiement !== "Retention")
-          .reduce((sum: number, p: PaiementClient) => {
-            let amount: number;
-            if (typeof p.montant === "string") {
-              amount = parseFloat(p.montant) || 0;
-            } else {
-              amount = p.montant || 0;
-            }
-            return sum + amount;
-          }, 0);
+        let paginatedResult;
 
-        // --- Calculate retention from paiements (ONLY Retention) ---
-        const retentionFromPaiements = relevantPaiements
-          .filter((p: PaiementClient) => p.modePaiement === "Retention")
-          .reduce((sum: number, p: PaiementClient) => {
-            let amount: number;
-            if (typeof p.montant === "string") {
-              amount = parseFloat(p.montant) || 0;
-            } else {
-              amount = p.montant || 0;
-            }
-            return sum + amount;
-          }, 0);
-
-        // --- Calculate regular payments from paymentMethods (EXCLUDING retenue) ---
-        const regularPaymentMethods = bon.paymentMethods
-          ? bon.paymentMethods
-            .filter((pm: any) => pm.method !== "retenue")
-            .reduce((sum: number, pm: any) => sum + (Number(pm.amount) || 0), 0)
-          : 0;
-
-        // --- Calculate retention from paymentMethods (ONLY retenue) ---
-        const retentionFromMethods = bon.paymentMethods
-          ? bon.paymentMethods
-            .filter((pm: any) => pm.method === "retenue")
-            .reduce((sum: number, pm: any) => {
-              const amount = Number(pm.amount) || 0;
-              // If amount is 0 but tauxRetention exists, calculate it based on total
-              // We'll calculate after we have finalTotal
-              return sum + amount;
-            }, 0)
-          : 0;
-
-        // Calculate article totals
-        let sousTotalHT = 0;
-        let totalTax = 0;
-        let grandTotal = 0;
-
-        bon.articles.forEach((item: any) => {
-          const qty = Number(item.quantite) || 1;
-          const priceHT = Number(item.prixUnitaire) || 0;
-          const tvaRate = Number(item.tva ?? 0);
-          const remiseRate = Number(item.remise || 0);
-          const priceTTC =
-            Number(item.prix_ttc) || priceHT * (1 + tvaRate / 100);
-
-          const montantHTLigne =
-            Math.round(qty * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
-          const montantTTCLigne = Math.round(qty * priceTTC * 1000) / 1000;
-          const taxAmount =
-            Math.round((montantTTCLigne - montantHTLigne) * 1000) / 1000;
-
-          sousTotalHT += montantHTLigne;
-          totalTax += taxAmount;
-          grandTotal += montantTTCLigne;
+        const paginatedPromise = fetchBonsCommandeClientPaginated({
+          page,
+          limit: limit,
+          search: searchText || undefined,
+          status: statusParam || undefined,
+          startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
+          endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
         });
 
-        let finalTotal = grandTotal;
-        const hasDiscount = bon.remise && Number(bon.remise) > 0;
-        if (hasDiscount) {
-          if (bon.remiseType === "percentage") {
-            finalTotal = grandTotal * (1 - Number(bon.remise) / 100);
-          } else {
-            finalTotal = Number(bon.remise);
-          }
-        }
-
-        sousTotalHT = Math.round(sousTotalHT * 1000) / 1000;
-        totalTax = Math.round(totalTax * 1000) / 1000;
-        grandTotal = Math.round(grandTotal * 1000) / 1000;
-        finalTotal = Math.round(finalTotal * 1000) / 1000;
-
-        // Calculate retention from methods with tauxRetention if amount is 0
-        let calculatedRetentionFromMethods = 0;
-        if (bon.paymentMethods) {
-          bon.paymentMethods
-            .filter((pm: any) => pm.method === "retenue")
-            .forEach((pm: any) => {
-              const amount = Number(pm.amount) || 0;
-              if (amount === 0 && pm.tauxRetention) {
-                // Calculate based on total if amount is 0 but rate exists
-                calculatedRetentionFromMethods += (finalTotal * pm.tauxRetention) / 100;
-              } else {
-                calculatedRetentionFromMethods += amount;
-              }
-            });
-        }
-
-        // Total retention from both sources
-        const totalRetention = retentionFromPaiements + calculatedRetentionFromMethods;
-
-        // Total regular payments (what the user actually paid - NO retention)
-        const totalRegularPayments = regularPaiements + regularPaymentMethods;
-
-        // Calculate reste à payer: finalTotal - totalRegularPayments - totalRetention
-        let resteAPayer = Math.round((finalTotal - totalRegularPayments - totalRetention) * 1000) / 1000;
-        resteAPayer = Math.max(0, resteAPayer);
-
-        return {
-          ...bon,
-          totalHT: sousTotalHT,
-          totalTVA: totalTax,
-          totalTTC: grandTotal,
-          totalTTCAfterRemise: finalTotal,
-          montantPaye: totalRegularPayments, // Only regular payments (NO retention)
-          montantRetenue: totalRetention, // Total retention from both sources
-          resteAPayer: resteAPayer, // finalTotal - regularPayments - retention
-          hasPayments: totalRegularPayments > 0,
-          hasRetention: totalRetention > 0,
-          paiements: relevantPaiements,
-          paymentMethods: bon.paymentMethods,
-        };
-      });
-
-      setBonsCommande(bonsWithPayments);
-      setFilteredBonsCommande(bonsWithPayments);
-      setVendeurs(vendeursData);
-
-      // PHASE 2: Load secondary data only if not skipped
-      if (!skipSecondary) {
-        setSecondaryLoading(true);
-
-        try {
-          const [depotsData, categoriesData] = await Promise.all([
+        if (!skipSecondary) {
+          const [resPaginated, resVendeurs, resDepots] = await Promise.all([
+            paginatedPromise,
+            fetchVendeurs(),
             fetchDepots(),
-            fetchCategories(),
           ]);
-
-          setDepots(depotsData);
-          setCategories(categoriesData);
-
-          // Auto-select "magazin" depot if not already selected
-          if (depotsData.length > 0 && !selectedDepot) {
-            const magazinDepot = depotsData.find(d =>
-              d.nom.toLowerCase().includes("magazin")
-            );
-            if (magazinDepot) {
-              setSelectedDepot(magazinDepot);
-            }
-          }
-
-          const [articlesResult, clientsResult] = await Promise.all([
-            searchArticles({ query: "", page: 1, limit: 25 }),
-            searchClients({ query: "", page: 1, limit: 25 }),
-          ]);
-
-          setArticles(articlesResult.articles || []);
-          setFilteredClients(clientsResult.clients || []);
-        } catch (secondaryErr) {
-          console.error("Secondary data loading failed:", secondaryErr);
-        } finally {
-          setSecondaryLoading(false);
+          paginatedResult = resPaginated;
+          setVendeurs(resVendeurs);
+          setDepots(resDepots);
+        } else {
+          paginatedResult = await paginatedPromise;
         }
+
+        // Use the calculated totals from the server where possible
+        // The server already joined paiements and articles
+        setBonsCommande(paginatedResult.bons);
+        setFilteredBonsCommande(paginatedResult.bons);
+        setTotalCount(paginatedResult.pagination.totalCount);
+        setTotalPages(paginatedResult.pagination.totalPages);
+        setCurrentPage(paginatedResult.pagination.page);
+        setPageSize(limit);
+
+        if (!skipSecondary) {
+          setSecondaryLoading(true);
+          try {
+            // Load initial articles and clients for modal searches
+            const [articlesResult, clientsResult] = await Promise.all([
+              searchArticles({ query: "", page: 1, limit: 10 }),
+              searchClients({ query: "", page: 1, limit: 10 }),
+            ]);
+            setArticles(articlesResult.articles || []);
+            setClients(clientsResult.clients || []);
+            setFilteredClients(clientsResult.clients || []);
+          } catch (secondaryErr) {
+            console.error("Secondary data loading failed:", secondaryErr);
+          } finally {
+            setSecondaryLoading(false);
+          }
+        }
+
+        setLoading(false);
+        setError(null);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Échec du chargement des données"
+        );
+        setLoading(false);
       }
+    },
+    [searchText, startDate, endDate, activeTab, pageSize]
+  );
 
-      setLoading(false);
-      setError(null);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Échec du chargement des données"
-      );
-      setLoading(false);
-      setSecondaryLoading(false);
-    }
-  }, []);
+  const isFirstRender = useRef(true);
 
-  // Initial load - only critical data
+  // Re-fetch whenever filters change (debounced)
   useEffect(() => {
-    fetchData(true); // true means skip secondary data initially
-  }, [fetchData]);
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    setCurrentPage(1);
+    const timer = setTimeout(() => {
+      fetchData(1, pageSize, true);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchText, startDate, endDate, activeTab]);
+
+  // Initial load
+  useEffect(() => {
+    fetchData(1, pageSize, false);
+  }, []); // eslint-disable-line
 
   // Load articles only when needed (modal opens or search)
   const loadArticles = async (query = "", page = 1, limit = 15) => {
@@ -1242,7 +1150,7 @@ const BonCommandeClientList = () => {
       const clientsSearchResult = await searchClients({
         query: "",
         page: 1,
-        limit: 50, // Limit to reasonable number
+        limit: 10,
       });
 
       // Use the searched clients instead of all clients
@@ -3020,7 +2928,12 @@ const BonCommandeClientList = () => {
                     ]}
                     data={filteredBonsCommande}
                     isGlobalFilter={false}
-                    customPageSize={10}
+                    isPagination={true}
+                    totalDataCount={totalCount}
+                    currentPage={currentPage - 1}
+                    onPageChange={(page) => fetchData(page + 1, pageSize, true)}
+                    onPageSizeChange={(size) => fetchData(1, size, true)}
+                    customPageSize={pageSize}
                     divClass="table-responsive table-card mb-1 mt-0"
                     tableClass="align-middle table-nowrap"
                     theadClass="table-light text-muted text-uppercase"

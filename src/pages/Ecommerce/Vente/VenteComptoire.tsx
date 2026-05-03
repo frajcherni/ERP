@@ -52,6 +52,7 @@ import {
 } from "./FactureClientServices";
 import {
   fetchVenteComptoire,
+  fetchVenteComptoirePaginated,
   CreateVenteComptoire,
   updateventecomptoire,
   deleteventecomptoire,
@@ -153,6 +154,13 @@ const VenteComptoire = () => {
 
   const [editClientModal, setEditClientModal] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const isFirstRender = useRef(true);
 
   // === FONCTIONS DE CALCUL TVA/FODEC TUNISIEN ===
   const parseNumber = (value: string | number): number => {
@@ -756,73 +764,85 @@ const VenteComptoire = () => {
   // Enhanced client search functionality
   // Enhanced client search functionality
 
-  const fetchData = useCallback(async (skipSecondary = false) => {
-    try {
-      setLoading(true);
+  const fetchData = useCallback(
+    async (page = currentPage, limit = pageSize, skipSecondary = false) => {
+      try {
+        setLoading(true);
 
-      // PHASE 1: Load critical data only
-      const [bonsData, vendeursData] = await Promise.all([
-        fetchVenteComptoire(),
-        fetchVendeurs(),
-      ]);
+        let paginatedResult;
 
-      setBonsCommande(bonsData);
-      setFilteredBonsCommande(bonsData);
-      setVendeurs(vendeursData);
+        const paginatedPromise = fetchVenteComptoirePaginated({
+          page,
+          limit: limit,
+          search: searchText || undefined,
+          startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
+          endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
+        });
 
-      // PHASE 2: Load secondary data only if not skipped
-      if (!skipSecondary) {
-        setSecondaryLoading(true);
-
-        try {
-          // Load depot and categories first (needed for forms)
-          const [depotsData, categoriesData] = await Promise.all([
+        if (!skipSecondary) {
+          const [resPaginated, resVendeurs, resDepots] = await Promise.all([
+            paginatedPromise,
+            fetchVendeurs(),
             fetchDepots(),
-            fetchCategories(),
           ]);
-
-          setDepots(depotsData);
-          setCategories(categoriesData);
-
-          // Auto-select "magazin" depot if not already selected
-          if (depotsData.length > 0 && !selectedDepot) {
-            const magazinDepot = depotsData.find(d =>
-              d.nom.toLowerCase().includes("magazin")
-            );
-            if (magazinDepot) {
-              setSelectedDepot(magazinDepot);
-            }
-          }
-
-          // Then load articles and clients in parallel
-          const [articlesResult, clientsResult, fournisseursData] =
-            await Promise.all([
-              searchArticles({ query: "", page: 1, limit: 25 }), // Reduced from 50
-              searchClients({ query: "", page: 1, limit: 25 }), // Reduced from 50
-              fetchFournisseurs(),
-            ]);
-
-          setArticles(articlesResult.articles || []);
-          setFilteredClients(clientsResult.clients || []);
-          setFournisseurs(fournisseursData);
-        } catch (secondaryErr) {
-          console.error("Secondary data loading failed:", secondaryErr);
-          // Continue without secondary data
-        } finally {
-          setSecondaryLoading(false);
+          paginatedResult = resPaginated;
+          setVendeurs(resVendeurs);
+          setDepots(resDepots);
+        } else {
+          paginatedResult = await paginatedPromise;
         }
-      }
 
-      setLoading(false);
-      setError(null);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Échec du chargement des données"
-      );
-      setLoading(false);
-      setSecondaryLoading(false);
-    }
-  }, []);
+        setBonsCommande(paginatedResult.bons);
+        setFilteredBonsCommande(paginatedResult.bons);
+        setTotalCount(paginatedResult.pagination.totalCount);
+        setTotalPages(paginatedResult.pagination.totalPages);
+        setCurrentPage(paginatedResult.pagination.page);
+        setPageSize(limit);
+
+        if (!skipSecondary) {
+          setSecondaryLoading(true);
+          try {
+            const [categoriesData, articlesResult, clientsResult, fournisseursData] =
+              await Promise.all([
+                fetchCategories(),
+                searchArticles({ query: "", page: 1, limit: 10 }),
+                searchClients({ query: "", page: 1, limit: 10 }),
+                fetchFournisseurs(),
+              ]);
+
+            setCategories(categoriesData);
+            setArticles(articlesResult.articles || []);
+            setFilteredClients(clientsResult.clients || []);
+            setFournisseurs(fournisseursData);
+
+            // Auto-select "magazin" depot
+            const depotsData = (await fetchDepots());
+            if (depotsData.length > 0 && !selectedDepot) {
+              const magazinDepot = depotsData.find(d =>
+                d.nom.toLowerCase().includes("magazin")
+              );
+              if (magazinDepot) {
+                setSelectedDepot(magazinDepot);
+              }
+            }
+          } catch (secondaryErr) {
+            console.error("Secondary data loading failed:", secondaryErr);
+          } finally {
+            setSecondaryLoading(false);
+          }
+        }
+
+        setLoading(false);
+        setError(null);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Échec du chargement des données"
+        );
+        setLoading(false);
+      }
+    },
+    [searchText, startDate, endDate, pageSize]
+  );
 
   // Load articles only when needed (modal opens or search)
   const loadArticles = async (query = "", page = 1, limit = 15) => {
@@ -902,10 +922,10 @@ const VenteComptoire = () => {
     }
   };
 
-  // Initial load - only critical data
+  // Initial load - load everything
   useEffect(() => {
-    fetchData(true); // true means skip secondary data initially
-  }, [fetchData]);
+    fetchData(1, pageSize, false);
+  }, [fetchData, pageSize]);
 
   // Load modal data when modal opens
   useEffect(() => {
@@ -949,53 +969,23 @@ const VenteComptoire = () => {
     return () => clearTimeout(timer);
   }, [clientSearch, modal]);
 
+  // Initial load
   useEffect(() => {
-    let result = [...bonsCommande];
+    fetchData(1, pageSize, false);
+  }, []); // eslint-disable-line
 
-    if (startDate && endDate) {
-      const start = moment(startDate).startOf("day");
-      const end = moment(endDate).endOf("day");
-      result = result.filter((bon) => {
-        const bonDate = moment(bon.dateCommande);
-        return bonDate.isBetween(start, end, null, "[]");
-      });
+  // Re-fetch whenever filters change (debounced)
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
     }
-
-    // Apply regular text search
-    if (searchText) {
-      const searchLower = searchText.toLowerCase().trim();
-
-      result = result.filter((bon) => {
-        const bonNumero = bon.numeroCommande?.toLowerCase() || "";
-        const clientName = bon.client?.raison_sociale?.toLowerCase() || "";
-        const clientDesignation = bon.client?.designation?.toLowerCase() || "";
-
-        return (
-          bonNumero.includes(searchLower) ||
-          clientName.includes(searchLower) ||
-          clientDesignation.includes(searchLower)
-        );
-      });
-    }
-
-    // Apply phone number search separately
-    if (phoneSearch) {
-      const cleanPhoneSearch = phoneSearch.replace(/\s/g, "").trim();
-
-      result = result.filter((bon) => {
-        if (!bon.client) return false;
-
-        const phone1 = bon.client.telephone1?.replace(/\s/g, "") || "";
-        const phone2 = bon.client.telephone2?.replace(/\s/g, "") || "";
-
-        return (
-          phone1.includes(cleanPhoneSearch) || phone2.includes(cleanPhoneSearch)
-        );
-      });
-    }
-
-    setFilteredBonsCommande(result);
-  }, [startDate, endDate, searchText, phoneSearch, bonsCommande]);
+    setCurrentPage(1);
+    const timer = setTimeout(() => {
+      fetchData(1, pageSize, true);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchText, startDate, endDate]);
 
   const openDetailModal = (bonCommande: BonCommandeClient) => {
     setSelectedBonCommande(bonCommande);
@@ -1068,7 +1058,7 @@ const VenteComptoire = () => {
     try {
       await deleteventecomptoire(bonCommande.id);
       setDeleteModal(false);
-      fetchData();
+      fetchData(currentPage, pageSize, true);
       toast.success("Vente supprimée avec succès");
     } catch (err) {
       toast.error(
@@ -1270,7 +1260,7 @@ const VenteComptoire = () => {
       // Fermer et réinitialiser
       toggleModal();
       setIsCreatingFacture(false);
-      fetchData();
+      fetchData(currentPage, pageSize, true);
     } catch (err) {
       console.error("Error creating facture:", err);
       toast.error(
@@ -1353,7 +1343,7 @@ const VenteComptoire = () => {
 
       // Close modal and refresh data
       toggleModal();
-      fetchData();
+      fetchData(currentPage, pageSize, true);
     } catch (err) {
       console.error("Erreur sauvegarde:", err);
       toast.error(err instanceof Error ? err.message : "Échec de l'opération");
@@ -2146,7 +2136,12 @@ const VenteComptoire = () => {
                     columns={columns}
                     data={filteredBonsCommande}
                     isGlobalFilter={false}
-                    customPageSize={10}
+                    isPagination={true}
+                    totalDataCount={totalCount}
+                    currentPage={currentPage - 1}
+                    onPageChange={(page) => fetchData(page + 1, pageSize, true)}
+                    onPageSizeChange={(size) => fetchData(1, size, true)}
+                    customPageSize={pageSize}
                     divClass="table-responsive table-card mb-1 mt-0"
                     tableClass="align-middle table-nowrap"
                     theadClass="table-light text-muted text-uppercase"

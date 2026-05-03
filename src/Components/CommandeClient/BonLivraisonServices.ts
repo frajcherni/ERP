@@ -19,6 +19,42 @@ export const FetchBonLivraison = async (): Promise<BonLivraison[]> => {
     }
 };
 
+export const FetchBonLivraisonPaginated = async (params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+}): Promise<{
+    bons: BonLivraison[];
+    pagination: {
+        totalCount: number;
+        page: number;
+        limit: number;
+        totalPages: number;
+    };
+}> => {
+    try {
+        const queryParams = new URLSearchParams();
+        if (params.page) queryParams.append('page', params.page.toString());
+        if (params.limit) queryParams.append('limit', params.limit.toString());
+        if (params.search) queryParams.append('search', params.search);
+        if (params.status) queryParams.append('status', params.status);
+        if (params.startDate) queryParams.append('startDate', params.startDate);
+        if (params.endDate) queryParams.append('endDate', params.endDate);
+
+        const response = await fetch(`${API_BASE}/bons-livraison/paginated?${queryParams.toString()}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch paginated delivery notes');
+        }
+        return await response.json();
+    } catch (error) {
+        console.error('Error fetching paginated delivery notes:', error);
+        throw error;
+    }
+};
+
 // Create a new client order
 export const createBonLivraison = async (bonLivraison: Omit<BonLivraison, 'id'>): Promise<BonLivraison> => {
     debugger

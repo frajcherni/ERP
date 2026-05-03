@@ -45,6 +45,7 @@ import moment from "moment";
 import Flatpickr from "react-flatpickr";
 import {
   fetchDevis,
+  fetchDevisPaginated,
   createDevis,
   updateDevis,
   deleteDevis,
@@ -110,6 +111,11 @@ const Devis = () => {
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [searchText, setSearchText] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalPages, setTotalPages] = useState(0);
+  const isFirstRender = useRef(true);
   const [articleSearch, setArticleSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -691,75 +697,113 @@ const Devis = () => {
   // Fix the client search functionality
   // Also add this helper function for better phone display
 
-  const fetchData = useCallback(async (skipSecondary = false) => {
-    try {
-      setLoading(true);
+  const fetchData = useCallback(
+    async (page = currentPage, limit = pageSize, skipSecondary = false) => {
+      try {
+        setLoading(true);
 
-      // PHASE 1: Load critical data only
-      const [bonsData, vendeursData] = await Promise.all([
-        fetchDevis(), // This should be your devis fetching function
-        fetchVendeurs(),
-      ]);
+        // Map activeTab to status for backend
+        let statusFilter = "";
+        if (activeTab === "2") statusFilter = "Brouillon";
+        else if (activeTab === "3") statusFilter = "Confirme";
+        else if (activeTab === "4") statusFilter = "Envoye";
+        else if (activeTab === "5") statusFilter = "Accepte";
+        else if (activeTab === "6") statusFilter = "Refuse";
 
-      setBonsCommande(bonsData);
-      setFilteredBonsCommande(bonsData);
-      setVendeurs(vendeursData);
+        const paginatedPromise = fetchDevisPaginated({
+          page,
+          limit,
+          search: searchText || undefined,
+          status: statusFilter || undefined,
+          startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
+          endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
+        });
 
-      // PHASE 2: Load secondary data only if not skipped
-      if (!skipSecondary) {
-        setSecondaryLoading(true);
-
-        try {
-          // Load depot first (needed for forms)
-          const [depotsData, categoriesData] = await Promise.all([
+        let paginatedResult;
+        if (!skipSecondary) {
+          const [resPaginated, resVendeurs, resDepots] = await Promise.all([
+            paginatedPromise,
+            fetchVendeurs(),
             fetchDepots(),
-            fetchCategories(),
           ]);
-
-          setDepots(depotsData);
-          setCategories(categoriesData);
-
-          // Auto-select "magazin" depot if not already selected
-          if (depotsData.length > 0 && !selectedDepot) {
-            const magazinDepot = depotsData.find(d =>
-              d.nom.toLowerCase().includes("magazin")
-            );
-            if (magazinDepot) {
-              setSelectedDepot(magazinDepot);
-            }
-          }
-
-          // Then load articles and clients in parallel with limit
-          const [articlesResult, clientsResult] = await Promise.all([
-            searchArticles({ query: "", page: 1, limit: 25 }),
-            searchClients({ query: "", page: 1, limit: 25 }),
-          ]);
-
-          setArticles(articlesResult.articles || []);
-          setFilteredClients(clientsResult.clients || []);
-        } catch (secondaryErr) {
-          console.error("Secondary data loading failed:", secondaryErr);
-          // Continue without secondary data
-        } finally {
-          setSecondaryLoading(false);
+          paginatedResult = resPaginated;
+          setVendeurs(resVendeurs);
+          setDepots(resDepots);
+        } else {
+          paginatedResult = await paginatedPromise;
         }
+
+        const bonsData = paginatedResult.devis;
+
+        setBonsCommande(bonsData);
+        setFilteredBonsCommande(bonsData);
+        setTotalCount(paginatedResult.pagination.totalCount);
+        setTotalPages(paginatedResult.pagination.totalPages);
+        setCurrentPage(paginatedResult.pagination.page);
+        setPageSize(limit);
+
+        if (!skipSecondary) {
+          setSecondaryLoading(true);
+          try {
+            const [categoriesData, articlesResult, clientsResult, fournisseursData] =
+              await Promise.all([
+                fetchCategories(),
+                searchArticles({ query: "", page: 1, limit: 10 }),
+                searchClients({ query: "", page: 1, limit: 10 }),
+                fetchFournisseurs(),
+              ]);
+
+            setCategories(categoriesData);
+            setArticles(articlesResult.articles || []);
+            setFilteredClients(clientsResult.clients || []);
+            setFournisseurs(fournisseursData);
+
+            // Auto-select "magazin" depot
+            const depotsData = (await fetchDepots());
+            if (depotsData.length > 0 && !selectedDepot) {
+              const magazinDepot = depotsData.find(d =>
+                d.nom.toLowerCase().includes("magazin")
+              );
+              if (magazinDepot) {
+                setSelectedDepot(magazinDepot);
+              }
+            }
+          } catch (secondaryErr) {
+            console.error("Secondary data loading failed:", secondaryErr);
+          } finally {
+            setSecondaryLoading(false);
+          }
+        }
+
+        setLoading(false);
+        setError(null);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Échec du chargement des données"
+        );
+        setLoading(false);
       }
+    },
+    [searchText, startDate, endDate, pageSize, activeTab]
+  );
 
-      setLoading(false);
-      setError(null);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Échec du chargement des données"
-      );
-      setLoading(false);
-      setSecondaryLoading(false);
-    }
-  }, []);
-
-  // Initial load - only critical data
+  // Initial load
   useEffect(() => {
-    fetchData(true); // true means skip secondary data initially
-  }, [fetchData]);
+    fetchData(1, pageSize, false);
+  }, []); // eslint-disable-line
+
+  // Re-fetch whenever filters change (debounced)
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    setCurrentPage(1);
+    const timer = setTimeout(() => {
+      fetchData(1, pageSize, true);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchText, startDate, endDate, activeTab, phoneSearch]);
 
   // Load articles only when needed (modal opens or search)
   const loadArticles = async (query = "", page = 1, limit = 15) => {
@@ -875,53 +919,6 @@ const Devis = () => {
   }, [modal]);
 
 
-  useEffect(() => {
-    let result = [...bonsCommande];
-
-    if (startDate && endDate) {
-      const start = moment(startDate).startOf("day");
-      const end = moment(endDate).endOf("day");
-      result = result.filter((bon) => {
-        const bonDate = moment(bon.dateCommande);
-        return bonDate.isBetween(start, end, null, "[]");
-      });
-    }
-
-    // Apply regular text search
-    if (searchText) {
-      const searchLower = searchText.toLowerCase().trim();
-
-      result = result.filter((bon) => {
-        const bonNumero = bon.numeroCommande?.toLowerCase() || "";
-        const clientName = bon.client?.raison_sociale?.toLowerCase() || "";
-        const clientDesignation = bon.client?.designation?.toLowerCase() || "";
-
-        return (
-          bonNumero.includes(searchLower) ||
-          clientName.includes(searchLower) ||
-          clientDesignation.includes(searchLower)
-        );
-      });
-    }
-
-    // Apply phone number search separately
-    if (phoneSearch) {
-      const cleanPhoneSearch = phoneSearch.replace(/\s/g, "").trim();
-
-      result = result.filter((bon) => {
-        if (!bon.client) return false;
-
-        const phone1 = bon.client.telephone1?.replace(/\s/g, "") || "";
-        const phone2 = bon.client.telephone2?.replace(/\s/g, "") || "";
-
-        return (
-          phone1.includes(cleanPhoneSearch) || phone2.includes(cleanPhoneSearch)
-        );
-      });
-    }
-
-    setFilteredBonsCommande(result);
-  }, [startDate, endDate, searchText, phoneSearch, bonsCommande]);
 
   const openDetailModal = (bonCommande: BonCommandeClient) => {
     setSelectedBonCommande(bonCommande);
@@ -1040,7 +1037,7 @@ const Devis = () => {
     try {
       await deleteDevis(bonCommande.id);
       setDeleteModal(false);
-      fetchData();
+      fetchData(currentPage, pageSize, true);
       toast.success("Devis supprimé avec succès");
     } catch (err) {
       toast.error(
@@ -1131,7 +1128,7 @@ const Devis = () => {
       }
 
       setModal(false);
-      fetchData();
+      fetchData(currentPage, pageSize, true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Échec de l'opération");
     }
@@ -1935,7 +1932,12 @@ const Devis = () => {
                     columns={columns}
                     data={filteredBonsCommande}
                     isGlobalFilter={false}
-                    customPageSize={10}
+                    isPagination={true}
+                    totalDataCount={totalCount}
+                    currentPage={currentPage - 1}
+                    onPageChange={(page) => fetchData(page + 1, pageSize, true)}
+                    onPageSizeChange={(size) => fetchData(1, size, true)}
+                    customPageSize={pageSize}
                     divClass="table-responsive table-card mb-1 mt-0"
                     tableClass="align-middle table-nowrap"
                     theadClass="table-light text-muted text-uppercase"
