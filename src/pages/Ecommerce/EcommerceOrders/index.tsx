@@ -74,7 +74,7 @@ const ArticlesList = () => {
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [totalArticles, setTotalArticles] = useState(0);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(10);
   const [debouncedSearchText, setDebouncedSearchText] = useState("");
   const [detailsModal, setDetailsModal] = useState(false);
   const [subcategories, setSubcategories] = useState<Categorie[]>([]);
@@ -512,7 +512,7 @@ const ArticlesList = () => {
         "3": "Non Consigné"
       };
 
-      const [articlesResponse, categoriesData, fournisseursData] =
+      const [articlesResponse] =
         await Promise.all([
           searchArticles({
             query: debouncedSearchText,
@@ -524,8 +524,6 @@ const ArticlesList = () => {
             sortBy: "article.id",
             sortOrder: "DESC"
           }),
-          fetchCategories(),
-          fetchFournisseurs(),
         ]);
 
       const formattedArticles = articlesResponse.articles.map((a: any) => ({
@@ -555,8 +553,6 @@ const ArticlesList = () => {
       setFilteredArticles(formattedArticles);
       setTotalArticles(articlesResponse.total);
       setTotalPages(articlesResponse.totalPages);
-      setCategories(categoriesData);
-      setFournisseurs(fournisseursData);
       setLoading(false);
     } catch (err) {
       setError(
@@ -569,6 +565,23 @@ const ArticlesList = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Fetch categories and fournisseurs only once on mount
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      try {
+        const [categoriesData, fournisseursData] = await Promise.all([
+          fetchCategories(),
+          fetchFournisseurs(),
+        ]);
+        setCategories(categoriesData);
+        setFournisseurs(fournisseursData);
+      } catch (err) {
+        console.error("Échec du chargement des métadonnées:", err);
+      }
+    };
+    fetchMetadata();
+  }, []);
 
 
   // Add this helper function near your other functions

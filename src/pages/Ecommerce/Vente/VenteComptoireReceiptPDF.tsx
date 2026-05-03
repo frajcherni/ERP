@@ -57,7 +57,7 @@ const styles = StyleSheet.create({
   infoLabel: {
     fontSize: 10,
     fontWeight: "bold",
-    marginBottom : 5
+    marginBottom: 5
   },
   divider: {
     borderBottom: "1pt solid #000",
@@ -127,8 +127,8 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   numeroCommande: {
-  fontSize: 11,
-},
+    fontSize: 11,
+  },
   paymentMethod: {
     marginTop: 4,
     padding: 3,
@@ -163,10 +163,10 @@ const styles = StyleSheet.create({
   },
 
   vendeurRow: {
-  marginTop: 4, // Ajustez cette valeur pour plus ou moins d'espace
-},
+    marginTop: 4, // Ajustez cette valeur pour plus ou moins d'espace
+  },
 
-  
+
 });
 
 interface VenteComptoireReceiptPDFProps {
@@ -224,7 +224,7 @@ const VenteComptoireReceiptPDF: React.FC<VenteComptoireReceiptPDFProps> = ({
       const qty = Number(article.quantite) || 0;
       const tvaRate = Number(article.tva) || 0;
       const remiseRate = Number(article.remise) || 0;
-      
+
       // Use prix_ttc if available, otherwise calculate from prixUnitaire
       const priceHT = Number(article.prixUnitaire) || 0;
       const priceTTC = Number(article.prix_ttc) || priceHT * (1 + tvaRate / 100);
@@ -258,18 +258,18 @@ const VenteComptoireReceiptPDF: React.FC<VenteComptoireReceiptPDFProps> = ({
       if (remiseType === "percentage") {
         discountAmountValue = Math.round(netHTValue * (globalRemise / 100) * 1000) / 1000;
         netHTAfterDiscount = Math.round((netHTValue - discountAmountValue) * 1000) / 1000;
-        
+
         const discountRatio = netHTAfterDiscount / netHTValue;
         totalTaxAfterDiscount = Math.round(totalTaxValue * discountRatio * 1000) / 1000;
-        
+
         finalTotalValue = Math.round((netHTAfterDiscount + totalTaxAfterDiscount) * 1000) / 1000;
-        
+
       } else if (remiseType === "fixed") {
         finalTotalValue = Math.round(Number(globalRemise) * 1000) / 1000;
-        
+
         const tvaToHtRatio = totalTaxValue / netHTValue;
         const htAfterDiscount = Math.round(finalTotalValue / (1 + tvaToHtRatio) * 1000) / 1000;
-        
+
         discountAmountValue = Math.round((netHTValue - htAfterDiscount) * 1000) / 1000;
         netHTAfterDiscount = htAfterDiscount;
         totalTaxAfterDiscount = Math.round(netHTAfterDiscount * tvaToHtRatio * 1000) / 1000;
@@ -309,21 +309,21 @@ const VenteComptoireReceiptPDF: React.FC<VenteComptoireReceiptPDFProps> = ({
         <Text style={styles.title}>REÇU DE VENTE</Text>
 
         {/* Receipt Information */}
-      {/* Receipt Information */}
-<View style={styles.receiptInfo}>
-  <View style={styles.infoRow}>
-    <Text style={styles.numeroCommande}>{bonCommande.numeroCommande}</Text>
-    <Text style={styles.dateboncommande}>
-      {moment(bonCommande.dateCommande).format("DD/MM/YYYY")}
-    </Text>
-  </View>
-  <View style={[styles.infoRow, styles.vendeurRow]}>
-    <Text>
-      <Text style={styles.infoLabel}>Vendeur: </Text>
-      {bonCommande.vendeur?.prenom} {bonCommande.vendeur?.nom}
-    </Text>
-  </View>
-</View>
+        {/* Receipt Information */}
+        <View style={styles.receiptInfo}>
+          <View style={styles.infoRow}>
+            <Text style={styles.numeroCommande}>{bonCommande.numeroCommande}</Text>
+            <Text style={styles.dateboncommande}>
+              {moment(bonCommande.dateCommande).format("DD/MM/YYYY")}
+            </Text>
+          </View>
+          <View style={[styles.infoRow, styles.vendeurRow]}>
+            <Text>
+              <Text style={styles.infoLabel}>Vendeur: </Text>
+              {bonCommande.vendeur?.prenom} {bonCommande.vendeur?.nom}
+            </Text>
+          </View>
+        </View>
 
         <View style={styles.divider} />
 
@@ -351,7 +351,7 @@ const VenteComptoireReceiptPDF: React.FC<VenteComptoireReceiptPDFProps> = ({
 
             // Use prix_ttc if available, otherwise calculate from prixUnitaire
             const priceTTC = Number(item.prix_ttc) || priceHT * (1 + tvaRate / 100);
-            
+
             // Calculate exactly like FactureVentePDF
             const montantNetHT = Math.round(qty * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
             const montantTTCLigne = Math.round(qty * priceTTC * 1000) / 1000;
@@ -400,7 +400,7 @@ const VenteComptoireReceiptPDF: React.FC<VenteComptoireReceiptPDFProps> = ({
             <Text style={styles.totalLabel}>Net H.T.:</Text>
             <Text style={styles.totalValue}>{totals.netHT.toFixed(3)} DT</Text>
           </View>
-          
+
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>TVA:</Text>
             <Text style={styles.totalValue}>
@@ -411,7 +411,7 @@ const VenteComptoireReceiptPDF: React.FC<VenteComptoireReceiptPDFProps> = ({
           {/* Show Total TTC avec "après remise" text when applicable */}
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>
-            Total TTC:
+              Total TTC:
             </Text>
             <Text style={styles.totalValue}>
               {totals.finalTotal.toFixed(3)} DT
@@ -425,51 +425,51 @@ const VenteComptoireReceiptPDF: React.FC<VenteComptoireReceiptPDFProps> = ({
           </View>
         </View>
 
-          <View style={styles.paymentMethod}>
-  {bonCommande.paymentMethods && bonCommande.paymentMethods.length > 0 ? (
-    <View>
-      {bonCommande.paymentMethods.map((payment, index) => {
-        // Helper to get display text based on payment method (without amount)
-        const getMethodText = (payment: any): string => {
-          switch (payment.method) {
-            case "especes":
-              return `ESPÈCES`;
-            case "cheque":
-              return `CHÈQUE${payment.numero ? ` N°${payment.numero}` : ""}${payment.banque ? ` (${payment.banque})` : ""}`;
-            case "virement":
-              return `VIREMENT${payment.numero ? ` N°${payment.numero}` : ""}`;
-            case "traite":
-              return `TRAITE${payment.numero ? ` N°${payment.numero}` : ""}${payment.dateEcheance ? ` Éch. ${moment(payment.dateEcheance).format("DD/MM/YY")}` : ""}`;
-            case "carte":
-            case "Carte Bancaire TPE":
-            case "tpe":
-              return `CARTE BANCAIRE (TPE)`;
-            default:
-              return payment.method.toUpperCase();
-          }
-        };
-        
-        return (
-          <Text key={payment.id} style={styles.paymentText}>
-            **** {getMethodText(payment)} ****
-          </Text>
-        );
-      })}
-    </View>
-  ) : (
-    <Text style={styles.paymentText}>
-      **** {(() => {
-        const method = bonCommande.modeReglement;
-        if (method === "especes") return `ESPÈCES`;
-        if (method === "cheque") return `CHÈQUE${bonCommande.numeroReglement ? ` N°${bonCommande.numeroReglement}` : ""}${bonCommande.banqueCheque ? ` (${bonCommande.banqueCheque})` : ""}`;
-        if (method === "virement") return `VIREMENT${bonCommande.numeroReglement ? ` N°${bonCommande.numeroReglement}` : ""}`;
-        if (method === "traite") return `TRAITE${bonCommande.numeroReglement ? ` N°${bonCommande.numeroReglement}` : ""}${bonCommande.dateEcheance ? ` Éch. ${moment(bonCommande.dateEcheance).format("DD/MM/YY")}` : ""}`;
-        if (method === "carte" ) return `CARTE BANCAIRE (TPE)`;
-        return `ESPÈCES`;
-      })()} ****
-    </Text>
-  )}
-          </View>
+        <View style={styles.paymentMethod}>
+          {bonCommande.paymentMethods && bonCommande.paymentMethods.length > 0 ? (
+            <View>
+              {bonCommande.paymentMethods.map((payment, index) => {
+                // Helper to get display text based on payment method (without amount)
+                const getMethodText = (payment: any): string => {
+                  switch (payment.method) {
+                    case "especes":
+                      return `ESPÈCES`;
+                    case "cheque":
+                      return `CHÈQUE${payment.numero ? ` N°${payment.numero}` : ""}${payment.banque ? ` (${payment.banque})` : ""}`;
+                    case "virement":
+                      return `VIREMENT${payment.numero ? ` N°${payment.numero}` : ""}`;
+                    case "traite":
+                      return `TRAITE${payment.numero ? ` N°${payment.numero}` : ""}${payment.dateEcheance ? ` Éch. ${moment(payment.dateEcheance).format("DD/MM/YY")}` : ""}`;
+                    case "carte":
+                    case "Carte Bancaire TPE":
+                    case "tpe":
+                      return `CARTE BANCAIRE (TPE)`;
+                    default:
+                      return payment.method.toUpperCase();
+                  }
+                };
+
+                return (
+                  <Text key={payment.id} style={styles.paymentText}>
+                    **** {getMethodText(payment)} ****
+                  </Text>
+                );
+              })}
+            </View>
+          ) : (
+            <Text style={styles.paymentText}>
+              **** {(() => {
+                const method = bonCommande.modeReglement;
+                if (method === "especes") return `ESPÈCES`;
+                if (method === "cheque") return `CHÈQUE${bonCommande.numeroReglement ? ` N°${bonCommande.numeroReglement}` : ""}${bonCommande.banqueCheque ? ` (${bonCommande.banqueCheque})` : ""}`;
+                if (method === "virement") return `VIREMENT${bonCommande.numeroReglement ? ` N°${bonCommande.numeroReglement}` : ""}`;
+                if (method === "traite") return `TRAITE${bonCommande.numeroReglement ? ` N°${bonCommande.numeroReglement}` : ""}${bonCommande.dateEcheance ? ` Éch. ${moment(bonCommande.dateEcheance).format("DD/MM/YY")}` : ""}`;
+                if (method === "carte") return `CARTE BANCAIRE (TPE)`;
+                return `ESPÈCES`;
+              })()} ****
+            </Text>
+          )}
+        </View>
 
         {/* Thank You Message */}
         <View style={styles.thankYou}>

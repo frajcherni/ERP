@@ -11,6 +11,7 @@ import {
 } from "@react-pdf/renderer";
 import moment from "moment";
 import { BonLivraison } from "../../../Components/Article/Interfaces";
+import { calculateDocumentTotals } from "../../../Utils/CalculationEngine";
 
 Font.register({
   family: "Open Sans",
@@ -319,88 +320,8 @@ const BonLivraisonPDF: React.FC<BonLivraisonPDFProps> = ({
   const isLinkedToBC = !!bonLivraison.bonCommandeClient;
   const hasDeliveryInfo = !!(bonLivraison.voiture || bonLivraison.serie || bonLivraison.chauffeur || bonLivraison.cin);
 
-  const calculateTotals = () => {
-    if (!bonLivraison?.articles || bonLivraison.articles.length === 0) {
-      return { sousTotalHT: 0, netHT: 0, totalTax: 0, grandTotal: 0, finalTotal: 0, discountAmount: 0 };
-    }
-    let sousTotalHTValue = 0;
-    let totalTaxValue = 0;
-    let grandTotalValue = 0;
-
-    bonLivraison.articles.forEach((article) => {
-      const qty = Number(article.quantite) || 0;
-      const articleRemise = Number(article.remise) || 0;
-      const tvaRate = Number(article.tva) || 0;
-      const unitHT = Number(article.prix_unitaire) || 0;
-      const unitTTC = Number(article.prix_ttc) || unitHT * (1 + tvaRate / 100);
-      const lineHT = Math.round(unitHT * 1000) / 1000;
-      const lineTTC = Math.round(unitTTC * 1000) / 1000;
-      const montantSousTotalHT = Math.round(qty * lineHT * 1000) / 1000;
-      const montantNetHTLigne = Math.round(qty * lineHT * (1 - articleRemise / 100) * 1000) / 1000;
-      const montantTTCLigne = Math.round(qty * lineTTC * 1000) / 1000;
-      const montantTVALigne = Math.round((montantTTCLigne - montantNetHTLigne) * 1000) / 1000;
-      sousTotalHTValue += montantSousTotalHT;
-      totalTaxValue += montantTVALigne;
-      grandTotalValue += montantTTCLigne;
-    });
-
-    sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
-    totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-    grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
-
-    let finalTotalValue = grandTotalValue;
-    let discountAmountValue = 0;
-    let netHTValue = sousTotalHTValue;
-
-    const remiseValue = Number(bonLivraison.remise) || 0;
-    const remiseTypeValue = bonLivraison.remiseType || "percentage";
-
-    if (remiseValue > 0) {
-      if (remiseTypeValue === "percentage") {
-        discountAmountValue = Math.round((sousTotalHTValue * remiseValue / 100) * 1000) / 1000;
-        netHTValue = sousTotalHTValue - discountAmountValue;
-        const tvaToHtRatio = sousTotalHTValue > 0 ? totalTaxValue / sousTotalHTValue : 0;
-        const newTVA = Math.round((netHTValue * tvaToHtRatio) * 1000) / 1000;
-        totalTaxValue = newTVA;
-        finalTotalValue = Math.round((netHTValue + newTVA) * 1000) / 1000;
-      } else if (remiseTypeValue === "fixed") {
-        finalTotalValue = Math.round(Number(remiseValue) * 1000) / 1000;
-        const tvaRates = Array.from(new Set(bonLivraison.articles.map(a => Number(a.tva) || 0)));
-        if (tvaRates.length === 1 && tvaRates[0] > 0) {
-          const tvaRate = tvaRates[0];
-          netHTValue = Math.round((finalTotalValue / (1 + tvaRate / 100)) * 1000) / 1000;
-          totalTaxValue = Math.round((finalTotalValue - netHTValue) * 1000) / 1000;
-        } else {
-          const discountCoefficient = grandTotalValue > 0 ? finalTotalValue / grandTotalValue : 0;
-          netHTValue = 0;
-          totalTaxValue = 0;
-          bonLivraison.articles.forEach((article) => {
-            const qty = Number(article.quantite) || 0;
-            const articleRemise = Number(article.remise) || 0;
-            const tvaRate = Number(article.tva) || 0;
-            const unitHT = Number(article.prix_unitaire) || 0;
-            const montantNetHTLigne = Math.round(qty * unitHT * (1 - articleRemise / 100) * 1000) / 1000;
-            const newLineHT = Math.round((montantNetHTLigne * discountCoefficient) * 1000) / 1000;
-            const newLineTVA = Math.round((newLineHT * (tvaRate / 100)) * 1000) / 1000;
-            netHTValue += newLineHT;
-            totalTaxValue += newLineTVA;
-          });
-          netHTValue = Math.round(netHTValue * 1000) / 1000;
-          totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-        }
-        discountAmountValue = Math.round((sousTotalHTValue - netHTValue) * 1000) / 1000;
-      }
-      netHTValue = Math.round(netHTValue * 1000) / 1000;
-      totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-      finalTotalValue = Math.round(finalTotalValue * 1000) / 1000;
-      discountAmountValue = Math.round(discountAmountValue * 1000) / 1000;
-    } else {
-      netHTValue = sousTotalHTValue;
-    }
-    return { sousTotalHT: sousTotalHTValue, netHT: netHTValue, totalTax: totalTaxValue, grandTotal: grandTotalValue, finalTotal: finalTotalValue, discountAmount: discountAmountValue };
-  };
-
-  const { sousTotalHT, netHT, totalTax, finalTotal, discountAmount } = calculateTotals();
+  const totals = calculateDocumentTotals(bonLivraison);
+  const { sousTotalHT, netHT, totalTax, finalTotal, discountAmount } = totals;
   const formatCurrency = (amount: number) => amount.toFixed(3);
 
   const numberToWords = (num: number): string => {

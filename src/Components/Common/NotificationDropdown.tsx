@@ -37,65 +37,21 @@ const NotificationDropdown = () => {
 
   // Charger les notifications
   useEffect(() => {
+    // Disabled as requested: getallboncommandeclient and getbonliv are not needed
+    /*
     const loadNotifications = async () => {
       try {
         const [bonsCommande, bonsLivraison] = await Promise.all([
           fetchBonsCommandeClient(),
           FetchBonLivraison()
         ]);
-
-        const today = moment().format('YYYY-MM-DD');
-        const newNotifications: any[] = [];
-
-        // Traiter les Bons de Commande
-        bonsCommande.forEach((bc: any) => {
-          if (bc.dateLivBonCommande === today && bc.status !== 'Annule' && bc.status !== 'Livre') {
-            newNotifications.push({
-              id: `bc-${bc.id}`,
-              title: 'Livraison prévue (Commande)',
-              description: `BC ${bc.numeroCommande} - ${bc.client?.raison_sociale || 'Client inconnu'}`,
-              time: 'Aujourd\'hui',
-              icon: 'bx-package',
-              color: 'primary',
-              link: '/CommandeClient'
-            });
-          }
-        });
-
-        // Traiter les Bons de Livraison
-        bonsLivraison.forEach((bl: any) => {
-          if (bl.dateLivraison === today && bl.status !== 'Annulee' && bl.status !== 'Livree') {
-            newNotifications.push({
-              id: `bl-${bl.id}`,
-              title: 'Livraison prévue (BL)',
-              description: `BL ${bl.numeroLivraison} - ${bl.client?.raison_sociale || 'Client inconnu'}`,
-              time: 'Aujourd\'hui',
-              icon: 'bx-truck',
-              color: 'success',
-              link: '/BonLivraison'
-            });
-          }
-        });
-
-        setNotificationsData(newNotifications);
-
-        // Gérer le statut "lu"
-        const readIdsJson = localStorage.getItem('read-notifications');
-        const readIds = readIdsJson ? JSON.parse(readIdsJson) : [];
-        const unread = newNotifications
-          .filter(n => !readIds.includes(n.id))
-          .map(n => n.id);
-        
-        setUnreadIds(new Set(unread));
-        setNotificationCount(unread.length);
+        // ... rest of the logic
       } catch (error) {
         console.error("Erreur lors du chargement des notifications:", error);
       }
     };
-
     loadNotifications();
-    // Rafraîchir toutes les 30 minutes (optionnel, mais l'utilisateur a dit "pas besoin de call chaque 1h")
-    // On peut le laisser juste au montage.
+    */
   }, []);
 
   // Marquer comme lu lors de l'ouverture

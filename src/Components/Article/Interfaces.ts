@@ -50,8 +50,9 @@ export interface FactureClient {
   }>;
   totalPaymentAmount?: number;
   createdAt: string;
-
   updatedAt: string;
+  lockedPercentage?: number | null;
+  locked_percentage?: number | null;
 }
 export interface Client {
   id: number;
@@ -273,6 +274,8 @@ export interface BonLivraison {
   paymentMethods?: any[];
   espaceNotes?: string;
   paiements?: PaiementClient[];
+  lockedPercentage?: number | null;
+  locked_percentage?: number | null;
 }
 
 
@@ -368,6 +371,8 @@ export interface BonCommandeClient {
     dateEcheance?: string;
   }>;
   totalPaymentAmount?: number;
+  lockedPercentage?: number | null;
+  locked_percentage?: number | null;
 
 }
 

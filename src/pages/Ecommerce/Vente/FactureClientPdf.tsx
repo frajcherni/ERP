@@ -10,6 +10,7 @@ import {
 } from "@react-pdf/renderer";
 import moment from "moment";
 import { FactureClient } from "../../../Components/Article/Interfaces";
+import { calculateDocumentTotals } from "../../../Utils/CalculationEngine";
 
 Font.register({
   family: "Open Sans",
@@ -337,167 +338,16 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
   // ─────────────────────────────────────────────
   // TOTALS CALCULATION
   // ─────────────────────────────────────────────
-  const calculateTotals = () => {
-    if (!facture?.articles || facture.articles.length === 0) {
-      return {
-        sousTotalHT: 0,
-        netHT: 0,
-        totalTax: 0,
-        grandTotal: 0,
-        finalTotal: 0,
-        discountAmount: 0,
-        tvaBreakdown: {} as { [key: number]: { base: number; montant: number } },
-      };
-    }
-
-    let sousTotalHTValue = 0;
-    let netHTBeforeGlobalRemise = 0;
-    let totalTaxValue = 0;
-    let grandTotalValue = 0;
-
-    const tvaBreakdownOriginal: { [key: number]: { base: number; montant: number } } = {};
-
-    facture.articles.forEach((article) => {
-      const qty = Number(article.quantite) || 0;
-      const articleRemise = Number(article.remise) || 0;
-      const tvaRate = Number(article.tva) || 0;
-      let unitHT = Number(article.prixUnitaire) || 0;
-      let unitTTC = Number(article.prix_ttc) || unitHT * (1 + tvaRate / 100);
-
-      const lineHT = Math.round(unitHT * 1000) / 1000;
-      const lineTTC = Math.round(unitTTC * 1000) / 1000;
-      const montantSousTotalHT = Math.round(qty * lineHT * 1000) / 1000;
-      const montantNetHTLigne = Math.round(qty * lineHT * (1 - articleRemise / 100) * 1000) / 1000;
-      const montantTTCLigne = Math.round(qty * lineTTC * 1000) / 1000;
-      const montantTVALigne = Math.round((montantTTCLigne - montantNetHTLigne) * 1000) / 1000;
-
-      sousTotalHTValue = Math.round((sousTotalHTValue + montantSousTotalHT) * 1000) / 1000;
-      netHTBeforeGlobalRemise = Math.round((netHTBeforeGlobalRemise + montantNetHTLigne) * 1000) / 1000;
-      totalTaxValue = Math.round((totalTaxValue + montantTVALigne) * 1000) / 1000;
-      grandTotalValue = Math.round((grandTotalValue + montantTTCLigne) * 1000) / 1000;
-
-      if (tvaRate > 0) {
-        if (!tvaBreakdownOriginal[tvaRate]) {
-          tvaBreakdownOriginal[tvaRate] = { base: 0, montant: 0 };
-        }
-        tvaBreakdownOriginal[tvaRate].base = Math.round((tvaBreakdownOriginal[tvaRate].base + montantNetHTLigne) * 1000) / 1000;
-        tvaBreakdownOriginal[tvaRate].montant = Math.round((tvaBreakdownOriginal[tvaRate].montant + montantTVALigne) * 1000) / 1000;
-      }
-    });
-
-    sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
-    netHTBeforeGlobalRemise = Math.round(netHTBeforeGlobalRemise * 1000) / 1000;
-    totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-    grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
-
-    let finalTotalValue = grandTotalValue;
-    let discountAmountValue = 0;
-    let netHTValue = netHTBeforeGlobalRemise;
-    let tvaBreakdownFinal: { [key: number]: { base: number; montant: number } } = {};
-
-    const remiseValue = Number(facture.remise) || 0;
-    const remiseTypeValue = facture.remiseType || "percentage";
-
-    if (remiseValue > 0) {
-      if (remiseTypeValue === "percentage") {
-        discountAmountValue = Math.round((netHTBeforeGlobalRemise * remiseValue / 100) * 1000) / 1000;
-        netHTValue = Math.round((netHTBeforeGlobalRemise - discountAmountValue) * 1000) / 1000;
-        const tvaToHtRatio = netHTBeforeGlobalRemise > 0 ? Math.round((totalTaxValue / netHTBeforeGlobalRemise) * 1000) / 1000 : 0;
-        const newTVA = Math.round((netHTValue * tvaToHtRatio) * 1000) / 1000;
-        totalTaxValue = newTVA;
-        finalTotalValue = Math.round((netHTValue + newTVA) * 1000) / 1000;
-        const discountRatio = netHTBeforeGlobalRemise > 0 ? netHTValue / netHTBeforeGlobalRemise : 1;
-        Object.keys(tvaBreakdownOriginal).forEach(rate => {
-          const tvaRate = parseFloat(rate);
-          tvaBreakdownFinal[tvaRate] = {
-            base: Math.round((tvaBreakdownOriginal[tvaRate].base * discountRatio) * 1000) / 1000,
-            montant: Math.round((tvaBreakdownOriginal[tvaRate].montant * discountRatio) * 1000) / 1000,
-          };
-        });
-      } else if (remiseTypeValue === "fixed") {
-        finalTotalValue = Math.round(Number(remiseValue) * 1000) / 1000;
-        const tvaRates = Array.from(new Set(facture.articles.map((a: any) => Number(a.tva) || 0)));
-        if (tvaRates.length === 1 && tvaRates[0] > 0) {
-          const tvaRate = tvaRates[0];
-          netHTValue = Math.round((finalTotalValue / (1 + tvaRate / 100)) * 1000) / 1000;
-          totalTaxValue = Math.round((finalTotalValue - netHTValue) * 1000) / 1000;
-          tvaBreakdownFinal[tvaRate] = { base: netHTValue, montant: totalTaxValue };
-        } else {
-          const discountCoefficient = grandTotalValue > 0 ? finalTotalValue / grandTotalValue : 0;
-          let newTotalHT = 0;
-          let newTotalTVA = 0;
-          facture.articles.forEach((article: any) => {
-            const qty = Number(article.quantite) || 0;
-            const articleRemise = Number(article.remise) || 0;
-            const tvaRate = Number(article.tva) || 0;
-            const unitHT = Number(article.prixUnitaire) || 0;
-            
-            const lineHTAfterDiscount = qty * unitHT * (1 - articleRemise / 100);
-            const newLineHT = lineHTAfterDiscount * discountCoefficient;
-            const newLineTVA = newLineHT * (tvaRate / 100);
-
-            newTotalHT += newLineHT;
-            newTotalTVA += newLineTVA;
-
-            if (tvaRate > 0) {
-              if (!tvaBreakdownFinal[tvaRate]) {
-                tvaBreakdownFinal[tvaRate] = { base: 0, montant: 0 };
-              }
-              tvaBreakdownFinal[tvaRate].base += newLineHT;
-              tvaBreakdownFinal[tvaRate].montant += newLineTVA;
-            }
-          });
-          netHTValue = Math.round(newTotalHT * 1000) / 1000;
-          totalTaxValue = Math.round(newTotalTVA * 1000) / 1000;
-          
-          // Final rounding for breakdown
-          Object.keys(tvaBreakdownFinal).forEach(rate => {
-            const r = parseFloat(rate);
-            tvaBreakdownFinal[r].base = Math.round(tvaBreakdownFinal[r].base * 1000) / 1000;
-            tvaBreakdownFinal[r].montant = Math.round(tvaBreakdownFinal[r].montant * 1000) / 1000;
-          });
-          netHTValue = Math.round(netHTValue * 1000) / 1000;
-          totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-        }
-        discountAmountValue = Math.round((sousTotalHTValue - netHTValue) * 1000) / 1000;
-      }
-      netHTValue = Math.round(netHTValue * 1000) / 1000;
-      totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-      finalTotalValue = Math.round(finalTotalValue * 1000) / 1000;
-      discountAmountValue = Math.round(discountAmountValue * 1000) / 1000;
-    } else {
-      netHTValue = sousTotalHTValue;
-      tvaBreakdownFinal = { ...tvaBreakdownOriginal };
-    }
-
-    if (exoneration) {
-      totalTaxValue = 0;
-      finalTotalValue = netHTValue;
-    }
-
-    if (facture.timbreFiscal) {
-      finalTotalValue = Math.round((finalTotalValue + 1) * 1000) / 1000;
-    }
-
-    return {
-      sousTotalHT: Math.round(sousTotalHTValue * 1000) / 1000,
-      netHT: Math.round(netHTValue * 1000) / 1000,
-      totalTax: Math.round(totalTaxValue * 1000) / 1000,
-      grandTotal: Math.round(grandTotalValue * 1000) / 1000,
-      finalTotal: Math.round(finalTotalValue * 1000) / 1000,
-      discountAmount: Math.round(discountAmountValue * 1000) / 1000,
-      tvaBreakdown: tvaBreakdownFinal,
-    };
-  };
-
+  const totals = calculateDocumentTotals(facture, { isCreatingFacture: true });
   const {
     sousTotalHT,
     netHT,
     totalTax,
     finalTotal,
     discountAmount,
-    tvaBreakdown,
-  } = calculateTotals();
+    tvaBreakdown = {},
+  } = totals as any;
+
 
   // ─────────────────────────────────────────────
   // HELPERS

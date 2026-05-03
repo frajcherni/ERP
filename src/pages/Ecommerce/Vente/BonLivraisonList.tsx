@@ -38,6 +38,7 @@ import DeleteModal from "../../../Components/Common/DeleteModal";
 import Loader from "../../../Components/Common/Loader";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import { calculateDocumentTotals } from "../../../Utils/CalculationEngine";
 import * as Yup from "yup";
 import { useFormik } from "formik";
 import moment from "moment";
@@ -109,6 +110,7 @@ const BonLivraisonList = () => {
   const [bonsCommande, setBonsCommande] = useState<BonCommandeClient[]>([]);
   const [isEdit, setIsEdit] = useState(false);
   const [isCreatingFacture, setIsCreatingFacture] = useState(false);
+  const [exoneration, setExoneration] = useState<boolean>(false);
   const [deleteModal, setDeleteModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -132,76 +134,14 @@ const BonLivraisonList = () => {
 
   const calculateEffectiveTotal = useCallback((bon: any) => {
     if (!bon) return 0;
-    const articles = bon.articles || [];
-    const remiseValue = Number(bon.remise) || 0;
-    const remiseTypeValue = bon.remiseType || "percentage";
-
-    if (articles.length === 0) return 0;
-
-    let netHTBeforeGlobalRemise = 0;
-    let totalTaxValue = 0;
-    let grandTotalValue = 0;
-
-    articles.forEach((article: any) => {
-      const qty = Number(article.quantite) || 0;
-      const articleRemise = Number(article.remise) || 0;
-      let unitHT = Number(article.prix_unitaire || article.prixUnitaire) || 0;
-      let unitTTC = Number(article.prix_ttc || article.prixTTC) || 0;
-
-      if (unitTTC === 0) {
-        const tvaRate = Number(article.tva) || 0;
-        unitTTC = unitHT * (1 + tvaRate / 100);
-      }
-
-      unitHT = Math.round(unitHT * 1000) / 1000;
-      unitTTC = Math.round(unitTTC * 1000) / 1000;
-
-      const lineHT = Math.round(unitHT * 1000) / 1000;
-      const lineTTC = Math.round(unitTTC * 1000) / 1000;
-
-      const montantNetHTLigne =
-        Math.round(qty * lineHT * (1 - articleRemise / 100) * 1000) / 1000;
-      const montantTTCLigne = Math.round(qty * lineTTC * 1000) / 1000;
-      const montantTVALigne =
-        Math.round((montantTTCLigne - montantNetHTLigne) * 1000) / 1000;
-
-      netHTBeforeGlobalRemise =
-        Math.round((netHTBeforeGlobalRemise + montantNetHTLigne) * 1000) / 1000;
-      totalTaxValue = Math.round((totalTaxValue + montantTVALigne) * 1000) / 1000;
-      grandTotalValue =
-        Math.round((grandTotalValue + montantTTCLigne) * 1000) / 1000;
+    const totals = calculateDocumentTotals({
+      articles: bon.articles || [],
+      remise: bon.remise || 0,
+      remiseType: bon.remiseType || "percentage",
+      exoneration: bon.exoneration === "OUI" || bon.exoneration === true,
+      timbreFiscal: (bon as any).timbreFiscal || false
     });
-
-    let finalTotalValue = grandTotalValue;
-
-    if (remiseValue > 0) {
-      if (remiseTypeValue === "percentage") {
-        const discountAmountValue =
-          Math.round(netHTBeforeGlobalRemise * (remiseValue / 100) * 1000) /
-          1000;
-        const netHTAfterGlobalRemise =
-          Math.round((netHTBeforeGlobalRemise - discountAmountValue) * 1000) /
-          1000;
-        let totalTaxAfterGlobalRemise = totalTaxValue;
-
-        if (netHTBeforeGlobalRemise > 0) {
-          const tvaToHtRatio =
-            Math.round((totalTaxValue / netHTBeforeGlobalRemise) * 1000) / 1000;
-          totalTaxAfterGlobalRemise =
-            Math.round(netHTAfterGlobalRemise * tvaToHtRatio * 1000) / 1000;
-        } else {
-          totalTaxAfterGlobalRemise = 0;
-        }
-        finalTotalValue =
-          Math.round(
-            (netHTAfterGlobalRemise + totalTaxAfterGlobalRemise) * 1000
-          ) / 1000;
-      } else if (remiseTypeValue === "fixed") {
-        finalTotalValue = Math.round(remiseValue * 1000) / 1000;
-      }
-    }
-
-    return Math.round(finalTotalValue * 1000) / 1000;
+    return totals.finalTotal;
   }, []);
 
   const calculateTotalPaid = useCallback((bon: any) => {
@@ -1158,9 +1098,9 @@ const BonLivraisonList = () => {
     if (modal || articleSearch) {
       setArticlesLoading(true);
       try {
-        const result = await searchArticles({ 
-          query, 
-          page, 
+        const result = await searchArticles({
+          query,
+          page,
           limit,
           depot_id: selectedDepot?.id
         });
@@ -1289,242 +1229,54 @@ const BonLivraisonList = () => {
     retentionMontant,
     netAPayer,
   } = useMemo(() => {
-    if (selectedArticles.length === 0) {
-      return {
-        sousTotalHT: 0,
-        netHT: 0,
-        totalTax: 0,
-        grandTotal: 0,
-        finalTotal: 0,
-        discountAmount: 0,
-        discountPercentage: 0,
-        retentionMontant: 0,
-        netAPayer: 0,
-      };
-    }
-
-    let sousTotalHTValue = 0;
-    let netHTBeforeGlobalRemise = 0;
-    let totalTaxValue = 0;
-    let grandTotalValue = 0;
-
-    // ✅ STEP 1: Calculate totals WITHOUT considering global remise
-    selectedArticles.forEach((article) => {
-      const qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
-      const articleRemise = Number(article.remise) || 0;
-
-      // Get unit prices with proper handling of editing
-      let unitHT = Number(article.prixUnitaire) || 0;
-      let unitTTC = Number(article.prixTTC) || 0;
-
-      // Handle manual editing
-      if (editingHT[article.article_id] !== undefined) {
-        const editingValue = parseNumericInput(editingHT[article.article_id]);
-        if (!isNaN(editingValue) && editingValue >= 0) {
-          unitHT = editingValue;
-          // Recalculate TTC based on TVA rate
-          const tvaRate = Number(article.tva) || 0;
-          if (tvaRate > 0) {
-            const tvaAmount = (unitHT * tvaRate) / 100;
-            unitTTC = Math.round((unitHT + tvaAmount) * 1000) / 1000;
-          } else {
-            unitTTC = unitHT;
-          }
-        }
-      } else if (editingTTC[article.article_id] !== undefined) {
-        const editingValue = parseNumericInput(editingTTC[article.article_id]);
-        if (!isNaN(editingValue) && editingValue >= 0) {
-          unitTTC = editingValue;
-          // Recalculate HT based on TVA rate
-          const tvaRate = Number(article.tva) || 0;
-          if (tvaRate > 0) {
-            const coefficient = Math.round((1 + tvaRate / 100) * 1000) / 1000;
-            unitHT = Math.round((unitTTC / coefficient) * 1000) / 1000;
-          } else {
-            unitHT = unitTTC;
-          }
-        }
+    return calculateDocumentTotals(
+      {
+        articles: selectedArticles,
+        remise: globalRemise,
+        remiseType,
+        exoneration,
+        timbreFiscal,
+        methodesReglement,
+      },
+      {
+        editingHT,
+        editingTTC,
+        lockedPercentage,
       }
-
-      // Calculate line amounts
-      const lineHT = Math.round(unitHT * 1000) / 1000;
-      const lineTTC = Math.round(unitTTC * 1000) / 1000;
-
-      const montantSousTotalHT = Math.round(qty * lineHT * 1000) / 1000;
-      const montantNetHTLigne = Math.round(
-        qty * lineHT * (1 - articleRemise / 100) * 1000
-      ) / 1000;
-      const montantTTCLigne = Math.round(qty * lineTTC * 1000) / 1000;
-      const montantTVALigne = Math.round(
-        (montantTTCLigne - montantNetHTLigne) * 1000
-      ) / 1000;
-
-      sousTotalHTValue = Math.round(
-        (sousTotalHTValue + montantSousTotalHT) * 1000
-      ) / 1000;
-      netHTBeforeGlobalRemise = Math.round(
-        (netHTBeforeGlobalRemise + montantNetHTLigne) * 1000
-      ) / 1000;
-      totalTaxValue = Math.round((totalTaxValue + montantTVALigne) * 1000) / 1000;
-      grandTotalValue = Math.round(
-        (grandTotalValue + montantTTCLigne) * 1000
-      ) / 1000;
-    });
-
-    // ✅ STEP 2: Apply global remise according to principle (EXACT SAME AS FACTURE)
-    let netHTAfterGlobalRemise = netHTBeforeGlobalRemise;
-    let totalTaxAfterGlobalRemise = totalTaxValue;
-    let finalTotalValue = grandTotalValue;
-    let discountAmountValue = 0;
-    let discountPercentageValue = 0;
-
-    if (showRemise && Number(globalRemise) > 0) {
-      if (remiseType === "percentage") {
-        // ✅ Percentage remise: Apply on HT base
-        discountAmountValue = Math.round(
-          netHTBeforeGlobalRemise * (Number(globalRemise) / 100) * 1000
-        ) / 1000;
-        netHTAfterGlobalRemise = Math.round(
-          (netHTBeforeGlobalRemise - discountAmountValue) * 1000
-        ) / 1000;
-
-        // ✅ Recalculate TVA proportionally
-        if (netHTBeforeGlobalRemise > 0) {
-          const tvaToHtRatio = Math.round(
-            (totalTaxValue / netHTBeforeGlobalRemise) * 1000
-          ) / 1000;
-          totalTaxAfterGlobalRemise = Math.round(
-            netHTAfterGlobalRemise * tvaToHtRatio * 1000
-          ) / 1000;
-        } else {
-          totalTaxAfterGlobalRemise = 0;
-        }
-
-        finalTotalValue = Math.round(
-          (netHTAfterGlobalRemise + totalTaxAfterGlobalRemise) * 1000
-        ) / 1000;
-      } else if (remiseType === "fixed") {
-        // ✅ Fixed remise: User enters the final TTC amount (EXACT SAME AS FACTURE)
-        finalTotalValue = Math.round(Number(globalRemise) * 1000) / 1000;
-
-        // ✅ CHECK IF SINGLE OR MULTIPLE TVA RATES
-        const uniqueTvaRates = Array.from(
-          new Set(selectedArticles.map((a) => Number(a.tva) || 0))
-        );
-
-        if (uniqueTvaRates.length === 1 && uniqueTvaRates[0] > 0) {
-          // ✅ SINGLE TVA RATE FORMULA: Net HT = TTC / (1 + TVA rate)
-          const tvaRate = uniqueTvaRates[0] / 100;
-          netHTAfterGlobalRemise = Math.round((finalTotalValue / (1 + tvaRate)) * 1000) / 1000;
-          totalTaxAfterGlobalRemise = Math.round((finalTotalValue - netHTAfterGlobalRemise) * 1000) / 1000;
-        } else {
-          // ✅ MULTIPLE TVA RATES: EXACT SAME CALCULATION AS FACTURE
-          const discountCoefficient = finalTotalValue / grandTotalValue;
-
-          let newTotalHT = 0;
-          let newTotalTVA = 0;
-
-          selectedArticles.forEach((article) => {
-            const qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
-            const articleRemise = Number(article.remise) || 0;
-            const unitHT = Number(article.prixUnitaire) || 0;
-            const tvaRate = Number(article.tva) || 0;
-
-            const lineHTAfterDiscount = qty * unitHT * (1 - articleRemise / 100);
-            const newLineHT = lineHTAfterDiscount * discountCoefficient;
-            const newLineTVA = newLineHT * (tvaRate / 100);
-
-            newTotalHT += newLineHT;
-            newTotalTVA += newLineTVA;
-          });
-
-          netHTAfterGlobalRemise = Math.round(newTotalHT * 1000) / 1000;
-          totalTaxAfterGlobalRemise = Math.round(newTotalTVA * 1000) / 1000;
-        }
-
-        discountAmountValue = Math.round(
-          (netHTBeforeGlobalRemise - netHTAfterGlobalRemise) * 1000
-        ) / 1000;
-
-        // Calculate discount percentage for display
-        if (netHTBeforeGlobalRemise > 0 && discountAmountValue > 0.001) {
-          discountPercentageValue = Math.round(
-            (discountAmountValue / netHTBeforeGlobalRemise) * 100 * 1000
-          ) / 1000;
-        } else {
-          discountPercentageValue = 0;
-          // If discount is not valid (negative or zero), ensure totals don't reflect a "negative discount"
-          if (discountAmountValue <= 0) {
-            netHTAfterGlobalRemise = netHTBeforeGlobalRemise;
-            totalTaxAfterGlobalRemise = totalTaxValue;
-            finalTotalValue = grandTotalValue;
-            discountAmountValue = 0;
-          }
-        }
-      }
-    }
-
-    // ✅ STEP 3: Calculate timbre fiscal if applicable
-    let timbreAmount = 0;
-    if (isCreatingFacture && timbreFiscal) {
-      timbreAmount = 1.000;
-      finalTotalValue = Math.round((finalTotalValue + timbreAmount) * 1000) / 1000;
-    }
-
-    // ✅ STEP 4: Calculate retention based on the final total
-    let calculatedRetention = 0;
-    if (methodesReglement) {
-      const retentionMethod = methodesReglement.find(
-        (m) => m.method === "retenue"
-      );
-      if (retentionMethod) {
-        calculatedRetention =
-          (finalTotalValue * (retentionMethod.tauxRetention || 1)) / 100;
-      }
-    }
-
-    const netAPayerValue = finalTotalValue;
-
-    return {
-      sousTotalHT: sousTotalHTValue,
-      netHT:
-        showRemise && Number(globalRemise) > 0
-          ? netHTAfterGlobalRemise
-          : netHTBeforeGlobalRemise,
-      totalTax:
-        showRemise && Number(globalRemise) > 0
-          ? totalTaxAfterGlobalRemise
-          : totalTaxValue,
-      grandTotal: grandTotalValue,
-      finalTotal: finalTotalValue,
-      discountAmount: discountAmountValue,
-      discountPercentage: discountPercentageValue,
-      retentionMontant: calculatedRetention,
-      netAPayer: netAPayerValue,
-    };
+    );
   }, [
     selectedArticles,
-    showRemise,
     globalRemise,
     remiseType,
-    editingHT,
-    editingTTC,
-    isCreatingFacture,
+    exoneration,
     timbreFiscal,
     methodesReglement,
+    editingHT,
+    editingTTC,
+    lockedPercentage,
   ]);
+
+  // Calculate discount percentage for display
+
+
+  // Use a ref to track grandTotal to only trigger proportionality on actual item changes
+  const lastGrandTotalRef = useRef(grandTotal);
 
   // STEP 4: Auto-update global remise if locked percentage exists
   // This effect ensures that a "Fixed" amount remains proportional to the items
   useEffect(() => {
-    if (remiseType === "fixed" && lockedPercentage !== null && grandTotal > 0) {
-      const newTargetNet = grandTotal * (1 - lockedPercentage / 100);
-      const roundedTargetNet = Math.round(newTargetNet * 1000) / 1000;
-      if (Math.abs(globalRemise - roundedTargetNet) > 0.001) {
-        setGlobalRemise(roundedTargetNet);
+    // Only run if the total has actually changed (items added/removed/quantities changed)
+    if (Math.abs(lastGrandTotalRef.current - grandTotal) > 0.001) {
+      if (remiseType === "fixed" && lockedPercentage !== null && grandTotal > 0) {
+        const newTargetNet = grandTotal * (1 - lockedPercentage / 100);
+        const roundedTargetNet = Math.round(newTargetNet * 1000) / 1000;
+        if (Math.abs(globalRemise - roundedTargetNet) > 0.001) {
+          setGlobalRemise(roundedTargetNet);
+        }
       }
+      lastGrandTotalRef.current = grandTotal;
     }
-  }, [grandTotal, remiseType, lockedPercentage]);
+  }, [grandTotal, remiseType, lockedPercentage, globalRemise]);
 
 
   const handleDelete = async () => {
@@ -1789,19 +1541,26 @@ const BonLivraisonList = () => {
           designation: item.designation || "", // Add this line
 
         })),
-        remise: (remiseType === "fixed" && lockedPercentage !== null) ? lockedPercentage : globalRemise,
-        remiseType: (remiseType === "fixed" && lockedPercentage !== null) ? "percentage" : remiseType,
+        remise: globalRemise,
+        remiseType: remiseType,
+        lockedPercentage: lockedPercentage,
         bonCommandeClient_id: selectedBonCommande?.id || null,
         totalHT: netHT,
         totalTVA: totalTax,
         totalTTC: grandTotal,
         totalTTCAfterRemise: finalTotal,
-        montantPaye: isEdit && bonLivraison ? getSafeNumber(bonLivraison.montantPaye) : 0,
-        resteAPayer: finalTotal - (isEdit && bonLivraison ? getSafeNumber(bonLivraison.montantPaye) : 0),
-        hasPayments: isEdit && bonLivraison ? (bonLivraison.hasPayments || false) : false,
-        totalPaymentAmount: isEdit && bonLivraison ? getSafeNumber(bonLivraison.totalPaymentAmount) : 0,
-        hasRetenue: isEdit && bonLivraison ? (bonLivraison.hasRetenue || false) : false,
-        montantRetenue: isEdit && bonLivraison ? getSafeNumber(bonLivraison.montantRetenue) : 0,
+        montantPaye: isCreatingFacture ? 0 : processedMethodesReglement
+          .filter(pm => pm.method !== "retenue")
+          .reduce((sum, pm) => sum + pm.amount, 0),
+        resteAPayer: finalTotal - (isCreatingFacture ? 0 : processedMethodesReglement
+          .filter(pm => pm.method !== "retenue")
+          .reduce((sum, pm) => sum + pm.amount, 0)),
+        hasPayments: isCreatingFacture ? false : processedMethodesReglement.some(pm => pm.method !== "retenue"),
+        totalPaymentAmount: isCreatingFacture ? 0 : processedMethodesReglement
+          .filter(pm => pm.method !== "retenue")
+          .reduce((sum, pm) => sum + pm.amount, 0),
+        hasRetenue: isCreatingFacture ? false : processedMethodesReglement.some(pm => pm.method === "retenue"),
+        montantRetenue: isCreatingFacture ? 0 : getSafeNumber(retentionMontant),
         timbreFiscal: isCreatingFacture ? (timbreFiscal ?? false) : false,
         paymentMethods: isCreatingFacture ? [] : processedMethodesReglement,
         espaceNotes: isCreatingFacture ? "" : (espaceNotes || ""),
@@ -2268,13 +2027,17 @@ const BonLivraisonList = () => {
     );
 
     // FIXED: Convert fixed target net to percentage to avoid "big mistake" on partial delivery
-    const bcTotalTTC = bon.articles.reduce((sum: number, item: any) => {
-      const qty = Number(item.quantite) || 0;
-      const unitHT = Number(item.prixUnitaire) || 0;
-      const tvaRate = Number(item.tva) || 0;
-      const priceTTC = Number(item.prix_ttc) || (unitHT * (1 + tvaRate / 100));
-      return sum + (qty * priceTTC);
-    }, 0);
+    // FIXED: Convert fixed target net to percentage using high-precision engine
+    const bcTotals = calculateDocumentTotals({
+      articles: bon.articles.map((a: any) => ({
+        ...a,
+        prixUnitaire: a.prixUnitaire,
+        prixTTC: a.prix_ttc || (a.prixUnitaire * (1 + (a.tva || 0) / 100))
+      })),
+      remise: 0,
+      remiseType: "percentage"
+    });
+    const bcTotalTTC = bcTotals.grandTotal;
     const bcTargetNet = Number(bon.remise) || 0;
 
     if (bon.remiseType === "fixed" && bcTotalTTC > 0 && bcTargetNet > 0 && bcTargetNet < bcTotalTTC) {
@@ -2347,21 +2110,14 @@ const BonLivraisonList = () => {
         accessorKey: "articles",
         enableColumnFilter: false,
         cell: (cell: any) => {
-          const total = cell.getValue().reduce((sum: number, item: any) => {
-            const qty = Number(item.quantite) || 1;
-            // USE prix_ttc FROM DATABASE OR CALCULATE
-            const priceTTC =
-              Number(item.prix_ttc) ||
-              Number(item.prixUnitaire) * (1 + (item.tva || 0) / 100);
-            const remiseRate = Number(item.remise || 0);
-
-            const montantHTLigne =
-              qty * Number(item.prixUnitaire) * (1 - remiseRate / 100);
-            const montantTTCLigne = qty * priceTTC;
-
-            return sum + montantTTCLigne;
-          }, 0);
-          return `${total.toFixed(3)} DT`;
+          const bon = cell.row.original;
+          const totals = calculateDocumentTotals({
+            articles: bon.articles || [],
+            remise: 0,
+            remiseType: "percentage",
+            exoneration: bon.exoneration === "OUI" || bon.exoneration === true
+          });
+          return `${totals.grandTotal.toFixed(3)} DT`;
         },
       },
       {
@@ -2369,33 +2125,8 @@ const BonLivraisonList = () => {
         accessorKey: "articles",
         enableColumnFilter: false,
         cell: (cell: any) => {
-          const total = cell.getValue().reduce((sum: number, item: any) => {
-            const qty = Number(item.quantite) || 1;
-            // USE prix_ttc FROM DATABASE OR CALCULATE (SAME AS TOTAL TTC)
-            const priceTTC =
-              Number(item.prix_ttc) ||
-              Number(item.prixUnitaire) * (1 + (item.tva || 0) / 100);
-            const remiseRate = Number(item.remise || 0);
-
-            // Use prix_ttc for calculation (consistent with Total TTC)
-            const montantTTCLigne = qty * priceTTC;
-
-            return sum + montantTTCLigne;
-          }, 0);
-
-          const globalDiscount = Number(cell.row.original.remise) || 0;
-          const discountType = cell.row.original.remiseType || "percentage";
-
-          let netAPayer = total;
-          if (globalDiscount > 0) {
-            if (discountType === "percentage") {
-              netAPayer = total * (1 - globalDiscount / 100);
-            } else {
-              netAPayer = globalDiscount;
-            }
-          }
-
-          return `${netAPayer.toFixed(3)} DT`;
+          const total = calculateEffectiveTotal(cell.row.original);
+          return `${total.toFixed(3)} DT`;
         },
       },
       {
@@ -2520,6 +2251,11 @@ const BonLivraisonList = () => {
                     setSelectedClient(cellProps.row.original.client || null);
                     setSelectedDepot(cellProps.row.original.depot || null);
                     setIsEdit(true);
+                    setLockedPercentage(
+                      cellProps.row.original.lockedPercentage ||
+                      cellProps.row.original.locked_percentage ||
+                      null
+                    );
                     setModal(true);
                   }}
                 >
@@ -3842,163 +3578,34 @@ const BonLivraisonList = () => {
                                       );
                                     }
 
-                                    let sousTotalHTValue = 0;
-                                    let netHTBeforeGlobalRemise = 0;
-                                    let totalTaxValue = 0;
-                                    let grandTotalValue = 0;
-
-                                    // STEP 1: Calculate totals WITHOUT considering global remise
-                                    articles.forEach((article) => {
-                                      const qty = Number(article.quantite) || 0;
-                                      const articleRemise = Number(article.remise) || 0;
-
-                                      // Get unit prices
-                                      let unitHT = Number(article.prix_unitaire) || 0;
-                                      let unitTTC = Number(article.prix_ttc) || 0;
-
-                                      // Handle if prix_ttc is not in database
-                                      if (unitTTC === 0) {
-                                        const tvaRate = Number(article.tva) || 0;
-                                        unitTTC = unitHT * (1 + tvaRate / 100);
+                                    const totals = calculateDocumentTotals(
+                                      {
+                                        articles: articles.map((a: any) => ({
+                                          ...a,
+                                          prixUnitaire: a.prix_unitaire,
+                                          prixTTC: a.prix_ttc || (a.prix_unitaire * (1 + (a.tva || 0) / 100))
+                                        })),
+                                        remise: remiseValue,
+                                        remiseType: remiseTypeValue,
+                                        exoneration: !!(selectedBonLivraison.client as any)?.exoneration || (selectedBonLivraison.client as any)?.exoneration === "Oui",
+                                        timbreFiscal: false, // Timbre fiscal usually not on BL unless it's a factura
+                                        methodesReglement: selectedBonLivraison.paymentMethods || [],
                                       }
+                                    );
 
-                                      // Apply proper rounding
-                                      unitHT = Math.round(unitHT * 1000) / 1000;
-                                      unitTTC = Math.round(unitTTC * 1000) / 1000;
+                                    const {
+                                      sousTotalHT: sousTotalHTValue,
+                                      netHT: netHTAfterGlobalRemise,
+                                      totalTax: totalTaxAfterGlobalRemise,
+                                      grandTotal: grandTotalValue,
+                                      finalTotal: finalTotalValue,
+                                      discountAmount: discountAmountValue,
+                                      discountPercentage: discountPercentageValue,
+                                    } = totals;
 
-                                      // Calculate line amounts
-                                      const lineHT = Math.round(unitHT * 1000) / 1000;
-                                      const lineTTC = Math.round(unitTTC * 1000) / 1000;
-
-                                      const montantSousTotalHT = Math.round(qty * lineHT * 1000) / 1000;
-                                      const montantNetHTLigne = Math.round(
-                                        qty * lineHT * (1 - articleRemise / 100) * 1000
-                                      ) / 1000;
-                                      const montantTTCLigne = Math.round(qty * lineTTC * 1000) / 1000;
-                                      const montantTVALigne = Math.round(
-                                        (montantTTCLigne - montantNetHTLigne) * 1000
-                                      ) / 1000;
-
-                                      sousTotalHTValue = Math.round(
-                                        (sousTotalHTValue + montantSousTotalHT) * 1000
-                                      ) / 1000;
-                                      netHTBeforeGlobalRemise = Math.round(
-                                        (netHTBeforeGlobalRemise + montantNetHTLigne) * 1000
-                                      ) / 1000;
-                                      totalTaxValue = Math.round((totalTaxValue + montantTVALigne) * 1000) / 1000;
-                                      grandTotalValue = Math.round(
-                                        (grandTotalValue + montantTTCLigne) * 1000
-                                      ) / 1000;
-                                    });
-
-                                    // STEP 2: Apply global remise according to principle (EXACT SAME AS useMemo)
-                                    let netHTAfterGlobalRemise = netHTBeforeGlobalRemise;
-                                    let totalTaxAfterGlobalRemise = totalTaxValue;
-                                    let finalTotalValue = grandTotalValue;
-                                    let discountAmountValue = 0;
-                                    let discountPercentageValue = 0;
-
-                                    if (remiseValue > 0) {
-                                      if (remiseTypeValue === "percentage") {
-                                        discountPercentageValue = remiseValue;
-                                        // ✅ Percentage remise: Apply on HT base
-                                        discountAmountValue = Math.round(
-                                          netHTBeforeGlobalRemise * (remiseValue / 100) * 1000
-                                        ) / 1000;
-                                        netHTAfterGlobalRemise = Math.round(
-                                          (netHTBeforeGlobalRemise - discountAmountValue) * 1000
-                                        ) / 1000;
-
-                                        // ✅ Recalculate TVA proportionally
-                                        if (netHTBeforeGlobalRemise > 0) {
-                                          const tvaToHtRatio = Math.round(
-                                            (totalTaxValue / netHTBeforeGlobalRemise) * 1000
-                                          ) / 1000;
-                                          totalTaxAfterGlobalRemise = Math.round(
-                                            netHTAfterGlobalRemise * tvaToHtRatio * 1000
-                                          ) / 1000;
-                                        } else {
-                                          totalTaxAfterGlobalRemise = 0;
-                                        }
-
-                                        finalTotalValue = Math.round(
-                                          (netHTAfterGlobalRemise + totalTaxAfterGlobalRemise) * 1000
-                                        ) / 1000;
-                                      } else if (remiseTypeValue === "fixed") {
-                                        // ✅ Fixed remise: User enters the final TTC amount
-                                        finalTotalValue = Math.round(remiseValue * 1000) / 1000;
-
-                                        // ✅ CHECK IF SINGLE OR MULTIPLE TVA RATES
-                                        const uniqueTvaRates = Array.from(
-                                          new Set(articles.map((a) => Number(a.tva) || 0))
-                                        );
-
-                                        if (uniqueTvaRates.length === 1 && uniqueTvaRates[0] > 0) {
-                                          // ✅ SINGLE TVA RATE FORMULA: Net HT = TTC / (1 + TVA rate)
-                                          const tvaRate = uniqueTvaRates[0] / 100;
-                                          netHTAfterGlobalRemise = Math.round((finalTotalValue / (1 + tvaRate)) * 1000) / 1000;
-                                          totalTaxAfterGlobalRemise = Math.round((finalTotalValue - netHTAfterGlobalRemise) * 1000) / 1000;
-                                        } else {
-                                          // ✅ MULTIPLE TVA RATES: EXACT SAME CALCULATION
-                                          const discountCoefficient = finalTotalValue / grandTotalValue;
-
-                                          let newTotalHT = 0;
-                                          let newTotalTVA = 0;
-
-                                          articles.forEach((article) => {
-                                            const qty = Number(article.quantite) || 0;
-                                            const articleRemise = Number(article.remise) || 0;
-
-                                            // Get unit prices
-                                            let unitHT = Number(article.prix_unitaire) || 0;
-                                            let unitTTC = Number(article.prix_ttc) || 0;
-
-                                            // Handle if prix_ttc is not in database
-                                            if (unitTTC === 0) {
-                                              const tvaRate = Number(article.tva) || 0;
-                                              unitTTC = unitHT * (1 + tvaRate / 100);
-                                            }
-
-                                            unitHT = Math.round(unitHT * 1000) / 1000;
-                                            unitTTC = Math.round(unitTTC * 1000) / 1000;
-
-                                            const lineHTAfterDiscount = qty * unitHT * (1 - articleRemise / 100);
-                                            const newLineHT = lineHTAfterDiscount * discountCoefficient;
-                                            const newLineTVA = newLineHT * (Number(article.tva) || 0) / 100;
-
-                                            newTotalHT += newLineHT;
-                                            newTotalTVA += newLineTVA;
-                                          });
-
-                                          netHTAfterGlobalRemise = Math.round(newTotalHT * 1000) / 1000;
-                                          totalTaxAfterGlobalRemise = Math.round(newTotalTVA * 1000) / 1000;
-                                        }
-
-                                        discountAmountValue = Math.round(
-                                          (netHTBeforeGlobalRemise - netHTAfterGlobalRemise) * 1000
-                                        ) / 1000;
-
-                                        // Calculate discount percentage for display
-                                        if (netHTBeforeGlobalRemise > 0) {
-                                          discountPercentageValue = Math.round(
-                                            (discountAmountValue / netHTBeforeGlobalRemise) * 100 * 1000
-                                          ) / 1000;
-                                        }
-                                      }
-                                    }
-
-                                    // ✅ FINAL VALUES
-                                    const displayNetHT = remiseValue > 0
-                                      ? netHTAfterGlobalRemise
-                                      : netHTBeforeGlobalRemise;
-
-                                    const displayTotalTax = remiseValue > 0
-                                      ? totalTaxAfterGlobalRemise
-                                      : totalTaxValue;
-
-                                    const displayFinalTotal = remiseValue > 0
-                                      ? finalTotalValue
-                                      : grandTotalValue;
+                                    const displayNetHT = netHTAfterGlobalRemise;
+                                    const displayTotalTax = totalTaxAfterGlobalRemise;
+                                    const displayFinalTotal = finalTotalValue;
 
                                     return (
                                       <Table className="table-sm table-borderless mb-0">
@@ -4143,27 +3750,46 @@ const BonLivraisonList = () => {
                           setIsEdit(false);
                           setTimbreFiscal(false);
 
-                          // Initialize payment methods from BL if they exist
-                          setMethodesReglement(
-                            selectedBonLivraison.paymentMethods &&
-                              selectedBonLivraison.paymentMethods.length > 0
-                              ? selectedBonLivraison.paymentMethods.map(
-                                (pm: any, index: number) => ({
-                                  id: pm.id || `facture-bl-${index}`,
-                                  method: pm.method,
-                                  amount: pm.amount
-                                    ? typeof pm.amount === "number"
-                                      ? pm.amount.toFixed(3).replace(".", ",")
-                                      : String(pm.amount)
-                                    : "",
-                                  numero: pm.numero || "",
-                                  banque: pm.banque || "",
-                                  dateEcheance: pm.dateEcheance || "",
-                                  tauxRetention: pm.tauxRetention || 1,
-                                })
-                              )
-                              : []
-                          );
+                          // Initialize payment methods from BL (JSON and table)
+                          const combinedMethods: any[] = [];
+                          
+                          if (selectedBonLivraison.paymentMethods && Array.isArray(selectedBonLivraison.paymentMethods)) {
+                            selectedBonLivraison.paymentMethods.forEach((pm: any, index: number) => {
+                              combinedMethods.push({
+                                id: pm.id || `bl-pm-${index}`,
+                                method: pm.method,
+                                amount: pm.amount ? String(pm.amount).replace(".", ",") : "",
+                                numero: pm.numero || "",
+                                banque: pm.banque || "",
+                                dateEcheance: pm.dateEcheance || "",
+                                tauxRetention: pm.tauxRetention || 1,
+                              });
+                            });
+                          }
+
+                          if (selectedBonLivraison.paiements && Array.isArray(selectedBonLivraison.paiements)) {
+                            selectedBonLivraison.paiements.forEach((p: any, index: number) => {
+                              let method = p.modePaiement || "especes";
+                              if (method === "Espece") method = "especes";
+                              else if (method === "Cheque") method = "cheque";
+                              else if (method === "Virement") method = "virement";
+                              else if (method === "Traite") method = "traite";
+                              else if (method === "Carte Bancaire TPE") method = "Carte Bancaire TPE";
+                              else if (method === "Retention") method = "retenue";
+
+                              combinedMethods.push({
+                                id: p.id || `bl-p-${index}`,
+                                method: method,
+                                amount: p.montant ? String(p.montant).replace(".", ",") : "",
+                                numero: p.numeroCheque || p.numeroTraite || "",
+                                banque: p.banque || "",
+                                dateEcheance: p.dateEcheance || "",
+                                tauxRetention: p.tauxRetention || 1,
+                              });
+                            });
+                          }
+
+                          setMethodesReglement(combinedMethods);
                           setEspaceNotes(selectedBonLivraison.espaceNotes || "");
 
                           validation.setValues({
@@ -5556,16 +5182,18 @@ const BonLivraisonList = () => {
                                             }
                                             onChange={(e) => {
                                               const value = e.target.value;
-                                              if (value === "") {
+                                              const numValue = parseFloat(value);
+                                              if (value === "" || isNaN(numValue)) {
                                                 setGlobalRemise(0);
+                                                setLockedPercentage(null);
                                               } else {
-                                                const numValue = Number(value);
-                                                if (
-                                                  !isNaN(numValue) &&
-                                                  numValue >= 0
-                                                ) {
-                                                  setGlobalRemise(numValue);
-                                                  setLockedPercentage(null); // Clear proportionality if user manual edits
+                                                setGlobalRemise(numValue);
+                                                // Calculate high-precision locked percentage immediately on manual edit
+                                                if (remiseType === "fixed" && grandTotal > 0) {
+                                                  const perc = ((grandTotal - numValue) / grandTotal) * 100;
+                                                  setLockedPercentage(perc);
+                                                } else {
+                                                  setLockedPercentage(null);
                                                 }
                                               }
                                             }}
@@ -5623,8 +5251,8 @@ const BonLivraisonList = () => {
                                           <tr className={`real-time-update ${discountPercentage > 10 ? "table-danger" : "table-success"}`}>
                                             <th className={`text-end fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                               {remiseType === "percentage"
-                                                ? `Remise (Global) ${Number(globalRemise).toFixed(2)}%`
-                                                : `Remise (Montant fixe) ${discountPercentage.toFixed(2)}%`}
+                                                ? `Remise (Global) ${Number(globalRemise).toFixed(8)}%`
+                                                : `Remise (Montant fixe) ${discountPercentage.toFixed(8)}%`}
                                             </th>
                                             <td className={`text-end fw-bold fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                               - {discountAmount.toFixed(3)} DT

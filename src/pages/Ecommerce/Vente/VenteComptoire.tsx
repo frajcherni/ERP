@@ -38,6 +38,7 @@ import DeleteModal from "../../../Components/Common/DeleteModal";
 import Loader from "../../../Components/Common/Loader";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import { calculateDocumentTotals } from "../../../Utils/CalculationEngine";
 import * as Yup from "yup";
 import { useFormik } from "formik";
 import moment from "moment";
@@ -828,9 +829,9 @@ const VenteComptoire = () => {
     if (modal || articleSearch) {
       setArticlesLoading(true);
       try {
-        const result = await searchArticles({ 
-          query, 
-          page, 
+        const result = await searchArticles({
+          query,
+          page,
           limit,
           depot_id: selectedDepot?.id
         });
@@ -1018,7 +1019,6 @@ const VenteComptoire = () => {
     return numericValue.toFixed(3).replace(".", ",");
   };
 
-  // Add this near your other helper functions
   const {
     sousTotalHT,
     netHT,
@@ -1026,193 +1026,28 @@ const VenteComptoire = () => {
     grandTotal,
     finalTotal,
     discountAmount,
-    discountPercentage, // ← ADD THIS TO DESTRUCTURING
+    discountPercentage,
   } = useMemo(() => {
-    if (selectedArticles.length === 0) {
-      return {
-        sousTotalHT: 0,
-        netHT: 0,
-        totalTax: 0,
-        grandTotal: 0,
-        finalTotal: 0,
-        discountAmount: 0,
-        discountPercentage: 0, // ← ADD THIS
-      };
-    }
-
-    let sousTotalHTValue = 0;
-    let totalTaxValue = 0;
-    let grandTotalValue = 0;
-    let discountPercentageValue = 0; // ← ADD THIS VARIABLE
-
-    // -----------------------------
-    // ORIGINAL TOTALS
-    // -----------------------------
-    selectedArticles.forEach((article) => {
-      const qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
-      const articleRemise = Number(article.remise) || 0;
-
-      let unitHT = Number(article.prixUnitaire) || 0;
-      let unitTTC = Number(article.prixTTC) || 0;
-
-      // HT editing
-      if (editingHT[article.article_id] !== undefined) {
-        const v = parseNumericInput(editingHT[article.article_id]);
-        if (!isNaN(v) && v >= 0) {
-          unitHT = v;
-          const tvaRate = Number(article.tva) || 0;
-          unitTTC = unitHT * (1 + tvaRate / 100);
-        }
+    return calculateDocumentTotals(
+      {
+        articles: selectedArticles,
+        remise: globalRemise,
+        remiseType,
+      },
+      {
+        editingHT,
+        editingTTC,
+        lockedPercentage,
       }
-      // TTC editing
-      else if (editingTTC[article.article_id] !== undefined) {
-        const v = parseNumericInput(editingTTC[article.article_id]);
-        if (!isNaN(v) && v >= 0) {
-          unitTTC = v;
-          const tvaRate = Number(article.tva) || 0;
-          unitHT = tvaRate > 0 ? unitTTC / (1 + tvaRate / 100) : unitTTC;
-        }
-      }
-
-      const lineHT = Math.round(unitHT * 1000) / 1000;
-      const lineTTC = Math.round(unitTTC * 1000) / 1000;
-
-      const montantSousTotalHT = Math.round(qty * lineHT * 1000) / 1000;
-
-      const montantNetHTLigne =
-        Math.round(qty * lineHT * (1 - articleRemise / 100) * 1000) / 1000;
-
-      const montantTTCLigne = Math.round(qty * lineTTC * 1000) / 1000;
-
-      const montantTVALigne =
-        Math.round((montantTTCLigne - montantNetHTLigne) * 1000) / 1000;
-
-      sousTotalHTValue += montantSousTotalHT;
-      totalTaxValue += montantTVALigne;
-      grandTotalValue += montantTTCLigne;
-    });
-
-    // Base rounding
-    sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
-    totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-    grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
-
-    let netHTValue = sousTotalHTValue;
-    let finalTotalValue = grandTotalValue;
-    let discountAmountValue = 0;
-
-    // -----------------------------
-    // GLOBAL REMISE
-    // -----------------------------
-    if (showRemise && Number(globalRemise) > 0) {
-      // ===== % REMISE =====
-      if (remiseType === "percentage") {
-        discountAmountValue = (sousTotalHTValue * Number(globalRemise)) / 100;
-
-        netHTValue = sousTotalHTValue - discountAmountValue;
-
-        const ratio =
-          sousTotalHTValue > 0 ? totalTaxValue / sousTotalHTValue : 0;
-
-        totalTaxValue = netHTValue * ratio;
-        finalTotalValue = netHTValue + totalTaxValue;
-
-        // ← ADD THIS - Set percentage directly for percentage remise
-        discountPercentageValue = Number(globalRemise);
-      }
-
-      // ===== FIXED TTC =====
-      else if (remiseType === "fixed") {
-        finalTotalValue = Number(globalRemise);
-
-        // 🛑 LOGICAL GUARD: TTC unchanged → NO REMISE
-        if (
-          Math.round(finalTotalValue * 1000) ===
-          Math.round(grandTotalValue * 1000)
-        ) {
-          netHTValue = sousTotalHTValue;
-          discountAmountValue = 0;
-          discountPercentageValue = 0; // ← ADD THIS
-        } else {
-          const tvaRates = Array.from(
-            new Set(selectedArticles.map((a) => Number(a.tva) || 0))
-          );
-
-          // Single TVA
-          if (tvaRates.length === 1 && tvaRates[0] > 0) {
-            const tvaRate = tvaRates[0];
-            netHTValue = finalTotalValue / (1 + tvaRate / 100);
-            totalTaxValue = finalTotalValue - netHTValue;
-          }
-          // Multiple TVA
-          else {
-            const coeff =
-              grandTotalValue > 0 ? finalTotalValue / grandTotalValue : 1;
-
-            let newHT = 0;
-            let newTVA = 0;
-
-            selectedArticles.forEach((article) => {
-              const qty =
-                article.quantite === "" ? 0 : Number(article.quantite) || 0;
-              const unitHT = Number(article.prixUnitaire) || 0;
-              const tvaRate = Number(article.tva) || 0;
-
-              const lineHT = qty * unitHT * coeff;
-              const lineTVA = lineHT * (tvaRate / 100);
-
-              newHT += lineHT;
-              newTVA += lineTVA;
-            });
-
-            netHTValue = newHT;
-            totalTaxValue = newTVA;
-          }
-
-          // ← ADD THIS - Calculate percentage based on grandTotal for fixed remise
-          if (grandTotalValue > 0) {
-            discountPercentageValue = ((grandTotalValue - finalTotalValue) / grandTotalValue) * 100;
-          } else {
-            discountPercentageValue = 0;
-          }
-        }
-      }
-
-      // Final rounding + SAFE remise derivation
-      netHTValue = Math.round(netHTValue * 1000) / 1000;
-      totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-      finalTotalValue = Math.round(finalTotalValue * 1000) / 1000;
-
-      discountAmountValue =
-        Math.round((sousTotalHTValue - netHTValue) * 1000) / 1000;
-
-      // Ensure discount is positive and valid
-      if (discountAmountValue <= 0.001) {
-        discountAmountValue = 0;
-        discountPercentageValue = 0;
-        // Reset totals if creating a "negative" discount
-        if (discountAmountValue < 0) {
-          netHTValue = sousTotalHTValue;
-          finalTotalValue = grandTotalValue;
-          // Note: totalTaxValue would need recalibration if we really wanted to be perfect here, 
-          // but for VenteComptoire with no items yet, it's fine.
-        }
-      }
-
-      // ← ADD THIS - Round the percentage
-      discountPercentageValue = Math.round(discountPercentageValue * 1000) / 1000;
-    }
-
-    return {
-      sousTotalHT: sousTotalHTValue,
-      netHT: netHTValue,
-      totalTax: totalTaxValue,
-      grandTotal: grandTotalValue,
-      finalTotal: finalTotalValue,
-      discountAmount: discountAmountValue,
-      discountPercentage: discountPercentageValue, // ← ADD THIS
-    };
-  }, [selectedArticles, showRemise, globalRemise, remiseType, editingHT, editingTTC]);
+    );
+  }, [
+    selectedArticles,
+    globalRemise,
+    remiseType,
+    editingHT,
+    editingTTC,
+    lockedPercentage,
+  ]);
 
   // STEP 4: Auto-update global remise if locked percentage exists
   // This effect ensures that a "Fixed" amount remains proportional to the items
@@ -1394,50 +1229,6 @@ const VenteComptoire = () => {
       // Les paiements restent avec la vente comptoire uniquement
       // const processedPaymentMethods = []; // NE PAS envoyer
 
-      // Calculer les totaux
-      let sousTotalHTValue = 0;
-      let totalTaxValue = 0;
-      let grandTotalValue = 0;
-
-      selectedArticles.forEach((article) => {
-        const qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
-        const tvaRate = Number(article.tva) || 0;
-        const remiseRate = Number(article.remise) || 0;
-        const priceHT = Number(article.prixUnitaire) || 0;
-        const priceTTC = Number(article.prixTTC) || 0;
-
-        const montantHTLigne =
-          Math.round(qty * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
-        const montantTTCLigne = Math.round(qty * priceTTC * 1000) / 1000;
-        const taxAmount =
-          Math.round((montantTTCLigne - montantHTLigne) * 1000) / 1000;
-
-        sousTotalHTValue += montantHTLigne;
-        totalTaxValue += taxAmount;
-        grandTotalValue += montantTTCLigne;
-      });
-
-      // Appliquer remise globale
-      let finalTotalValue = grandTotalValue;
-      if (showRemise && Number(globalRemise) > 0) {
-        if (remiseType === "percentage") {
-          finalTotalValue = grandTotalValue * (1 - Number(globalRemise) / 100);
-        } else {
-          finalTotalValue = Number(globalRemise);
-        }
-      }
-
-      // Ajouter timbre fiscal
-      if (timbreFiscal) {
-        finalTotalValue += 1;
-      }
-
-      // Arrondir les totaux
-      sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
-      totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-      grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
-      finalTotalValue = Math.round(finalTotalValue * 1000) / 1000;
-
       // Créer l'objet facture SANS paymentMethods
       const factureData = {
         numeroFacture: nextFactureNumber,
@@ -1454,17 +1245,17 @@ const VenteComptoire = () => {
         timbreFiscal: timbreFiscal,
         articles: articlesForFacture,
         notes: validation.values.notes,
-        remise: (remiseType === "fixed" && lockedPercentage !== null) ? lockedPercentage : globalRemise,
-        remiseType: (remiseType === "fixed" && lockedPercentage !== null) ? "percentage" : remiseType,
-        totalHT: sousTotalHTValue,
-        totalTVA: totalTaxValue,
-        totalTTC: grandTotalValue,
-        totalTTCAfterRemise: finalTotalValue,
+        remise: globalRemise,
+        remiseType: remiseType,
+        lockedPercentage: lockedPercentage,
+        totalHT: sousTotalHT,
+        totalTVA: totalTax,
+        totalTTC: grandTotal,
+        totalTTCAfterRemise: finalTotal,
         // ❌ NE PAS inclure les paymentMethods ici
-        // paymentMethods: [], // Pas besoin d'envoyer
         totalPaymentAmount: 0, // 0 car pas de paiements à la création
         montantPaye: 0,
-        resteAPayer: finalTotalValue,
+        resteAPayer: finalTotal,
         hasRetenue: false,
         montantRetenue: 0,
       };
@@ -1539,8 +1330,9 @@ const VenteComptoire = () => {
           remise: item.remise,
           designation: item.designation, // Add this
         })),
-        remise: (remiseType === "fixed" && lockedPercentage !== null) ? lockedPercentage : globalRemise,
-        remiseType: (remiseType === "fixed" && lockedPercentage !== null) ? "percentage" : remiseType,
+        remise: globalRemise,
+        remiseType: remiseType,
+        lockedPercentage: lockedPercentage,
         totalTVA: totalTax,
         totalTTC: grandTotal,
         totalTTCAfterRemise: finalTotal,
@@ -2122,16 +1914,13 @@ const VenteComptoire = () => {
                     }, 0);
                     const bcTargetNet = Number(bonCommande.remise) || 0;
 
-                    if (bonCommande.remiseType === "fixed" && bcTotalTTC > 0 && bcTargetNet > 0 && bcTargetNet < bcTotalTTC) {
-                      const perc = ((bcTotalTTC - bcTargetNet) / bcTotalTTC) * 100;
-                      setGlobalRemise(bcTargetNet);
-                      setRemiseType("fixed");
-                      setLockedPercentage(perc);
-                    } else {
-                      setGlobalRemise(bonCommande.remise || 0);
-                      setRemiseType(bonCommande.remiseType || "percentage");
-                      setLockedPercentage(null);
-                    }
+                    setLockedPercentage(
+                      bonCommande.lockedPercentage ||
+                      bonCommande.locked_percentage ||
+                      null
+                    );
+                    setGlobalRemise(bonCommande.remise || 0);
+                    setRemiseType(bonCommande.remiseType || "percentage");
                     setShowRemise(
                       !!bonCommande.remise && bonCommande.remise > 0
                     );
@@ -2552,7 +2341,6 @@ const VenteComptoire = () => {
                             </CardBody>
                           </Card>
                         )}
-
                         <Card className="border-0 shadow-sm">
                           <CardBody className="p-0">
                             <div className="table-responsive">
@@ -2562,12 +2350,8 @@ const VenteComptoire = () => {
                                     <th className="ps-4">Article</th>
                                     <th>Référence</th>
                                     <th className="text-end">Quantité</th>
-                                    <th className="text-end">
-                                      Prix Unitaire HT
-                                    </th>
-                                    <th className="text-end">
-                                      Prix Unitaire TTC
-                                    </th>
+                                    <th className="text-end">Prix Unitaire HT</th>
+                                    <th className="text-end">Prix Unitaire TTC</th>
                                     <th className="text-end">TVA (%)</th>
                                     <th className="text-end">Remise (%)</th>
                                     <th className="text-end">Total HT</th>
@@ -2575,86 +2359,40 @@ const VenteComptoire = () => {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {selectedBonCommande.articles.map(
-                                    (item, index) => {
-                                      const quantite =
-                                        Number(item.quantite) || 0;
-                                      const priceHT =
-                                        Number(item.prixUnitaire) || 0;
-                                      const tvaRate = Number(item.tva ?? 0);
-                                      const remiseRate = Number(
-                                        item.remise || 0
-                                      );
+                                  {selectedBonCommande.articles.map((item, index) => {
+                                    const quantite = Number(item.quantite) || 0;
+                                    const priceHT = Number(item.prixUnitaire) || 0;
+                                    const tvaRate = Number(item.tva ?? 0);
+                                    const remiseRate = Number(item.remise || 0);
+                                    const priceTTC = Number(item.prix_ttc) ||
+                                      Number(item.article?.puv_ttc) ||
+                                      (priceHT * (1 + tvaRate / 100));
 
-                                      const priceTTC =
-                                        Number(item.prix_ttc) ||
-                                        Number(item.article?.puv_ttc) ||
-                                        priceHT * (1 + tvaRate / 100);
+                                    const montantNetHT = Math.round(quantite * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
+                                    const montantTTCLigne = Math.round(quantite * priceTTC * 1000) / 1000;
 
-                                      const montantSousTotalHT =
-                                        Math.round(quantite * priceHT * 1000) /
-                                        1000;
-                                      const montantNetHT =
-                                        Math.round(
-                                          quantite *
-                                          priceHT *
-                                          (1 - remiseRate / 100) *
-                                          1000
-                                        ) / 1000;
-                                      const montantTTCLigne =
-                                        Math.round(quantite * priceTTC * 1000) /
-                                        1000;
-
-                                      return (
-                                        <tr
-                                          key={index}
-                                          className={
-                                            index % 2 === 0 ? "bg-light" : ""
-                                          }
-                                        >
-                                          <td className="ps-4">
-                                            <div className="d-flex align-items-center">
-                                              <div className="flex-grow-1">
-                                                <h6 className="mb-0 fw-semibold fs-6">
-                                                  {item.designation ||
-                                                    item.article?.designation}
-                                                </h6>
-                                              </div>
-                                            </div>
-                                          </td>
-                                          <td>
-                                            <Badge
-                                              color="light"
-                                              className="text-dark"
-                                            >
-                                              {item.article?.reference || "-"}
-                                            </Badge>
-                                          </td>
-                                          <td className="text-end fw-semibold">
-                                            {quantite}
-                                          </td>
-                                          <td className="text-end">
-                                            {priceHT.toFixed(3)} DT
-                                          </td>
-                                          <td className="text-end">
-                                            {priceTTC.toFixed(3)} DT
-                                          </td>
-                                          <td className="text-end">
-                                            {tvaRate}%
-                                          </td>
-                                          <td className="text-end">
-                                            {remiseRate}%
-                                          </td>
-                                          <td className="text-end fw-semibold">
-                                            {montantNetHT.toFixed(3)} DT
-                                          </td>
-                                          <td className="text-end pe-4 fw-semibold text-primary">
-                                            {montantTTCLigne.toFixed(3)} DT
-                                          </td>
-                                        </tr>
-                                      );
-                                    }
-                                  )}
+                                    return (
+                                      <tr key={index} className={index % 2 === 0 ? "bg-light" : ""}>
+                                        <td className="ps-4">
+                                          <h6 className="mb-0 fw-semibold fs-6">
+                                            {item.designation || item.article?.designation}
+                                          </h6>
+                                        </td>
+                                        <td>
+                                          <Badge color="light" className="text-dark">
+                                            {item.article?.reference || "-"}
+                                          </Badge>
+                                        </td>
+                                        <td className="text-end fw-semibold">{quantite}</td>
+                                        <td className="text-end">{priceHT.toFixed(3)} DT</td>
+                                        <td className="text-end">{priceTTC.toFixed(3)} DT</td>
+                                        <td className="text-end">{tvaRate}%</td>
+                                        <td className="text-end">{remiseRate}%</td>
+                                        <td className="text-end fw-semibold">{montantNetHT.toFixed(3)} DT</td>
+                                        <td className="text-end pe-4 fw-semibold text-primary">{montantTTCLigne.toFixed(3)} DT</td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                               </Table>
                             </div>
@@ -2663,237 +2401,68 @@ const VenteComptoire = () => {
                               <Row className="justify-content-end">
                                 <Col xs={8} sm={6} md={5} lg={4}>
                                   {(() => {
-                                    let sousTotalHTValue = 0;
-                                    let totalTaxValue = 0;
-                                    let grandTotalValue = 0;
-
-                                    // Calculate original totals
-                                    selectedBonCommande.articles.forEach(
-                                      (article: any) => {
-                                        const qty =
-                                          Number(article.quantite) || 0;
-                                        const articleRemise =
-                                          Number(article.remise) || 0;
-
-                                        const unitHT =
-                                          Number(article.prixUnitaire) || 0;
-                                        const tvaRate = Number(
-                                          article.tva ?? 0
-                                        );
-                                        const unitTTC =
-                                          Number(article.prix_ttc) !== 0
-                                            ? Number(article.prix_ttc)
-                                            : Number(
-                                              article.article?.puv_ttc
-                                            ) || unitHT * (1 + tvaRate / 100);
-
-                                        // Round to 3 decimals
-                                        const round = (num: number) =>
-                                          Math.round(num * 1000) / 1000;
-
-                                        const montantSousTotalHT = round(
-                                          qty * unitHT
-                                        );
-                                        const montantNetHTLigne = round(
-                                          qty *
-                                          unitHT *
-                                          (1 - articleRemise / 100)
-                                        );
-                                        const montantTTCLigne = round(
-                                          qty * unitTTC
-                                        );
-                                        const montantTVALigne = round(
-                                          montantTTCLigne - montantNetHTLigne
-                                        );
-
-                                        sousTotalHTValue += montantSousTotalHT;
-                                        totalTaxValue += montantTVALigne;
-                                        grandTotalValue += montantTTCLigne;
+                                    const totals = calculateDocumentTotals(
+                                      {
+                                        articles: (selectedBonCommande.articles || []).map((a: any) => ({
+                                          ...a,
+                                          prixUnitaire: a.prixUnitaire,
+                                          prixTTC: Number(a.prix_ttc) || Number(a.article?.puv_ttc) || (Number(a.prixUnitaire) * (1 + (Number(a.tva) || 0) / 100))
+                                        })),
+                                        remise: Number(selectedBonCommande.remise) || 0,
+                                        remiseType: selectedBonCommande.remiseType || "fixed",
+                                        exoneration: false,
+                                        timbreFiscal: !!(selectedBonCommande as any).timbreFiscal,
+                                        methodesReglement: selectedBonCommande.paymentMethods || [],
                                       }
                                     );
 
-                                    // Round totals
-                                    sousTotalHTValue =
-                                      Math.round(sousTotalHTValue * 1000) /
-                                      1000;
-                                    totalTaxValue =
-                                      Math.round(totalTaxValue * 1000) / 1000;
-                                    grandTotalValue =
-                                      Math.round(grandTotalValue * 1000) / 1000;
+                                    const {
+                                      sousTotalHT,
+                                      netHT,
+                                      totalTax,
+                                      grandTotal,
+                                      finalTotal,
+                                      discountAmount,
+                                      discountPercentage,
+                                    } = totals;
 
-                                    const remiseValue =
-                                      Number(selectedBonCommande.remise) || 0;
-                                    const remiseTypeValue =
-                                      selectedBonCommande.remiseType ||
-                                      "percentage";
-
-                                    let finalTotalValue = grandTotalValue;
-                                    let discountAmountValue = 0;
-                                    let netHTValue = sousTotalHTValue;
-                                    let displayTotalTax = totalTaxValue;
-                                    let discountPercentage = 0;
-
-                                    if (remiseValue > 0) {
-                                      if (remiseTypeValue === "percentage") {
-                                        // Percentage discount
-                                        discountAmountValue =
-                                          (sousTotalHTValue * remiseValue) /
-                                          100;
-                                        netHTValue =
-                                          sousTotalHTValue -
-                                          discountAmountValue;
-
-                                        const tvaToHtRatio =
-                                          sousTotalHTValue > 0
-                                            ? totalTaxValue / sousTotalHTValue
-                                            : 0;
-                                        displayTotalTax =
-                                          netHTValue * tvaToHtRatio;
-                                        finalTotalValue =
-                                          netHTValue + displayTotalTax;
-
-                                        discountPercentage = remiseValue;
-                                      } else if (remiseTypeValue === "fixed") {
-                                        // Fixed discount
-                                        finalTotalValue = remiseValue;
-
-                                        // Find unique TVA rates
-                                        const tvaRates = Array.from(
-                                          new Set(
-                                            selectedBonCommande.articles.map(
-                                              (a: any) => Number(a.tva ?? 0)
-                                            )
-                                          )
-                                        );
-
-                                        if (
-                                          tvaRates.length === 1 &&
-                                          tvaRates[0] > 0
-                                        ) {
-                                          // Single TVA rate: HT = TTC / (1 + TVA rate)
-                                          const tvaRate = tvaRates[0] / 100;
-                                          netHTValue =
-                                            finalTotalValue / (1 + tvaRate);
-                                          displayTotalTax =
-                                            finalTotalValue - netHTValue;
-                                        } else {
-                                          // Multiple TVA rates: proportional method
-                                          const discountCoefficient =
-                                            finalTotalValue / grandTotalValue;
-
-                                          let newTotalHT = 0;
-                                          let newTotalTVA = 0;
-
-                                          selectedBonCommande.articles.forEach(
-                                            (article: any) => {
-                                              const qty =
-                                                Number(article.quantite) || 0;
-                                              const unitHT =
-                                                Number(article.prixUnitaire) ||
-                                                0;
-                                              const tvaRate =
-                                                Number(article.tva ?? 0) / 100;
-
-                                              const newLineHT =
-                                                qty *
-                                                unitHT *
-                                                discountCoefficient;
-                                              const newLineTVA =
-                                                newLineHT * tvaRate;
-
-                                              newTotalHT += newLineHT;
-                                              newTotalTVA += newLineTVA;
-                                            }
-                                          );
-
-                                          netHTValue = newTotalHT;
-                                          displayTotalTax = newTotalTVA;
-                                        }
-
-                                        discountAmountValue =
-                                          sousTotalHTValue - netHTValue;
-                                        discountPercentage =
-                                          (discountAmountValue /
-                                            grandTotalValue) *
-                                          100;
-                                      }
-
-                                      // Round final values
-                                      netHTValue =
-                                        Math.round(netHTValue * 1000) / 1000;
-                                      displayTotalTax =
-                                        Math.round(displayTotalTax * 1000) /
-                                        1000;
-                                      finalTotalValue =
-                                        Math.round(finalTotalValue * 1000) /
-                                        1000;
-                                      discountAmountValue =
-                                        Math.round(discountAmountValue * 1000) /
-                                        1000;
-                                      discountPercentage =
-                                        Math.round(discountPercentage * 1000) /
-                                        1000;
-                                    }
+                                    const remiseValue = Number(selectedBonCommande.remise) || 0;
+                                    const remiseTypeValue = selectedBonCommande.remiseType || "fixed";
 
                                     return (
                                       <Table className="table-sm table-borderless mb-0">
                                         <tbody>
                                           <tr className="real-time-update">
-                                            <th className="text-end text-muted fs-6">
-                                              Sous-total H.T.:
-                                            </th>
-                                            <td className="text-end fw-semibold fs-6">
-                                              {sousTotalHTValue.toFixed(3)} DT
-                                            </td>
+                                            <th className="text-end text-muted fs-6">Sous-total H.T.:</th>
+                                            <td className="text-end fw-semibold fs-6">{sousTotalHT.toFixed(3)} DT</td>
                                           </tr>
                                           <tr className="real-time-update">
-                                            <th className="text-end text-muted fs-6">
-                                              Net H.T.:
-                                            </th>
-                                            <td className="text-end fw-semibold fs-6">
-                                              {netHTValue.toFixed(3)} DT
-                                            </td>
+                                            <th className="text-end text-muted fs-6">Net H.T.:</th>
+                                            <td className="text-end fw-semibold fs-6">{netHT.toFixed(3)} DT</td>
                                           </tr>
                                           <tr className="real-time-update">
-                                            <th className="text-end text-muted fs-6">
-                                              TVA:
-                                            </th>
-                                            <td className="text-end fw-semibold fs-6">
-                                              {displayTotalTax.toFixed(3)} DT
-                                            </td>
+                                            <th className="text-end text-muted fs-6">TVA:</th>
+                                            <td className="text-end fw-semibold fs-6">{totalTax.toFixed(3)} DT</td>
                                           </tr>
                                           <tr className="real-time-update">
-                                            <th className="text-end text-muted fs-6">
-                                              Total TTC:
-                                            </th>
-                                            <td className="text-end fw-semibold fs-6 text-dark">
-                                              {grandTotalValue.toFixed(3)} DT
-                                            </td>
+                                            <th className="text-end text-muted fs-6">Total TTC:</th>
+                                            <td className="text-end fw-semibold fs-6 text-dark">{grandTotal.toFixed(3)} DT</td>
                                           </tr>
                                           {remiseValue > 0 && (
                                             <tr className={`real-time-update ${discountPercentage > 10 ? "table-danger" : "table-success"}`}>
                                               <th className={`text-end fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
-                                                {remiseTypeValue ===
-                                                  "percentage"
+                                                {remiseTypeValue === "percentage"
                                                   ? `Remise (${remiseValue}%)`
-                                                  : `Remise (Montant fixe) ${discountPercentage.toFixed(
-                                                    2
-                                                  )}%`}
+                                                  : `Remise (Montant fixe) ${discountPercentage.toFixed(2)}%`}
                                               </th>
                                               <td className={`text-end fw-bold fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
-                                                -{" "}
-                                                {discountAmountValue.toFixed(3)}{" "}
-                                                DT
+                                                - {discountAmount.toFixed(3)} DT
                                               </td>
                                             </tr>
                                           )}
                                           <tr className="final-total real-time-update border-top">
-                                            <th className="text-end fs-5">
-                                              NET À PAYER:
-                                            </th>
-                                            <td className="text-end fw-bold fs-5 text-primary">
-                                              {finalTotalValue.toFixed(3)} DT
-                                            </td>
+                                            <th className="text-end fs-5">NET À PAYER:</th>
+                                            <td className="text-end fw-bold fs-5 text-primary">{finalTotal.toFixed(3)} DT</td>
                                           </tr>
                                         </tbody>
                                       </Table>
@@ -2905,7 +2474,6 @@ const VenteComptoire = () => {
                           </CardBody>
                         </Card>
 
-                        {/* Informations de Paiement */}
                         <Card className="border-0 shadow-sm mt-4">
                           <CardBody className="p-4">
                             <h6 className="fw-semibold mb-3 text-primary">
@@ -2913,107 +2481,45 @@ const VenteComptoire = () => {
                               Informations de Paiement
                             </h6>
 
-                            {selectedBonCommande.paymentMethods &&
-                              selectedBonCommande.paymentMethods.length > 0 ? (
+                            {selectedBonCommande.paymentMethods && selectedBonCommande.paymentMethods.length > 0 ? (
                               <div className="payment-methods">
-                                {selectedBonCommande.paymentMethods.map(
-                                  (payment: any, index: number) => (
-                                    <div
-                                      key={payment.id || index}
-                                      className="border rounded p-3 mb-3 bg-light"
-                                    >
-                                      <div className="d-flex justify-content-between align-items-center mb-2">
-                                        <h6 className="fw-semibold mb-0 text-dark">
-                                          Paiement #{index + 1}
-                                        </h6>
-                                        <Badge
-                                          color={
-                                            payment.method === "especes"
-                                              ? "success"
-                                              : payment.method === "cheque"
-                                                ? "warning"
-                                                : payment.method === "virement"
-                                                  ? "info"
-                                                  : payment.method === "traite"
-                                                    ? "primary"
-                                                    : payment.method === "tpe"
-                                                      ? "danger" // Add this line for tpe
-                                                      : "secondary"
-                                          }
-                                        >
-                                          {payment.method === "especes"
-                                            ? "Espèces"
-                                            : payment.method === "cheque"
-                                              ? "Chèque"
-                                              : payment.method === "virement"
-                                                ? "Virement"
-                                                : payment.method === "traite"
-                                                  ? "Traite"
-                                                  : payment.method === "tpe"
-                                                    ? "Carte Bancaire (TPE)" // Add this line
-                                                    : "Autre"}
-                                        </Badge>
-                                      </div>
-
-                                      <div className="row">
-                                        <div className="col-md-6">
-                                          <strong>Montant:</strong>{" "}
-                                          {Number(payment.amount || 0).toFixed(
-                                            3
-                                          )}{" "}
-                                          DT
-                                        </div>
-
-                                        {payment.numero && (
-                                          <div className="col-md-6">
-                                            <strong>Numéro:</strong>{" "}
-                                            {payment.numero}
-                                          </div>
-                                        )}
-
-                                        {payment.banque && (
-                                          <div className="col-md-6">
-                                            <strong>Banque:</strong>{" "}
-                                            {payment.banque}
-                                          </div>
-                                        )}
-
-                                        {payment.dateEcheance && (
-                                          <div className="col-md-6">
-                                            <strong>Date Échéance:</strong>{" "}
-                                            {moment(
-                                              payment.dateEcheance
-                                            ).format("DD/MM/YYYY")}
-                                          </div>
-                                        )}
-                                      </div>
+                                {selectedBonCommande.paymentMethods.map((payment: any, index: number) => (
+                                  <div key={payment.id || index} className="border rounded p-3 mb-3 bg-light">
+                                    <div className="d-flex justify-content-between align-items-center mb-2">
+                                      <h6 className="fw-semibold mb-0 text-dark">Paiement #{index + 1}</h6>
+                                      <Badge color={
+                                        payment.method === "especes" ? "success" :
+                                          payment.method === "cheque" ? "warning" :
+                                            payment.method === "virement" ? "info" :
+                                              payment.method === "traite" ? "primary" :
+                                                payment.method === "tpe" ? "danger" : "secondary"
+                                      }>
+                                        {payment.method === "especes" ? "Espèces" :
+                                          payment.method === "cheque" ? "Chèque" :
+                                            payment.method === "virement" ? "Virement" :
+                                              payment.method === "traite" ? "Traite" :
+                                                payment.method === "tpe" ? "Carte Bancaire (TPE)" : "Autre"}
+                                      </Badge>
                                     </div>
-                                  )
-                                )}
-
+                                    <div className="row">
+                                      <div className="col-md-6"><strong>Montant:</strong> {Number(payment.amount || 0).toFixed(3)} DT</div>
+                                      {payment.numero && <div className="col-md-6"><strong>Numéro:</strong> {payment.numero}</div>}
+                                      {payment.banque && <div className="col-md-6"><strong>Banque:</strong> {payment.banque}</div>}
+                                      {payment.dateEcheance && <div className="col-md-6"><strong>Date Échéance:</strong> {moment(payment.dateEcheance).format("DD/MM/YYYY")}</div>}
+                                    </div>
+                                  </div>
+                                ))}
                                 <div className="total-payment border-top pt-3 mt-3">
                                   <div className="d-flex justify-content-between align-items-center">
-                                    <strong className="fs-6">
-                                      Total Paiements:
-                                    </strong>
+                                    <strong className="fs-6">Total Paiements:</strong>
                                     <strong className="fs-5 text-primary">
-                                      {selectedBonCommande.paymentMethods
-                                        .reduce(
-                                          (sum: number, pm: any) =>
-                                            sum + (Number(pm.amount) || 0),
-                                          0
-                                        )
-                                        .toFixed(3)}{" "}
-                                      DT
+                                      {selectedBonCommande.paymentMethods.reduce((sum: number, pm: any) => sum + (Number(pm.amount) || 0), 0).toFixed(3)} DT
                                     </strong>
                                   </div>
                                 </div>
                               </div>
                             ) : (
-                              <div className="text-muted">
-                                <i className="ri-information-line me-2"></i>
-                                Aucune information de paiement disponible
-                              </div>
+                              <div className="text-muted text-center py-3">Aucun paiement enregistré</div>
                             )}
                           </CardBody>
                         </Card>
@@ -4417,10 +3923,8 @@ const VenteComptoire = () => {
                                           <tr className={`real-time-update ${discountPercentage > 10 ? "table-danger" : "table-success"}`}>
                                             <th className={`text-end fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                               {remiseType === "percentage"
-                                                ? `Remise (Global) ${Number(globalRemise).toFixed(2)}%`
-                                                : `Remise (Montant fixe) ${discountPercentage.toFixed(
-                                                  2
-                                                )}%`}
+                                                ? `Remise (Global) ${Number(globalRemise).toFixed(8)}%`
+                                                : `Remise (Montant fixe) ${discountPercentage.toFixed(8)}%`}
                                             </th>
                                             <td className={`text-end fw-bold fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                               - {discountAmount.toFixed(3)} DT

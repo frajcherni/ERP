@@ -38,6 +38,7 @@ import DeleteModal from "../../../Components/Common/DeleteModal";
 import Loader from "../../../Components/Common/Loader";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import { calculateDocumentTotals } from "../../../Utils/CalculationEngine";
 import * as Yup from "yup";
 import { useFormik } from "formik";
 import moment from "moment";
@@ -996,166 +997,28 @@ const Devis = () => {
     grandTotal,
     finalTotal,
     discountAmount,
+    discountPercentage,
   } = useMemo(() => {
-    if (selectedArticles.length === 0) {
-      return {
-        sousTotalHT: 0,
-        netHT: 0,
-        totalTax: 0,
-        grandTotal: 0,
-        finalTotal: 0,
-        discountAmount: 0,
-      };
-    }
-
-    let sousTotalHTValue = 0;
-    let totalTaxValue = 0;
-    let grandTotalValue = 0;
-
-    // ORIGINAL TOTALS
-    selectedArticles.forEach((article) => {
-      const qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
-      const articleRemise = Number(article.remise) || 0;
-
-      let unitHT = Number(article.prixUnitaire) || 0;
-      let unitTTC = Number(article.prixTTC) || 0;
-
-      // HT editing
-      if (editingHT[article.article_id] !== undefined) {
-        const v = parseNumericInput(editingHT[article.article_id]);
-        if (!isNaN(v) && v >= 0) {
-          unitHT = v;
-          const tvaRate = Number(article.tva) || 0;
-          unitTTC = unitHT * (1 + tvaRate / 100);
-        }
+    return calculateDocumentTotals(
+      {
+        articles: selectedArticles,
+        remise: globalRemise,
+        remiseType,
+      },
+      {
+        editingHT,
+        editingTTC,
+        lockedPercentage,
       }
-      // TTC editing
-      else if (editingTTC[article.article_id] !== undefined) {
-        const v = parseNumericInput(editingTTC[article.article_id]);
-        if (!isNaN(v) && v >= 0) {
-          unitTTC = v;
-          const tvaRate = Number(article.tva) || 0;
-          unitHT = tvaRate > 0 ? unitTTC / (1 + tvaRate / 100) : unitTTC;
-        }
-      }
-
-      const lineHT = Math.round(unitHT * 1000) / 1000;
-      const lineTTC = Math.round(unitTTC * 1000) / 1000;
-
-      const montantSousTotalHT = Math.round(qty * lineHT * 1000) / 1000;
-      const montantNetHTLigne = Math.round(
-        qty * lineHT * (1 - articleRemise / 100) * 1000
-      ) / 1000;
-      const montantTTCLigne = Math.round(qty * lineTTC * 1000) / 1000;
-      const montantTVALigne = Math.round(
-        (montantTTCLigne - montantNetHTLigne) * 1000
-      ) / 1000;
-
-      sousTotalHTValue += montantSousTotalHT;
-      totalTaxValue += montantTVALigne;
-      grandTotalValue += montantTTCLigne;
-    });
-
-    // Base rounding
-    sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
-    totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-    grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
-
-    let netHTValue = sousTotalHTValue;
-    let finalTotalValue = grandTotalValue;
-    let discountAmountValue = 0;
-
-    // GLOBAL REMISE - APPLIED ON HT
-    if (showRemise && Number(globalRemise) > 0) {
-      // ===== % REMISE =====
-      if (remiseType === "percentage") {
-        discountAmountValue = (sousTotalHTValue * Number(globalRemise)) / 100;
-
-        netHTValue = sousTotalHTValue - discountAmountValue;
-
-        const ratio = sousTotalHTValue > 0 ? totalTaxValue / sousTotalHTValue : 0;
-
-        totalTaxValue = netHTValue * ratio;
-        finalTotalValue = netHTValue + totalTaxValue;
-      }
-
-      // ===== FIXED TTC =====
-      else if (remiseType === "fixed") {
-        finalTotalValue = Number(globalRemise);
-
-        // 🛑 LOGICAL GUARD: TTC unchanged → NO REMISE
-        if (
-          Math.round(finalTotalValue * 1000) ===
-          Math.round(grandTotalValue * 1000)
-        ) {
-          netHTValue = sousTotalHTValue;
-          discountAmountValue = 0;
-        } else {
-          const tvaRates = Array.from(
-            new Set(selectedArticles.map((a) => Number(a.tva) || 0))
-          );
-
-          // Single TVA
-          if (tvaRates.length === 1 && tvaRates[0] > 0) {
-            const tvaRate = tvaRates[0];
-            netHTValue = finalTotalValue / (1 + tvaRate / 100);
-            totalTaxValue = finalTotalValue - netHTValue;
-          }
-          // Multiple TVA
-          else {
-            const coeff =
-              grandTotalValue > 0 ? finalTotalValue / grandTotalValue : 1;
-
-            let newHT = 0;
-            let newTVA = 0;
-
-            selectedArticles.forEach((article) => {
-              const qty =
-                article.quantite === "" ? 0 : Number(article.quantite) || 0;
-              const unitHT = Number(article.prixUnitaire) || 0;
-              const tvaRate = Number(article.tva) || 0;
-
-              const lineHT = qty * unitHT * coeff;
-              const lineTVA = lineHT * (tvaRate / 100);
-
-              newHT += lineHT;
-              newTVA += lineTVA;
-            });
-
-            netHTValue = newHT;
-            totalTaxValue = newTVA;
-          }
-        }
-
-        // Final rounding + SAFE remise derivation
-        netHTValue = Math.round(netHTValue * 1000) / 1000;
-        totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-        finalTotalValue = Math.round(finalTotalValue * 1000) / 1000;
-
-        discountAmountValue = Math.round(
-          (sousTotalHTValue - netHTValue) * 1000
-        ) / 1000;
-
-        // Ensure discount is positive and valid
-        if (discountAmountValue <= 0.001) {
-          discountAmountValue = 0;
-          if (discountAmountValue < 0) {
-            netHTValue = sousTotalHTValue;
-            finalTotalValue = grandTotalValue;
-          }
-        }
-      }
-    }
-
-    return {
-      sousTotalHT: sousTotalHTValue,
-      netHT: netHTValue,
-      totalTax: totalTaxValue,
-      grandTotal: grandTotalValue,
-      finalTotal: finalTotalValue,
-      discountAmount: discountAmountValue,
-    };
-  }, [selectedArticles, showRemise, globalRemise, remiseType]);
+    );
+  }, [
+    selectedArticles,
+    globalRemise,
+    remiseType,
+    editingHT,
+    editingTTC,
+    lockedPercentage,
+  ]);
 
   // STEP 4: Auto-update global remise if locked percentage exists
   // This effect ensures that a "Fixed" amount remains proportional to the items
@@ -1204,8 +1067,9 @@ const Devis = () => {
           status: "Confirme" as "Confirme", // Add type assertion
           notes: values.notes,
           taxMode: taxMode, // Corrigé : utiliser l'état existant
-          remise: (remiseType === "fixed" && lockedPercentage !== null) ? lockedPercentage : globalRemise,
-          remiseType: (remiseType === "fixed" && lockedPercentage !== null) ? "percentage" : remiseType,
+          remise: globalRemise,
+          remiseType: remiseType,
+          lockedPercentage: lockedPercentage,
           devis_id: bonCommande?.id,
           depot_id: selectedDepot?.id || 1, // Utiliser selectedDepot
           hasRetenue: false,
@@ -1213,6 +1077,7 @@ const Devis = () => {
           modeReglement: "especes" as "especes",
           acompte: 0,
           totalHT: netHT,
+          totalTVA: totalTax,
           totalTTC: finalTotal,
           totalTTCAfterRemise: finalTotal,
           totalAfterRemise: finalTotal,
@@ -1251,8 +1116,9 @@ const Devis = () => {
             designation: item.designation, // Add this
 
           })),
-          remise: (remiseType === "fixed" && lockedPercentage !== null) ? lockedPercentage : globalRemise,
-          remiseType: (remiseType === "fixed" && lockedPercentage !== null) ? "percentage" : remiseType,
+          remise: globalRemise,
+          remiseType: remiseType,
+          lockedPercentage: lockedPercentage,
         };
 
         if (isEdit && bonCommande) {
@@ -1435,6 +1301,11 @@ const Devis = () => {
                     setShowRemise((cellProps.row.original.remise || 0) > 0);
                     setSelectedClient(cellProps.row.original.client || null);
                     setIsEdit(true);
+                    setLockedPercentage(
+                      cellProps.row.original.lockedPercentage ||
+                      cellProps.row.original.locked_percentage ||
+                      null
+                    );
                     setModal(true);
                   }}
                 >
@@ -3268,8 +3139,8 @@ const Devis = () => {
                                             <tr className={`real-time-update ${isHigh ? "table-danger" : "table-success"}`}>
                                               <th className={`text-end fs-6 ${isHigh ? "text-danger" : "text-success"}`}>
                                                 {remiseType === "percentage"
-                                                  ? `Remise (Global) ${Number(globalRemise).toFixed(2)}%`
-                                                  : `Remise (Montant fixe) ${computedPercentage.toFixed(2)}%`}
+                                                  ? `Remise (Global) ${Number(globalRemise).toFixed(8)}%`
+                                                  : `Remise (Montant fixe) ${computedPercentage.toFixed(8)}%`}
                                               </th>
                                               <td className={`text-end fw-bold fs-6 ${isHigh ? "text-danger" : "text-success"}`}>
                                                 - {discountAmount.toFixed(3)} DT

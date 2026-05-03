@@ -38,11 +38,10 @@ import DeleteModal from "../../../Components/Common/DeleteModal";
 import Loader from "../../../Components/Common/Loader";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-import { calculateDocumentTotals } from "../../../Utils/CalculationEngine";
-import Flatpickr from "react-flatpickr";
 import * as Yup from "yup";
 import { useFormik } from "formik";
 import moment from "moment";
+import Flatpickr from "react-flatpickr";
 import {
   createClient,
   createArticle,
@@ -50,10 +49,8 @@ import {
   fetchCategories,
 } from "../../../Components/Article/ArticleServices";
 import { Categorie, Fournisseur } from "../../../Components/Article/Interfaces";
-import FactureClientReceiptModal from "./FactureClientReceiptModal";
 import {
   fetchFacturesClient,
-  fetchFacturesClientPaginated,
   createFacture,
   updateFacture,
   deleteFacture,
@@ -73,12 +70,12 @@ import {
   FactureClient,
   EncaissementClient,
   Vendeur,
-  Depot,
 } from "../../../Components/Article/Interfaces";
 import classnames from "classnames";
 import { PDFDownloadLink } from "@react-pdf/renderer";
 //import FacturePDF from "./FacturePDF";
 import FacturePDFModal from "./FactureClientPdfModal";
+import FactureClientPreview from "./FactureClientPreview";
 
 import { useProfile } from "Components/Hooks/UserHooks";
 import logo from "../../../assets/images/imglogo.png"; // Add this import
@@ -86,11 +83,7 @@ import backgroundImage from "../../../assets/images/backgroundImage.png"; // Add
 import EditClientModal from "./EditClientModal";
 
 import "./InvoiceModal.css";
-import DiscountAlertModal from "../../../Components/Common/DiscountAlertModal";
 import "./ArticleTableStyles.css"; // Import unified table styles
-import FacturesListPDF from "./JournalFactures";
-import { calculateFactureTotals } from "../../../Utils/FactureHelper";
-import { fetchDepots } from "../Stock/DepotServices";
 const ListFactureClient = () => {
   const [detailModal, setDetailModal] = useState(false);
   const [encaissementModal, setEncaissementModal] = useState(false);
@@ -121,10 +114,9 @@ const ListFactureClient = () => {
   const [nextFactureNumber, setNextFactureNumber] = useState("");
   const [editingTTC, setEditingTTC] = useState<{ [key: number]: string }>({});
   const [editingHT, setEditingHT] = useState<{ [key: number]: string }>({});
-  const [lockedPercentage, setLockedPercentage] = useState<number | null>(null);
   const { userProfile, loading: profileLoading } = useProfile();
   const [searchPhone, setSearchPhone] = useState("");
-  const [receiptModal, setReceiptModal] = useState(false);
+
   const [methodesReglement, setMethodesReglement] = useState<
     Array<{
       id: string;
@@ -148,14 +140,10 @@ const ListFactureClient = () => {
 
   const [showPaymentMethods, setShowPaymentMethods] = useState(false);
   const [espaceNotes, setEspaceNotes] = useState("");
-  const [showDiscountAlert, setShowDiscountAlert] = useState(false);
-  const [isDiscountConfirmed, setIsDiscountConfirmed] = useState(false);
 
   // Add these state variables near your existing states
   const [clientModal, setClientModal] = useState(false);
   const [articleModal, setArticleModal] = useState(false);
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [selectedDepot, setSelectedDepot] = useState<Depot | null>(null);
 
   const [editClientModal, setEditClientModal] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
@@ -164,15 +152,8 @@ const ListFactureClient = () => {
   const [scanningTimeout, setScanningTimeout] = useState<NodeJS.Timeout | null>(
     null
   );
-
-  const [journalModal, setJournalModal] = useState(false);
-  const [journalPDFBlob, setJournalPDFBlob] = useState<string | null>(null);
-
   const articleSearchRef = useRef<HTMLInputElement>(null); // Add this ref if not already present
-  const openReceiptModal = (facture: FactureClient) => {
-    setSelectedFactureForPdf(facture);
-    setReceiptModal(true);
-  };
+
   const [newClient, setNewClient] = useState({
     raison_sociale: "",
     designation: "",
@@ -186,51 +167,6 @@ const ListFactureClient = () => {
     email: "",
     status: "Actif" as "Actif" | "Inactif",
   });
-
-
-
-  // ===   // Function to generate PDF blob ===
-
-  const generateJournalPDF = async () => {
-    // Fetch ALL factures matching the current date filters for the journal
-    // (the paginated list only shows 50 at a time, journal needs everything)
-    toast.info("Chargement des factures pour le journal...", { autoClose: 2000 });
-
-    const journalResult = await fetchFacturesClientPaginated({
-      page: 1,
-      limit: 10000, // Get all matching factures for the journal
-      startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
-      endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
-    });
-
-    const journalFactures = journalResult.factures;
-
-    if (journalFactures.length === 0) {
-      toast.warning("Aucune facture à exporter pour la période sélectionnée");
-      return null;
-    }
-
-    const { pdf } = await import("@react-pdf/renderer");
-    const pdfBlob = await pdf(
-      <FacturesListPDF
-        factures={journalFactures}
-        startDate={startDate}
-        endDate={endDate}
-        companyInfo={companyInfo}
-      />
-    ).toBlob();
-
-    return URL.createObjectURL(pdfBlob);
-  };
-
-  // Handle export button click
-  const handleExportJournal = async () => {
-    const url = await generateJournalPDF();
-    if (url) {
-      setJournalPDFBlob(url);
-      setJournalModal(true);
-    }
-  };
 
 
   // === FONCTIONS DE CALCUL TVA/FODEC TUNISIEN ===
@@ -580,19 +516,19 @@ const ListFactureClient = () => {
   };
 
   // Update the client search useEffect
-  // Replace your current client search useEffect with this:
-  useEffect(() => {
-    const searchClientsDebounced = async () => {
-      if (clientSearch.length >= 1 || createEditModal) {
-        await loadClients(clientSearch, 1, 15);
-      } else {
-        setFilteredClients([]);
-      }
-    };
+// Replace your current client search useEffect with this:
+useEffect(() => {
+  const searchClientsDebounced = async () => {
+    if (clientSearch.length >= 1 || createEditModal) {
+      await loadClients(clientSearch, 1, 15);
+    } else {
+      setFilteredClients([]);
+    }
+  };
 
-    const timer = setTimeout(searchClientsDebounced, 300);
-    return () => clearTimeout(timer);
-  }, [clientSearch, createEditModal]);
+  const timer = setTimeout(searchClientsDebounced, 300);
+  return () => clearTimeout(timer);
+}, [clientSearch, createEditModal]);
 
   // Replace the current useEffect for article search:
   useEffect(() => {
@@ -623,30 +559,26 @@ const ListFactureClient = () => {
     return () => clearTimeout(timer);
   }, [articleSearch, createEditModal]);
 
-  // ============================================================
-  // OPTIMIZED: fetchData uses the paginated endpoint
-  // Server does encaissement calculation → no O(n*m) client-side loop
-  // ============================================================
   const fetchData = useCallback(async (skipSecondary = false) => {
     try {
       setLoading(true);
 
       // PHASE 1: Load critical data only
-      const [facturesData, encaissementsData, vendeursData , depotsData] = await Promise.all(
-        [fetchFacturesClient(), fetchEncaissementsClient(), fetchVendeurs(), fetchDepots()]
+      const [facturesData, encaissementsData, vendeursData] = await Promise.all(
+        [fetchFacturesClient(), fetchEncaissementsClient(), fetchVendeurs()]
       );
 
 
       if (!skipSecondary) {
         setSecondaryLoading(true);
-
+        
         try {
           // Load articles and clients in parallel with limit (EXACT SAME AS BL)
           const [articlesResult, clientsResult] = await Promise.all([
             searchArticles({ query: "", page: 1, limit: 25 }),
             searchClients({ query: "", page: 1, limit: 25 }),
           ]);
-
+          
           setArticles(articlesResult.articles || []);
           setClients(clientsResult.clients || []); // ADD THIS LINE - you were missing this
           setFilteredClients(clientsResult.clients || []);
@@ -929,7 +861,29 @@ const ListFactureClient = () => {
       setFactures(facturesWithCalculatedEncaissements);
       setFilteredFactures(facturesWithCalculatedEncaissements);
       setVendeurs(vendeursData);
-      setDepots(depotsData);
+
+      // PHASE 2: Load secondary data
+      try {
+        // Load categories and fournisseurs first
+        const [categoriesData, fournisseursData] = await Promise.all([
+          fetchCategories(),
+          fetchFournisseurs(),
+        ]);
+
+        setCategories(categoriesData);
+        setFournisseurs(fournisseursData);
+
+        // ✅ CHANGED: Use searchClients and searchArticles instead of fetchClients and fetchArticles
+        const [clientsResult, articlesResult] = await Promise.all([
+          searchClients({ query: "", page: 1, limit: 25 }), // ✅ Changed to searchClients
+          searchArticles({ query: "", page: 1, limit: 25 }), // ✅ Changed to searchArticles
+        ]);
+
+        setClients(clientsResult.clients || []);
+        setArticles(articlesResult.articles || []);
+      } catch (secondaryErr) {
+        console.error("Secondary data loading failed:", secondaryErr);
+      }
 
       setLoading(false);
       setError(null);
@@ -941,124 +895,146 @@ const ListFactureClient = () => {
     }
   }, []);
 
-  // ============================================================
-  // OPTIMIZED: Debounced fetch when filters change
-  // ============================================================
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchData();
-    }, 400); // 400ms debounce to avoid hammering server on each keystroke
-    return () => clearTimeout(timer);
+    fetchData(true); // true means skip secondary data initially
   }, [fetchData]);
 
 
   // Add this function after your fetchData function
-  const loadModalData = async () => {
-    if (createEditModal) {
-      setModalLoading(true);
-      try {
-        // Load categories and fournisseurs for article modal
-        const [categoriesResult, fournisseursData] = await Promise.all([
-          fetchCategories(),
-          fetchFournisseurs(),
-        ]);
+const loadModalData = async () => {
+  if (createEditModal) {
+    setModalLoading(true);
+    try {
+      // Load categories and fournisseurs for article modal
+      const [categoriesResult, fournisseursData] = await Promise.all([
+        fetchCategories(),
+        fetchFournisseurs(),
+      ]);
 
-        setCategories(categoriesResult);
-        setFournisseurs(fournisseursData);
+      setCategories(categoriesResult);
+      setFournisseurs(fournisseursData);
+      
+      // Load initial articles and clients for modal (EXACT SAME AS BL)
+      await Promise.all([
+        loadArticles("", 1, 15),
+        loadClients("", 1, 15),
+      ]);
+    } catch (err) {
+      console.error("Modal data loading failed:", err);
+    } finally {
+      setModalLoading(false);
+    }
+  }
+};
 
-        // Load initial articles and clients for modal (EXACT SAME AS BL)
-        await Promise.all([
-          loadArticles("", 1, 15),
-          loadClients("", 1, 15),
-        ]);
 
-        // Auto-select default depot (Magasin) for new records
-        if (!isEdit && !selectedDepot) {
-          const magasinDepot = depots.find(d =>
-            d.nom.toLowerCase().includes("magasin") ||
-            d.nom.toLowerCase().includes("magazin")
-          );
-          if (magasinDepot) {
-            setSelectedDepot(magasinDepot);
-            validation.setFieldValue("depot_id", magasinDepot.id);
-          }
-        }
-      } catch (err) {
-        console.error("Modal data loading failed:", err);
-      } finally {
-        setModalLoading(false);
+// Replace your current loadArticles and search logic with this:
+const loadArticles = async (query = "", page = 1, limit = 15) => {
+  if (createEditModal || articleSearch) {
+    setArticlesLoading(true);
+    try {
+      const result = await searchArticles({ query, page, limit });
+      if (query === "" && page === 1) {
+        setArticles(result.articles || []);
       }
+      setFilteredArticles(result.articles || []);
+    } catch (err) {
+      console.error("Failed to load articles:", err);
+    } finally {
+      setArticlesLoading(false);
     }
-  };
+  }
+};
 
-
-  // Replace your current loadArticles and search logic with this:
-  const loadArticles = async (query = "", page = 1, limit = 15) => {
-    if (createEditModal || articleSearch) {
-      setArticlesLoading(true);
-      try {
-        const result = await searchArticles({
-          query,
-          page,
-          limit,
-          depot_id: selectedDepot?.id
-        });
-        if (query === "" && page === 1) {
-          setArticles(result.articles || []);
-        }
-        setFilteredArticles(result.articles || []);
-      } catch (err) {
-        console.error("Failed to load articles:", err);
-      } finally {
-        setArticlesLoading(false);
+// Load clients only when needed (EXACT SAME AS BL)
+const loadClients = async (query = "", page = 1, limit = 15) => {
+  if (createEditModal || clientSearch) {
+    setClientsLoading(true);
+    try {
+      const result = await searchClients({ query, page, limit });
+      if (query === "" && page === 1) {
+        setFilteredClients(result.clients || []);
+      } else {
+        setFilteredClients(result.clients || []);
       }
+    } catch (err) {
+      console.error("Failed to load clients:", err);
+    } finally {
+      setClientsLoading(false);
     }
-  };
+  }
+};
 
-  // Load clients only when needed (EXACT SAME AS BL)
-  const loadClients = async (query = "", page = 1, limit = 15) => {
-    if (createEditModal || clientSearch) {
-      setClientsLoading(true);
-      try {
-        const result = await searchClients({ query, page, limit });
-        if (query === "" && page === 1) {
-          setFilteredClients(result.clients || []);
-        } else {
-          setFilteredClients(result.clients || []);
-        }
-      } catch (err) {
-        console.error("Failed to load clients:", err);
-      } finally {
-        setClientsLoading(false);
-      }
-    }
-  };
-
-  // Load modal data when modal opens (EXACT SAME AS BL)
-  useEffect(() => {
-    if (createEditModal) {
-      loadModalData();
-    }
-  }, [createEditModal]);
+// Load modal data when modal opens (EXACT SAME AS BL)
+useEffect(() => {
+  if (createEditModal) {
+    loadModalData();
+  }
+}, [createEditModal]);
   // Load modal data only when modal opens
 
-  // ============================================================
-  // OPTIMIZED: Filtering is now done server-side via fetchData
-  // The useEffect on fetchData already re-fetches when filters change
-  // This block is kept as a lightweight local filter fallback
-  // for instant tab switching (server data is already filtered)
-  // ============================================================
+  // Update the main search useEffect for factures
+  // Update your main search useEffect
   useEffect(() => {
-    // Since server-side filtering handles search/date/phone,
-    // we only need local tab filtering as an instant UI response
-    // while the server re-fetch debounce completes
-    setFilteredFactures(factures);
-  }, [factures]);
+    let result = [...factures];
+
+    if (activeTab === "2") {
+      result = result.filter((facture) => facture.status === "Brouillon");
+    } else if (activeTab === "3") {
+      result = result.filter((facture) => facture.status === "Validee");
+    } else if (activeTab === "4") {
+      result = result.filter((facture) => facture.status === "Payee");
+    } else if (activeTab === "5") {
+      result = result.filter((facture) => facture.status === "Annulee");
+    }
+
+    if (startDate && endDate) {
+      const start = moment(startDate).startOf("day");
+      const end = moment(endDate).endOf("day");
+      result = result.filter((facture) => {
+        const factureDate = moment(facture.dateFacture);
+        return factureDate.isBetween(start, end, null, "[]");
+      });
+    }
+
+    // Enhanced search functionality
+    if (searchText) {
+      const searchLower = searchText.toLowerCase();
+      result = result.filter(
+        (facture) =>
+          facture.numeroFacture.toLowerCase().includes(searchLower) ||
+          (facture.client?.raison_sociale &&
+            facture.client.raison_sociale
+              .toLowerCase()
+              .includes(searchLower)) ||
+          (facture.client?.designation &&
+            facture.client.designation.toLowerCase().includes(searchLower))
+      );
+    }
+
+    // Phone search functionality
+    if (searchPhone) {
+      const cleanPhoneSearch = searchPhone.replace(/\s/g, "").trim();
+
+      result = result.filter((facture) => {
+        if (!facture.client) return false;
+
+        const phone1 = facture.client.telephone1?.replace(/\s/g, "") || "";
+        const phone2 = facture.client.telephone2?.replace(/\s/g, "") || "";
+
+        return (
+          phone1.includes(cleanPhoneSearch) || phone2.includes(cleanPhoneSearch)
+        );
+      });
+    }
+
+    setFilteredFactures(result);
+  }, [activeTab, startDate, endDate, searchText, searchPhone, factures]);
 
 
 
 
-
+  
   const handleEditClient = (client: Client, e?: React.MouseEvent) => {
     if (e) {
       e.stopPropagation();
@@ -1067,9 +1043,9 @@ const ListFactureClient = () => {
     setEditingClient(client);
     setEditClientModal(true);
   };
+  
 
-
-
+  
 
   const handleCreateClient = async () => {
     try {
@@ -1221,9 +1197,7 @@ const ListFactureClient = () => {
     const factureMethods = facture.paymentMethods || [];
     const bonCommandeMethods = facture.bonCommandeClient?.paymentMethods || [];
     const bonCommandePaiements = facture.bonCommandeClient?.paiements || [];
-    const bonLivraisonMethods = facture.bonLivraison?.paymentMethods || [];
-    const bonLivraisonPaiements = (facture.bonLivraison as any)?.paiements || [];
-    const venteComptoireMethods = facture.venteComptoire?.paymentMethods || [];
+    const venteComptoireMethods = facture.venteComptoire?.paymentMethods || []; // Add this
 
     // Calculate totals
     const totalFactureMethods = factureMethods.reduce(
@@ -1271,36 +1245,7 @@ const ListFactureClient = () => {
       0
     );
 
-    const totalBonLivraisonMethods = bonLivraisonMethods.reduce(
-      (sum: number, pm: any) => {
-        let amountValue: number;
-        if (typeof pm.amount === "string") {
-          amountValue = parseFloat(pm.amount) || 0;
-        } else if (typeof pm.amount === "number") {
-          amountValue = pm.amount;
-        } else {
-          amountValue = 0;
-        }
-        return (pm.method as string) !== "retenue" ? sum + amountValue : sum;
-      },
-      0
-    );
-
-    const totalBonLivraisonPaiements = totalBonLivraisonMethods > 0 ? 0 : bonLivraisonPaiements.reduce(
-      (sum: number, paiement: any) => {
-        let amountValue: number;
-        if (typeof paiement.montant === "string") {
-          amountValue = parseFloat(paiement.montant) || 0;
-        } else if (typeof paiement.montant === "number") {
-          amountValue = paiement.montant;
-        } else {
-          amountValue = 0;
-        }
-        return sum + amountValue;
-      },
-      0
-    );
-
+    // ✅ ADD VENTE COMPTOIRE PAYMENTS
     const totalVenteComptoireMethods = venteComptoireMethods.reduce(
       (sum: number, pm: any) => {
         let amountValue: number;
@@ -1316,7 +1261,7 @@ const ListFactureClient = () => {
       0
     );
 
-    // Calculate retention - Include all sources
+    // Calculate retention - Include vente comptoire
     const totalRetention =
       facture.montantRetenue ||
       factureMethods
@@ -1330,16 +1275,6 @@ const ListFactureClient = () => {
           return sum + (finalTotal * rate) / 100;
         }, 0) +
       bonCommandeMethods
-        .filter((pm: any) => (pm.method as string) === "retenue")
-        .reduce((sum: number, pm: any) => {
-          const finalTotal =
-            Number(facture.totalTTCAfterRemise) ||
-            Number(facture.totalTTC) ||
-            0;
-          const rate = pm.tauxRetention || 1;
-          return sum + (finalTotal * rate) / 100;
-        }, 0) +
-      bonLivraisonMethods
         .filter((pm: any) => (pm.method as string) === "retenue")
         .reduce((sum: number, pm: any) => {
           const finalTotal =
@@ -1364,23 +1299,17 @@ const ListFactureClient = () => {
       totalFactureMethods,
       totalBonCommandeMethods,
       totalBonCommandePaiements,
-      totalBonLivraisonMethods,
-      totalBonLivraisonPaiements,
-      totalVenteComptoireMethods,
+      totalVenteComptoireMethods, // Add this
       totalRetention,
       totalAllPayments:
         totalFactureMethods +
         totalBonCommandeMethods +
         totalBonCommandePaiements +
-        totalBonLivraisonMethods +
-        totalBonLivraisonPaiements +
         totalVenteComptoireMethods,
       hasBonCommande: !!facture.bonCommandeClient,
-      hasBonLivraison: !!facture.bonLivraison,
-      hasVenteComptoire: !!facture.venteComptoire,
+      hasVenteComptoire: !!facture.venteComptoire, // Add this
       bonCommandeNumber: facture.bonCommandeClient?.numeroCommande,
-      bonLivraisonNumber: facture.bonLivraison?.numeroLivraison,
-      venteComptoireNumber: facture.venteComptoire?.numeroCommande,
+      venteComptoireNumber: facture.venteComptoire?.numeroCommande, // Add this
     };
   };
 
@@ -1421,44 +1350,228 @@ const ListFactureClient = () => {
     retentionMontant,
     netAPayer,
   } = useMemo(() => {
-    return calculateDocumentTotals(
-      {
-        articles: selectedArticles,
-        remise: globalRemise,
-        remiseType,
-        exoneration,
-        timbreFiscal,
-        methodesReglement,
-      },
-      {
-        editingHT,
-        editingTTC,
-        lockedPercentage,
-      }
-    );
-  }, [
-    selectedArticles,
-    globalRemise,
-    remiseType,
-    exoneration,
-    timbreFiscal,
-    methodesReglement,
-    editingHT,
-    editingTTC,
-    lockedPercentage,
-  ]);
+    if (selectedArticles.length === 0) {
+      return {
+        sousTotalHT: 0,
+        netHT: 0,
+        totalTax: 0,
+        grandTotal: 0,
+        finalTotal: 0,
+        discountAmount: 0,
+        discountPercentage: 0,
+        retentionMontant: 0,
+        netAPayer: 0,
+      };
+    }
 
-  // STEP 4: Auto-update global remise if locked percentage exists
-  // This effect ensures that a "Fixed" amount remains proportional to the items
-  useEffect(() => {
-    if (remiseType === "fixed" && lockedPercentage !== null && grandTotal > 0) {
-      const newTargetNet = grandTotal * (1 - lockedPercentage / 100);
-      const roundedTargetNet = Math.round(newTargetNet * 1000) / 1000;
-      if (Math.abs(globalRemise - roundedTargetNet) > 0.001) {
-        setGlobalRemise(roundedTargetNet);
+    // ✅ STEP 1: Calculate totals WITHOUT considering global remise
+    let sousTotalHTValue = 0;
+    let netHTBeforeGlobalRemise = 0;
+    let totalTaxValue = 0;
+    let grandTotalValue = 0;
+
+    selectedArticles.forEach((article) => {
+      const qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
+      const articleRemise = Number(article.remise) || 0;
+
+      // Get unit prices with proper handling of editing
+      let unitHT = Number(article.prixUnitaire) || 0;
+      let unitTTC = Number(article.prixTTC) || 0;
+
+      // Handle manual editing
+      if (editingHT[article.article_id] !== undefined) {
+        const editingValue = parseNumericInput(editingHT[article.article_id]);
+        if (!isNaN(editingValue) && editingValue >= 0) {
+          unitHT = editingValue;
+          // Recalculate TTC based on TVA rate
+          const tvaRate = exoneration ? 0 : Number(article.tva) || 0;
+          if (tvaRate > 0) {
+            const tvaAmount = (unitHT * tvaRate) / 100;
+            unitTTC = Math.round((unitHT + tvaAmount) * 1000) / 1000;
+          } else {
+            unitTTC = unitHT;
+          }
+        }
+      } else if (editingTTC[article.article_id] !== undefined) {
+        const editingValue = parseNumericInput(editingTTC[article.article_id]);
+        if (!isNaN(editingValue) && editingValue >= 0) {
+          unitTTC = editingValue;
+          // Recalculate HT based on TVA rate
+          const tvaRate = exoneration ? 0 : Number(article.tva) || 0;
+          if (tvaRate > 0) {
+            const coefficient = 1 + tvaRate / 100;
+            unitHT = Math.round((unitTTC / coefficient) * 1000) / 1000;
+          } else {
+            unitHT = unitTTC;
+          }
+        }
+      }
+
+      // Calculate line amounts
+      const lineHT = Math.round(unitHT * 1000) / 1000;
+      const lineTTC = Math.round(unitTTC * 1000) / 1000;
+
+      const montantSousTotalHT = Math.round(qty * lineHT * 1000) / 1000;
+      const montantNetHTLigne = Math.round(
+        qty * lineHT * (1 - articleRemise / 100) * 1000
+      ) / 1000;
+      const montantTTCLigne = Math.round(qty * lineTTC * 1000) / 1000;
+      const montantTVALigne = Math.round(
+        (montantTTCLigne - montantNetHTLigne) * 1000
+      ) / 1000;
+
+      sousTotalHTValue = Math.round((sousTotalHTValue + montantSousTotalHT) * 1000) / 1000;
+      netHTBeforeGlobalRemise = Math.round((netHTBeforeGlobalRemise + montantNetHTLigne) * 1000) / 1000;
+      totalTaxValue = Math.round((totalTaxValue + montantTVALigne) * 1000) / 1000;
+      grandTotalValue = Math.round((grandTotalValue + montantTTCLigne) * 1000) / 1000;
+    });
+
+    // ✅ STEP 2: Apply global remise according to principle
+    let netHTAfterGlobalRemise = netHTBeforeGlobalRemise;
+    let totalTaxAfterGlobalRemise = totalTaxValue;
+    let finalTotalValue = grandTotalValue;
+    let discountAmountValue = 0;
+    let discountPercentageValue = 0;
+
+    if (showRemise && Number(globalRemise) > 0) {
+      if (remiseType === "percentage") {
+        // ✅ Percentage remise: Apply on HT base
+        discountAmountValue = Math.round(
+          (netHTBeforeGlobalRemise * (Number(globalRemise) / 100)) * 1000
+        ) / 1000;
+        netHTAfterGlobalRemise = Math.round(
+          (netHTBeforeGlobalRemise - discountAmountValue) * 1000
+        ) / 1000;
+
+        // ✅ Recalculate TVA proportionally
+        if (netHTBeforeGlobalRemise > 0) {
+          const tvaToHtRatio = Math.round(
+            (totalTaxValue / netHTBeforeGlobalRemise) * 1000
+          ) / 1000;
+          totalTaxAfterGlobalRemise = Math.round(
+            (netHTAfterGlobalRemise * tvaToHtRatio) * 1000
+          ) / 1000;
+        } else {
+          totalTaxAfterGlobalRemise = 0;
+        }
+
+        finalTotalValue = Math.round(
+          (netHTAfterGlobalRemise + totalTaxAfterGlobalRemise) * 1000
+        ) / 1000;
+      } else if (remiseType === "fixed") {
+        // ✅ Fixed remise: User enters the final TTC amount
+        finalTotalValue = Math.round(Number(globalRemise) * 1000) / 1000;
+
+        // ✅ Check if single or multiple TVA rates
+        const uniqueTvaRates = Array.from(
+          new Set(selectedArticles.map((a) => Number(a.tva) || 0))
+        );
+
+        if (uniqueTvaRates.length === 1 && uniqueTvaRates[0] > 0) {
+          // ✅ SINGLE TVA RATE FORMULA: Net HT = TTC / (1 + TVA rate)
+          const tvaRate = uniqueTvaRates[0] / 100;
+          netHTAfterGlobalRemise = Math.round((finalTotalValue / (1 + tvaRate)) * 1000) / 1000;
+          totalTaxAfterGlobalRemise = Math.round((finalTotalValue - netHTAfterGlobalRemise) * 1000) / 1000;
+        } else {
+          // ✅ MULTIPLE TVA RATES: EXACT SAME CALCULATION AS VENTE COMPTOIRE
+          // IMPORTANT: Ne pas arrondir le coefficient de réduction
+          const discountCoefficient = finalTotalValue / grandTotalValue; // Pas d'arrondi ici
+
+          let newTotalHT = 0;
+          let newTotalTVA = 0;
+
+          selectedArticles.forEach((article) => {
+            const qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
+            const articleRemise = Number(article.remise) || 0;
+            const unitHT = Number(article.prixUnitaire) || 0;
+            const tvaRate = Number(article.tva) || 0;
+
+            // Calculer sans arrondi intermédiaire pour avoir exactement le même résultat
+            const lineHTAfterDiscount = qty * unitHT * (1 - articleRemise / 100);
+            const newLineHT = lineHTAfterDiscount * discountCoefficient;
+            const newLineTVA = newLineHT * (tvaRate / 100);
+
+            newTotalHT += newLineHT;
+            newTotalTVA += newLineTVA;
+          });
+
+          // Arrondir seulement à la fin
+          netHTAfterGlobalRemise = Math.round(newTotalHT * 1000) / 1000;
+          totalTaxAfterGlobalRemise = Math.round(newTotalTVA * 1000) / 1000;
+        }
+
+        discountAmountValue = Math.round(
+          (netHTBeforeGlobalRemise - netHTAfterGlobalRemise) * 1000
+        ) / 1000;
+
+        // Calculate discount percentage for display
+        if (netHTBeforeGlobalRemise > 0) {
+          discountPercentageValue = Math.round(
+            (discountAmountValue / netHTBeforeGlobalRemise) * 100 * 1000
+          ) / 1000;
+        }
       }
     }
-  }, [grandTotal, remiseType, lockedPercentage]);
+
+    // ✅ STEP 3: Apply exoneration - IF exoneration is true, TVA should be 0
+    if (exoneration) {
+      totalTaxAfterGlobalRemise = 0;
+      // When exoneration is active, TTC = HT
+      finalTotalValue = netHTAfterGlobalRemise;
+    }
+
+    // ✅ STEP 4: Add timbre fiscal
+    if (timbreFiscal) {
+      finalTotalValue = Math.round((finalTotalValue + 1) * 1000) / 1000;
+    }
+
+    // ✅ STEP 5: Calculate retention
+    let retentionMontantValue = 0;
+    methodesReglement.forEach((pm) => {
+      if (pm.method === "retenue") {
+        const tauxRetention = pm.tauxRetention || 1;
+        const retentionAmount = Math.round(
+          (finalTotalValue * tauxRetention) / 100 * 1000
+        ) / 1000;
+        retentionMontantValue = Math.round(
+          (retentionMontantValue + retentionAmount) * 1000
+        ) / 1000;
+      }
+    });
+
+    // ✅ STEP 6: Calculate net à payer
+    let netAPayerValue = Math.round((finalTotalValue - retentionMontantValue) * 1000) / 1000;
+    netAPayerValue = Math.max(0, netAPayerValue);
+
+    return {
+      sousTotalHT: sousTotalHTValue,
+      netHT:
+        showRemise && Number(globalRemise) > 0
+          ? netHTAfterGlobalRemise
+          : netHTBeforeGlobalRemise,
+      totalTax: exoneration
+        ? 0
+        : showRemise && Number(globalRemise) > 0
+          ? totalTaxAfterGlobalRemise
+          : totalTaxValue,
+      grandTotal: grandTotalValue,
+      finalTotal: finalTotalValue,
+      discountAmount: discountAmountValue,
+      discountPercentage: discountPercentageValue,
+      retentionMontant: retentionMontantValue,
+      netAPayer: netAPayerValue,
+    };
+  }, [
+    selectedArticles,
+    showRemise,
+    globalRemise,
+    remiseType,
+    editingHT,
+    editingTTC,
+    methodesReglement,
+    timbreFiscal,
+    exoneration,
+  ]);
 
   const handleAddArticle = (articleId: string) => {
     let article = filteredArticles.find((a) => a.id === parseInt(articleId));
@@ -1725,38 +1838,38 @@ const ListFactureClient = () => {
     }
   }, [createEditModal]);
 
-  // Update your toggleCreateEditModal function to clear modal data:
-  const toggleCreateEditModal = useCallback(() => {
-    if (createEditModal) {
-      // Clear all search results when closing modal (EXACT SAME AS BL)
-      setFilteredArticles([]);
-      setFilteredClients([]);
-      setArticleSearch("");
-      setClientSearch("");
-      setFocusedIndex(-1);
-
-      setCreateEditModal(false);
-      setFacture(null);
-      setSelectedArticles([]);
-      setSelectedClient(null);
-      setGlobalRemise(0);
-      setRemiseType("fixed");
-      setShowRemise(false);
-      setIsEdit(false);
-      setTimbreFiscal(true);
-      setExoneration(false);
-      setConditionPaiement("");
-      setMethodesReglement([]);
-      setEspaceNotes("");
-      setRetentionAmount(0);
-      setModalLoading(false); // ADD THIS LINE
-
-      validation.resetForm();
-    } else {
-      setCreateEditModal(true);
-      // Don't load modal data here - useEffect will handle it (EXACT SAME AS BL)
-    }
-  }, [createEditModal]);
+// Update your toggleCreateEditModal function to clear modal data:
+const toggleCreateEditModal = useCallback(() => {
+  if (createEditModal) {
+    // Clear all search results when closing modal (EXACT SAME AS BL)
+    setFilteredArticles([]);
+    setFilteredClients([]);
+    setArticleSearch("");
+    setClientSearch("");
+    setFocusedIndex(-1);
+    
+    setCreateEditModal(false);
+    setFacture(null);
+    setSelectedArticles([]);
+    setSelectedClient(null);
+    setGlobalRemise(0);
+    setRemiseType("fixed");
+    setShowRemise(false);
+    setIsEdit(false);
+    setTimbreFiscal(true);
+    setExoneration(false);
+    setConditionPaiement("");
+    setMethodesReglement([]);
+    setEspaceNotes("");
+    setRetentionAmount(0);
+    setModalLoading(false); // ADD THIS LINE
+    
+    validation.resetForm();
+  } else {
+    setCreateEditModal(true);
+    // Don't load modal data here - useEffect will handle it (EXACT SAME AS BL)
+  }
+}, [createEditModal]);
 
   // Ajouter méthode de règlement
   const addMethodeReglement = () => {
@@ -1819,10 +1932,6 @@ const ListFactureClient = () => {
   }, [methodesReglement]);
 
   const handleSubmit = async (values: any) => {
-    if (discountPercentage > 10 && !isDiscountConfirmed) {
-      setShowDiscountAlert(true);
-      return;
-    }
     try {
       // ✅ CORRECTED VALIDATION: Payment methods should not exceed finalTotal (BEFORE retention)
       // Retention is not a payment - it's a deduction from the total amount
@@ -1927,16 +2036,14 @@ const ListFactureClient = () => {
         ...values,
         taxMode,
         client_id: selectedClient?.id,
-        depot_id: values.depot_id,
         remise: globalRemise,
         remiseType: remiseType,
-        lockedPercentage: lockedPercentage,
         articles: selectedArticles.map((item) => ({
           article_id: item.article_id,
           quantite: item.quantite,
           prix_unitaire: item.prixUnitaire,
           prix_ttc: item.prixTTC,
-          designation: item.designation || item.articleDetails?.designation || "",
+          designation: item.designation || item.articleDetails?.designation || "", // ADD THIS
           tva: item.tva,
           remise: item.remise,
           vendeur_id: selectedVendeur?.id,
@@ -2055,9 +2162,12 @@ const ListFactureClient = () => {
       status: facture?.status ?? "Brouillon",
       notes: facture?.notes ?? "",
       client_id: facture?.client?.id ?? "",
-      depot_id: facture?.depot?.id ?? "",
+      // conditionPaiement: facture?.conditionPaiement ?? "",
       vendeur_id: facture?.vendeur?.id ?? "",
       modeReglement: facture?.modeReglement ?? "Espece",
+      // dateEcheance: facture?.dateEcheance
+      // ? moment(facture.dateEcheance).format("YYYY-MM-DD")
+      // : "",
       montantPaye: facture?.montantPaye ?? 0,
     },
     validationSchema: Yup.object().shape({
@@ -2066,10 +2176,19 @@ const ListFactureClient = () => {
         .required("La date est requise")
         .typeError("Date invalide"),
       status: Yup.string().required("Le statut est requis"),
-      client_id: Yup.number().required("Veuillez sélectionner un client"),
-      vendeur_id: Yup.string().required("Veuillez sélectionner un vendeur"),
-      depot_id: Yup.string().required("Veuillez sélectionner un dépôt"),
+      client_id: Yup.number().required("Le client est requis"),
+      // conditionPaiement: Yup.string().required(
+      // "La condition de paiement est requise"
+      // ),
+      vendeur_id: Yup.number().required("Le vendeur est requis"),
       modeReglement: Yup.string().required("Le mode de règlement est requis"),
+      //dateEcheance: Yup.date()
+      // .required("La date d'échéance est requise")
+      // .min(
+      // Yup.ref("dateFacture"),
+      // "La date d'échéance ne peut pas être antérieure à la date de facture"
+      // )
+      // .typeError("Date d'échéance invalide"),
       montantPaye: Yup.number().min(
         0,
         "Le montant payé ne peut pas être négatif"
@@ -2115,7 +2234,7 @@ const ListFactureClient = () => {
       const initialMontant = availableAmount.toFixed(3).replace(".", ",");
 
       encaissementValidation.setValues({
-        montant: "",
+        montant: initialMontant,
         modePaiement: "Espece",
         numeroEncaissement: nextNumber,
         date: moment().format("YYYY-MM-DD"),
@@ -2182,7 +2301,7 @@ const ListFactureClient = () => {
       const defaultNumber = `ENC-C${year}${String(0 + 1).padStart(5, "0")}`;
 
       encaissementValidation.setValues({
-        montant: "",
+        montant: initialMontant,
         modePaiement: "Espece",
         numeroEncaissement: defaultNumber,
         date: moment().format("YYYY-MM-DD"),
@@ -2346,15 +2465,15 @@ const ListFactureClient = () => {
           "max-reste",
           "Le montant ne peut pas dépasser le reste à payer",
           function (value) {
-            if (!value || !selectedFacture) return true;
+            if (!value || !selectedFacture) return false;
             const numericValue = parseFloat(value.replace(",", "."));
 
-            const totals = calculateFactureTotals(selectedFacture);
-            const currentPaid = Number(selectedFacture.montantPaye) || 0;
-            const realAvailable = Math.round((totals.netAPayer - currentPaid) * 1000) / 1000;
+            // ✅ USE THE EXACT SAME CALCULATION AS TABLE - JUST USE RESTEAPAYER DIRECTLY
+            const availableAmount = Number(selectedFacture.resteAPayer) || 0;
 
             const roundedValue = Math.round(numericValue * 1000) / 1000;
-            return roundedValue <= Math.max(0, realAvailable) + 0.001; // Small buffer for rounding if needed
+            const roundedAvailable = Math.round(availableAmount * 1000) / 1000;
+            return roundedValue <= roundedAvailable;
           }
         )
         .required("Le montant est requis"),
@@ -2483,19 +2602,6 @@ const ListFactureClient = () => {
       </span>
     );
   };
-  const journalTotals = useMemo(() => {
-    return filteredFactures.reduce(
-      (acc, f) => {
-        const totals = calculateFactureTotals(f);
-        return {
-          totalHT: acc.totalHT + totals.netHT,
-          totalTTC: acc.totalTTC + totals.netAPayer,
-        };
-      },
-      { totalHT: 0, totalTTC: 0 }
-    );
-  }, [filteredFactures]);
-
   const columns = useMemo(
     () => [
       {
@@ -2512,6 +2618,7 @@ const ListFactureClient = () => {
           </Link>
         ),
       },
+      // In your columns array, add this column:
       {
         header: "Source",
         accessorKey: "sourceInfo",
@@ -2523,13 +2630,6 @@ const ListFactureClient = () => {
               <Badge color="info">
                 <i className="ri-shopping-bag-line me-1"></i>
                 {facture.bonCommandeClient.numeroCommande}
-              </Badge>
-            );
-          } else if (facture.bonLivraison) {
-            return (
-              <Badge color="secondary">
-                <i className="ri-truck-line me-1"></i>
-                {facture.bonLivraison.numeroLivraison}
               </Badge>
             );
           } else if (facture.venteComptoire) {
@@ -2556,65 +2656,40 @@ const ListFactureClient = () => {
         cell: (cell: any) => cell.getValue()?.raison_sociale || "N/A",
       },
       {
-        header: "Total HT (Net)",
-        accessorKey: "totalHT",
+        header: "Total TTC",
+        accessorKey: "totalTTC",
         enableColumnFilter: false,
         cell: (cell: any) => {
-          const totals = calculateFactureTotals(cell.row.original);
-          return `${totals.netHT.toFixed(3)} DT`;
+          const total = Number(cell.getValue()) || 0;
+          return `${total.toFixed(3)} DT`; // ✅ Changed to 3 decimal places
         },
       },
       {
-        header: "Total TTC (Net à Payer)",
-        accessorKey: "netAPayer",
+        header: "Total TTC Après Remise",
+        accessorKey: "totalTTCAfterRemise", // Use the calculated field
         enableColumnFilter: false,
         cell: (cell: any) => {
-          const totals = calculateFactureTotals(cell.row.original);
-          return `${totals.netAPayer.toFixed(3)} DT`;
+          const total = Number(cell.getValue()) || 0;
+          return `${total.toFixed(3)} DT`; // ✅ Changed to 3 decimal places
         },
       },
       {
         header: "Payé",
         accessorKey: "montantPaye",
         enableColumnFilter: false,
-        cell: (cell: any) => {
-          const totalPaye = Number(cell.row.original.montantPaye) || 0;
-          return `${totalPaye.toFixed(3)} DT`;
-        },
+        cell: (cell: any) => `${Number(cell.getValue()).toFixed(3)} DT`, // ✅ 3 decimal places
       },
       {
         header: "Reste à payer",
         accessorKey: "resteAPayer",
         enableColumnFilter: false,
-        cell: (cell: any) => {
-          const totals = calculateFactureTotals(cell.row.original);
-          const paye = Number(cell.row.original.montantPaye) || 0;
-          const reste = Math.round((totals.netAPayer - paye) * 1000) / 1000;
-          return `${Math.max(0, reste < 0.005 ? 0 : reste).toFixed(3)} DT`;
-        },
+        cell: (cell: any) => `${Number(cell.getValue()).toFixed(3)} DT`, // ✅ 3 decimal places
       },
       {
         header: "Statut",
         accessorKey: "status",
         enableColumnFilter: false,
-        cell: (cell: any) => {
-          const facture = cell.row.original;
-          const totals = calculateFactureTotals(facture);
-          const paye = Number(facture.montantPaye) || 0;
-          const reste = Math.round((totals.netAPayer - paye) * 1000) / 1000;
-
-          let status = facture.status;
-          if (status !== "Annulee") {
-            if ((reste <= 0.005 || reste <= 0) && totals.netAPayer > 0) {
-              status = "Payee";
-            } else if (paye > 0 && reste > 0) {
-              status = "Partiellement Payee";
-            } else {
-              status = "Validee";
-            }
-          }
-          return <StatusBadge status={status} />;
-        },
+        cell: (cell: any) => <StatusBadge status={cell.getValue()} />,
       },
       {
         header: "Action",
@@ -2690,14 +2765,6 @@ const ListFactureClient = () => {
                       >
                         <i className="ri-add-line align-bottom me-1"></i>{" "}
                         Ajouter Facture
-                      </Button>
-                      <Button
-                        color="success"
-                        onClick={handleExportJournal}
-                        className="btn-invoice btn-invoice-success"
-                      >
-                        <i className="ri-file-pdf-line align-bottom me-1"></i>
-                        Journal Factures
                       </Button>
                     </div>
                   </div>
@@ -2874,119 +2941,6 @@ const ListFactureClient = () => {
                     theadClass="table-light text-muted text-uppercase"
                   />
                 )}
-
-
-
-                {/* Journal Factures Modal */}
-                {/* Journal Factures Modal */}
-                <Modal
-                  isOpen={journalModal}
-                  toggle={() => {
-                    setJournalModal(false);
-                    if (journalPDFBlob) {
-                      URL.revokeObjectURL(journalPDFBlob);
-                      setJournalPDFBlob(null);
-                    }
-                  }}
-                  size="xl"
-                  centered
-                  className="journal-modal"
-                  style={{ maxWidth: "90%", width: "90%" }}
-                >
-                  <ModalHeader toggle={() => {
-                    setJournalModal(false);
-                    if (journalPDFBlob) {
-                      URL.revokeObjectURL(journalPDFBlob);
-                      setJournalPDFBlob(null);
-                    }
-                  }}>
-                    <div className="d-flex align-items-center">
-                      <div className="modal-icon-wrapper bg-danger bg-opacity-10 rounded-circle p-2 me-3">
-                        <i className="ri-file-pdf-line text-danger fs-4"></i>
-                      </div>
-                      <div>
-                        <h4 className="mb-0 fw-bold text-dark">Journal des Factures</h4>
-                        <small className="text-muted">
-                          {startDate && endDate
-                            ? `Du ${moment(startDate).format("DD/MM/YYYY")} au ${moment(endDate).format("DD/MM/YYYY")}`
-                            : startDate
-                              ? `À partir du ${moment(startDate).format("DD/MM/YYYY")}`
-                              : endDate
-                                ? `Jusqu'au ${moment(endDate).format("DD/MM/YYYY")}`
-                                : "Toutes les factures"}
-                        </small>
-                      </div>
-                    </div>
-                  </ModalHeader>
-                  <ModalBody style={{ padding: 0, height: "85vh" }}>
-                    {journalPDFBlob ? (
-                      <iframe
-                        src={journalPDFBlob}
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          border: "none",
-                          backgroundColor: "#f5f5f5",
-                        }}
-                        title="Journal des Factures"
-                      />
-                    ) : (
-                      <div className="d-flex justify-content-center align-items-center h-100">
-                        <div className="text-center">
-                          <i className="ri-loader-4-line fs-1 text-primary spin-icon mb-3"></i>
-                          <p>Génération du PDF en cours...</p>
-                        </div>
-                      </div>
-                    )}
-                  </ModalBody>
-                  <ModalFooter className="border-0 pt-3">
-                    {journalPDFBlob && (
-                      <>
-                        <Button
-                          color="primary"
-                          onClick={() => {
-                            const link = document.createElement("a");
-                            link.href = journalPDFBlob;
-                            link.download = `Journal_Factures_${moment().format("YYYY-MM-DD_HH-mm")}.pdf`;
-                            link.click();
-                          }}
-                          className="btn-invoice-primary"
-                        >
-                          <i className="ri-download-line me-2"></i>
-                          Télécharger
-                        </Button>
-                        <Button
-                          color="success"
-                          onClick={() => {
-                            const iframe = document.querySelector('.journal-modal iframe') as HTMLIFrameElement;
-                            if (iframe && iframe.contentWindow) {
-                              iframe.contentWindow.print();
-                            }
-                          }}
-                          className="btn-invoice-success"
-                        >
-                          <i className="ri-printer-line me-2"></i>
-                          Imprimer
-                        </Button>
-                      </>
-                    )}
-                    <Button
-                      color="light"
-                      onClick={() => {
-                        setJournalModal(false);
-                        if (journalPDFBlob) {
-                          URL.revokeObjectURL(journalPDFBlob);
-                          setJournalPDFBlob(null);
-                        }
-                      }}
-                      className="btn-invoice"
-                    >
-                      <i className="ri-close-line me-2"></i>
-                      Fermer
-                    </Button>
-                  </ModalFooter>
-                </Modal>
-
 
                 {/* Quick Client Creation Modal */}
                 {/* Replace your current Client Creation Modal with this complete version */}
@@ -3971,39 +3925,155 @@ const ListFactureClient = () => {
                                   {(() => {
                                     if (!selectedFacture) return null;
 
-                                    const totals = calculateDocumentTotals(
-                                      {
-                                        articles: (selectedFacture.articles || []).map((a: any) => ({
-                                          ...a,
-                                          prixUnitaire: a.prixUnitaire,
-                                          prixTTC: a.prix_ttc || (a.prixUnitaire * (1 + (a.tva || 0) / 100))
-                                        })),
-                                        remise: Number(selectedFacture.remise) || 0,
-                                        remiseType: selectedFacture.remiseType || "fixed",
-                                        exoneration: !!selectedFacture.exoneration,
-                                        timbreFiscal: !!selectedFacture.timbreFiscal,
-                                        methodesReglement: selectedFacture.paymentMethods || [],
-                                      }
-                                    );
-
-                                    const {
-                                      sousTotalHT: sousTotalHTValue,
-                                      netHT: netHTAfterGlobalRemise,
-                                      totalTax: totalTaxAfterGlobalRemise,
-                                      grandTotal: grandTotalValue,
-                                      discountAmount: discountAmountValue,
-                                      discountPercentage,
-                                      retentionMontant: retentionAmount,
-                                      netAPayer: netAPayerValue,
-                                    } = totals;
-
+                                    const articles = selectedFacture.articles || [];
                                     const remiseValue = Number(selectedFacture.remise) || 0;
                                     const remiseTypeValue = selectedFacture.remiseType || "fixed";
                                     const isExoneration = !!selectedFacture.exoneration;
                                     const hasTimbreFiscal = !!selectedFacture.timbreFiscal;
+                                    const retentionAmount = Number(selectedFacture.montantRetenue) || 0;
 
-                                    const displayNetHT = netHTAfterGlobalRemise;
-                                    const displayTotalTax = totalTaxAfterGlobalRemise;
+                                    // ✅ STEP 1: Calculate totals WITHOUT considering global remise
+                                    let sousTotalHTValue = 0;
+                                    let netHTBeforeGlobalRemise = 0;
+                                    let totalTaxValue = 0;
+                                    let grandTotalValue = 0;
+
+                                    articles.forEach((article: any) => {
+                                      const qty = Number(article.quantite) || 0;
+                                      const articleRemise = Number(article.remise || 0);
+
+                                      const priceHT = Number(article.prixUnitaire) || 0;
+                                      const tvaRate = isExoneration ? 0 : Number(article.tva ?? 0);
+                                      const priceTTC = Number(article.prix_ttc) ||
+                                        Number(article.article?.puv_ttc) ||
+                                        priceHT * (1 + tvaRate / 100);
+
+                                      const lineHT = Math.round(priceHT * 1000) / 1000;
+                                      const lineTTC = Math.round(priceTTC * 1000) / 1000;
+
+                                      const montantSousTotalHT = Math.round(qty * lineHT * 1000) / 1000;
+                                      const montantNetHTLigne = Math.round(
+                                        qty * lineHT * (1 - articleRemise / 100) * 1000
+                                      ) / 1000;
+                                      const montantTTCLigne = Math.round(qty * lineTTC * 1000) / 1000;
+                                      const montantTVALigne = Math.round(
+                                        (montantTTCLigne - montantNetHTLigne) * 1000
+                                      ) / 1000;
+
+                                      sousTotalHTValue = Math.round((sousTotalHTValue + montantSousTotalHT) * 1000) / 1000;
+                                      netHTBeforeGlobalRemise = Math.round((netHTBeforeGlobalRemise + montantNetHTLigne) * 1000) / 1000;
+                                      totalTaxValue = Math.round((totalTaxValue + montantTVALigne) * 1000) / 1000;
+                                      grandTotalValue = Math.round((grandTotalValue + montantTTCLigne) * 1000) / 1000;
+                                    });
+
+                                    // ✅ STEP 2: Apply global remise according to principle
+                                    let netHTAfterGlobalRemise = netHTBeforeGlobalRemise;
+                                    let totalTaxAfterGlobalRemise = totalTaxValue;
+                                    let finalTotalValue = grandTotalValue;
+                                    let discountAmountValue = 0;
+                                    let discountPercentage = 0;
+
+                                    if (remiseValue > 0) {
+                                      if (remiseTypeValue === "percentage") {
+                                        // ✅ Percentage remise: Apply on HT base
+                                        discountAmountValue = Math.round(
+                                          (netHTBeforeGlobalRemise * (remiseValue / 100)) * 1000
+                                        ) / 1000;
+                                        netHTAfterGlobalRemise = Math.round(
+                                          (netHTBeforeGlobalRemise - discountAmountValue) * 1000
+                                        ) / 1000;
+
+                                        if (netHTBeforeGlobalRemise > 0) {
+                                          const tvaToHtRatio = Math.round(
+                                            (totalTaxValue / netHTBeforeGlobalRemise) * 1000
+                                          ) / 1000;
+                                          totalTaxAfterGlobalRemise = Math.round(
+                                            (netHTAfterGlobalRemise * tvaToHtRatio) * 1000
+                                          ) / 1000;
+                                        } else {
+                                          totalTaxAfterGlobalRemise = 0;
+                                        }
+
+                                        finalTotalValue = Math.round(
+                                          (netHTAfterGlobalRemise + totalTaxAfterGlobalRemise) * 1000
+                                        ) / 1000;
+                                      } else if (remiseTypeValue === "fixed") {
+                                        // ✅ Fixed remise: User enters the final TTC amount
+                                        finalTotalValue = Math.round(remiseValue * 1000) / 1000;
+
+                                        const uniqueTvaRates = Array.from(
+                                          new Set(articles.map((a: any) => Number(a.tva ?? 0)))
+                                        );
+
+                                        if (uniqueTvaRates.length === 1 && uniqueTvaRates[0] > 0) {
+                                          // ✅ SINGLE TVA RATE FORMULA: Net HT = TTC / (1 + TVA rate)
+                                          const tvaRate = uniqueTvaRates[0] / 100;
+                                          netHTAfterGlobalRemise = Math.round((finalTotalValue / (1 + tvaRate)) * 1000) / 1000;
+                                          totalTaxAfterGlobalRemise = Math.round((finalTotalValue - netHTAfterGlobalRemise) * 1000) / 1000;
+                                        } else {
+                                          // ✅ MULTIPLE TVA RATES: EXACT SAME CALCULATION
+                                          // IMPORTANT: Pas d'arrondi sur le coefficient
+                                          const discountCoefficient = finalTotalValue / grandTotalValue;
+
+                                          let newTotalHT = 0;
+                                          let newTotalTVA = 0;
+
+                                          articles.forEach((article: any) => {
+                                            const qty = Number(article.quantite) || 0;
+                                            const articleRemise = Number(article.remise || 0);
+                                            const unitHT = Number(article.prixUnitaire) || 0;
+                                            const tvaRate = Number(article.tva ?? 0) / 100;
+
+                                            // Calcul exact sans arrondi intermédiaire
+                                            const lineHTAfterDiscount = qty * unitHT * (1 - articleRemise / 100);
+                                            const newLineHT = lineHTAfterDiscount * discountCoefficient;
+                                            const newLineTVA = newLineHT * tvaRate;
+
+                                            newTotalHT += newLineHT;
+                                            newTotalTVA += newLineTVA;
+                                          });
+
+                                          // Arrondir seulement à la fin
+                                          netHTAfterGlobalRemise = Math.round(newTotalHT * 1000) / 1000;
+                                          totalTaxAfterGlobalRemise = Math.round(newTotalTVA * 1000) / 1000;
+                                        }
+
+                                        discountAmountValue = Math.round(
+                                          (netHTBeforeGlobalRemise - netHTAfterGlobalRemise) * 1000
+                                        ) / 1000;
+
+                                        if (netHTBeforeGlobalRemise > 0) {
+                                          discountPercentage = Math.round(
+                                            (discountAmountValue / netHTBeforeGlobalRemise) * 100 * 1000
+                                          ) / 1000;
+                                        }
+                                      }
+                                    }
+
+                                    // ✅ STEP 3: Apply exoneration - IF exoneration is true, TVA should be 0
+                                    if (isExoneration) {
+                                      totalTaxAfterGlobalRemise = 0;
+                                      finalTotalValue = netHTAfterGlobalRemise;
+                                    }
+
+                                    // ✅ STEP 4: Add timbre fiscal
+                                    if (hasTimbreFiscal) {
+                                      finalTotalValue = Math.round((finalTotalValue + 1) * 1000) / 1000;
+                                    }
+
+                                    // ✅ STEP 5: Calculate net à payer (after retention)
+                                    let netAPayerValue = Math.round((finalTotalValue - retentionAmount) * 1000) / 1000;
+                                    netAPayerValue = Math.max(0, netAPayerValue);
+
+                                    const displayNetHT = remiseValue > 0
+                                      ? netHTAfterGlobalRemise
+                                      : netHTBeforeGlobalRemise;
+
+                                    const displayTotalTax = isExoneration
+                                      ? 0
+                                      : remiseValue > 0
+                                        ? totalTaxAfterGlobalRemise
+                                        : totalTaxValue;
 
                                     return (
                                       <Table className="table-sm table-borderless mb-0">
@@ -4261,106 +4331,6 @@ const ListFactureClient = () => {
                               </Col>
                             )}
 
-                            {/* ✅ ADD BON LIVRAISON PAYMENTS */}
-                            {selectedFacture.bonLivraison && (
-                              <Col md={6}>
-                                <div className="border rounded p-3 bg-secondary bg-opacity-10">
-                                  <div className="d-flex justify-content-between align-items-center mb-2">
-                                    <div>
-                                      <h6 className="fw-semibold mb-1 text-dark">
-                                        <i className="ri-truck-line me-1 text-secondary"></i>
-                                        Bon de Livraison
-                                      </h6>
-                                      <small className="text-muted">
-                                        {
-                                          selectedFacture.bonLivraison
-                                            .numeroLivraison
-                                        }
-                                      </small>
-                                    </div>
-                                    <Badge color="secondary" pill>
-                                      Livraison
-                                    </Badge>
-                                  </div>
-
-                                  {/* Bon Livraison Payment Methods */}
-                                  {selectedFacture.bonLivraison.paymentMethods &&
-                                    selectedFacture.bonLivraison.paymentMethods.filter(
-                                      (pm: any) =>
-                                        pm.method !== "retenue" &&
-                                        Number(pm.amount || 0) > 0
-                                    ).length > 0 && (
-                                      <div className="mt-2 pt-2 border-top">
-                                        <small className="text-muted d-block">
-                                          Règlements:
-                                        </small>
-                                        <div className="small">
-                                          {selectedFacture.bonLivraison.paymentMethods
-                                            .filter(
-                                              (pm: any) =>
-                                                pm.method !== "retenue" &&
-                                                Number(pm.amount || 0) > 0
-                                            )
-                                            .map((pm: any, idx: number) => (
-                                              <div
-                                                key={idx}
-                                                className="d-flex justify-content-between"
-                                              >
-                                                <span>
-                                                  {formatPaymentMethodName(
-                                                    pm.method
-                                                  )}
-                                                </span>
-                                                <span className="fw-semibold">
-                                                  {Number(
-                                                    pm.amount || 0
-                                                  ).toFixed(3)}{" "}
-                                                  DT
-                                                </span>
-                                              </div>
-                                            ))}
-                                        </div>
-                                      </div>
-                                    )}
-
-                                  {/* Bon Livraison Paiements */}
-                                  {selectedFacture.bonLivraison.paiements &&
-                                    selectedFacture.bonLivraison.paiements.length > 0 && (
-                                      <div className="mt-2 pt-2 border-top">
-                                        <small className="text-muted d-block">
-                                          Paiements Client:
-                                        </small>
-                                        <div className="small">
-                                          {selectedFacture.bonLivraison.paiements
-                                            .filter(
-                                              (p: any) =>
-                                                Number(p.montant || 0) > 0
-                                            )
-                                            .map(
-                                              (paiement: any, idx: number) => (
-                                                <div
-                                                  key={idx}
-                                                  className="d-flex justify-content-between"
-                                                >
-                                                  <span>
-                                                    {paiement.modePaiement}
-                                                  </span>
-                                                  <span className="fw-semibold text-success">
-                                                    {Number(
-                                                      paiement.montant || 0
-                                                    ).toFixed(3)}{" "}
-                                                    DT
-                                                  </span>
-                                                </div>
-                                              )
-                                            )}
-                                        </div>
-                                      </div>
-                                    )}
-                                </div>
-                              </Col>
-                            )}
-
                             {/* ✅ ADD VENTE COMPTOIRE PAYMENTS */}
                             {selectedFacture.venteComptoire && (
                               <Col md={6}>
@@ -4460,8 +4430,6 @@ const ListFactureClient = () => {
                                       Tous paiements confondus
                                       {selectedFacture.venteComptoire &&
                                         " (incl. vente comptoire)"}
-                                      {selectedFacture.bonLivraison &&
-                                        " (incl. bon livraison)"}
                                     </small>
                                   </div>
                                 </div>
@@ -4545,8 +4513,6 @@ const ListFactureClient = () => {
                             selectedFacture.conditionPaiement
                           );
                           setSelectedVendeur(selectedFacture.vendeur || null); // FIXED: Handle undefined
-                          setSelectedDepot(selectedFacture.depot || null);
-                          validation.setFieldValue("depot_id", selectedFacture.depot?.id || "");
                           setDetailModal(false); // Close details modal
                         }}
                         className="btn-invoice btn-invoice-primary me-2"
@@ -4587,20 +4553,6 @@ const ListFactureClient = () => {
                         <i className="ri-file-pdf-line me-2"></i> Facture PDF
                       </Button>
                     )}
-
-                    {selectedFacture && (
-                      <Button
-                        color="info"
-                        onClick={() => {
-                          openReceiptModal(selectedFacture);
-                          setDetailModal(false);
-                        }}
-                        className="btn-invoice btn-invoice-info me-2"
-                      >
-                        <i className="ri-receipt-line me-2"></i> Petit Reçu
-                      </Button>
-                    )}
-
                     <Button
                       color="danger"
                       size="md"
@@ -4766,342 +4718,296 @@ const ListFactureClient = () => {
                         </CardBody>
                       </Card>
                       {/* Client and Vendeur Section */}
-                      {/* Client and Vendeur Section */}
-                      <Row className="g-3 mb-4">
-                        <Col md={4}>
-                          <Card className="border-0 shadow-sm h-100">
-                            <CardBody className="p-4">
-                              <h6 className="fw-semibold mb-3 text-primary">
-                                <i className="ri-user-line me-2"></i>
-                                Informations Client
-                              </h6>
+                  {/* Client and Vendeur Section */}
+<Row className="g-3 mb-4">
+  <Col md={6}>
+    <Card className="border-0 shadow-sm h-100">
+      <CardBody className="p-4">
+        <h6 className="fw-semibold mb-3 text-primary">
+          <i className="ri-user-line me-2"></i>
+          Informations Client
+        </h6>
 
-                              {/* Enhanced Client Search Section - SAME AS BON COMMANDE */}
-                              <div className="mb-3 position-relative">
-                                <Label className="form-label-lg fw-semibold">
-                                  Client <span className="text-danger"> *</span>
-                                  {!selectedClient && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-link text-primary p-0 ms-2"
-                                      onClick={() => setClientModal(true)}
-                                      title="Ajouter un nouveau client"
-                                      style={{ fontSize: "0.8rem" }}
-                                    >
-                                      <i className="ri-add-line me-1"></i>
-                                      Nouveau client
-                                    </button>
-                                  )}
-                                </Label>
+        {/* Enhanced Client Search Section - SAME AS BON COMMANDE */}
+        <div className="mb-3 position-relative">
+          <Label className="form-label-lg fw-semibold">
+            Client <span className="text-danger"> *</span>
+            {!selectedClient && (
+              <button
+                type="button"
+                className="btn btn-link text-primary p-0 ms-2"
+                onClick={() => setClientModal(true)}
+                title="Ajouter un nouveau client"
+                style={{ fontSize: "0.8rem" }}
+              >
+                <i className="ri-add-line me-1"></i>
+                Nouveau client
+              </button>
+            )}
+          </Label>
 
-                                <div className="position-relative">
-                                  <Input
-                                    type="text"
-                                    placeholder="Rechercher ..."
-                                    value={
-                                      selectedClient
-                                        ? selectedClient.raison_sociale
-                                        : clientSearch
-                                    }
-                                    onChange={(e) => {
-                                      const value = e.target.value;
-                                      if (!value) {
-                                        setSelectedClient(null);
-                                        validation.setFieldValue("client_id", "");
-                                        setClientSearch("");
-                                      } else {
-                                        // Auto-format phone if mostly digits
-                                        const digitCount = (value.match(/\d/g) || []).length;
-                                        const totalLength = value.length;
-                                        if (digitCount >= totalLength * 0.7) {
-                                          const formatted = formatPhoneInput(value);
-                                          setClientSearch(formatted);
-                                        } else {
-                                          setClientSearch(value);
-                                        }
-                                      }
-                                    }}
-                                    onFocus={() => {
-                                      if (clientSearch.length >= 1) {
-                                        setFilteredClients(clients);
-                                      }
-                                    }}
-                                    readOnly={!!selectedClient}
-                                    className="form-control-lg pe-10"
-                                  />
+          <div className="position-relative">
+            <Input
+              type="text"
+              placeholder="Rechercher par nom, raison sociale ou téléphone..."
+              value={
+                selectedClient
+                  ? selectedClient.raison_sociale
+                  : clientSearch
+              }
+              onChange={(e) => {
+                const value = e.target.value;
+                if (!value) {
+                  setSelectedClient(null);
+                  validation.setFieldValue("client_id", "");
+                  setClientSearch("");
+                } else {
+                  // Auto-format phone if mostly digits
+                  const digitCount = (value.match(/\d/g) || []).length;
+                  const totalLength = value.length;
+                  if (digitCount >= totalLength * 0.7) {
+                    const formatted = formatPhoneInput(value);
+                    setClientSearch(formatted);
+                  } else {
+                    setClientSearch(value);
+                  }
+                }
+              }}
+              onFocus={() => {
+                if (clientSearch.length >= 1) {
+                  setFilteredClients(clients);
+                }
+              }}
+              readOnly={!!selectedClient}
+              className="form-control-lg pe-10"
+            />
 
-                                  {/* Clear button when client is selected */}
-                                  {selectedClient && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-link text-danger position-absolute end-0 top-50 translate-middle-y p-0 me-3"
-                                      onClick={() => {
-                                        setSelectedClient(null);
-                                        validation.setFieldValue("client_id", "");
-                                        setClientSearch("");
-                                      }}
-                                      title="Changer de client"
-                                    >
-                                      <i className="ri-close-line fs-5"></i>
-                                    </button>
-                                  )}
+            {/* Clear button when client is selected */}
+            {selectedClient && (
+              <button
+                type="button"
+                className="btn btn-link text-danger position-absolute end-0 top-50 translate-middle-y p-0 me-3"
+                onClick={() => {
+                  setSelectedClient(null);
+                  validation.setFieldValue("client_id", "");
+                  setClientSearch("");
+                }}
+                title="Changer de client"
+              >
+                <i className="ri-close-line fs-5"></i>
+              </button>
+            )}
 
-                                  {/* Add new client button when no client selected */}
-                                  {!selectedClient && (
-                                    <button
-                                      type="button"
-                                      className="btn btn-link text-primary position-absolute end-0 top-50 translate-middle-y p-0 me-3"
-                                      onClick={() => setClientModal(true)}
-                                      title="Ajouter un nouveau client"
-                                    >
-                                      <i className="ri-add-line fs-5"></i>
-                                    </button>
-                                  )}
-                                </div>
+            {/* Add new client button when no client selected */}
+            {!selectedClient && (
+              <button
+                type="button"
+                className="btn btn-link text-primary position-absolute end-0 top-50 translate-middle-y p-0 me-3"
+                onClick={() => setClientModal(true)}
+                title="Ajouter un nouveau client"
+              >
+                <i className="ri-add-line fs-5"></i>
+              </button>
+            )}
+          </div>
 
-                                {/* Dropdown Results - same enhanced style as Bon Commande */}
-                                {!selectedClient && clientSearch.length >= 3 && (
-                                  <div
-                                    className="search-results client-results mt-1"
-                                    style={{
-                                      position: "absolute",
-                                      top: "100%", // Position below the input
-                                      left: 0,
-                                      right: 0,
-                                      zIndex: 1050,
-                                      backgroundColor: "#fafafa", // Light grey background
-                                      border: "1px solid #e9ecef",
-                                      borderRadius: "0.375rem",
-                                      boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)",
-                                      maxHeight: "400px",
-                                      overflowY: "auto"
-                                    }}
-                                  >
-                                    {filteredClients.length > 0 ? (
-                                      <ul className="list-group list-group-flush">
-                                        {filteredClients.map((c) => (
-                                          <li
-                                            key={c.id}
-                                            className="list-group-item list-group-item-action"
-                                            onClick={() => {
-                                              setSelectedClient(c);
-                                              validation.setFieldValue("client_id", c.id);
-                                              setClientSearch("");
-                                              setFilteredClients([]);
-                                            }}
-                                            style={{
-                                              cursor: "pointer",
-                                              padding: "12px 16px",
-                                              position: "relative",
-                                              transition: "all 0.15s ease",
-                                              backgroundColor: "transparent",
-                                              borderBottom: "1px solid #f1f3f5"
-                                            }}
-                                            onMouseEnter={(e) => {
-                                              e.currentTarget.style.backgroundColor = "#f5f5f5";
-                                              e.currentTarget.style.borderLeft = "3px solid #0d6efd";
-                                            }}
-                                            onMouseLeave={(e) => {
-                                              e.currentTarget.style.backgroundColor = "transparent";
-                                              e.currentTarget.style.borderLeft = "none";
-                                            }}
-                                          >
-                                            {/* Client Main Info */}
-                                            <div className="d-flex flex-column">
-                                              {/* Raison Sociale + Edit button */}
-                                              <div className="d-flex justify-content-between align-items-start mb-1 position-relative">
-                                                <span className="fw-semibold client-info-name">
-                                                  {c.raison_sociale}
-                                                </span>
+          {/* Dropdown Results - same enhanced style as Bon Commande */}
+          {!selectedClient && clientSearch.length >= 3 && (
+            <div
+              className="search-results client-results mt-1"
+              style={{
+                position: "absolute",
+                top: "100%", // Position below the input
+                left: 0,
+                right: 0,
+                zIndex: 1050,
+                backgroundColor: "#fafafa", // Light grey background
+                border: "1px solid #e9ecef",
+                borderRadius: "0.375rem",
+                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)",
+                maxHeight: "400px",
+                overflowY: "auto"
+              }}
+            >
+              {filteredClients.length > 0 ? (
+                <ul className="list-group list-group-flush">
+                  {filteredClients.map((c) => (
+                    <li
+                      key={c.id}
+                      className="list-group-item list-group-item-action"
+                      onClick={() => {
+                        setSelectedClient(c);
+                        validation.setFieldValue("client_id", c.id);
+                        setClientSearch("");
+                        setFilteredClients([]);
+                      }}
+                      style={{
+                        cursor: "pointer",
+                        padding: "12px 16px",
+                        position: "relative",
+                        transition: "all 0.15s ease",
+                        backgroundColor: "transparent",
+                        borderBottom: "1px solid #f1f3f5"
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = "#f5f5f5";
+                        e.currentTarget.style.borderLeft = "3px solid #0d6efd";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = "transparent";
+                        e.currentTarget.style.borderLeft = "none";
+                      }}
+                    >
+                      {/* Client Main Info */}
+                      <div className="d-flex flex-column">
+                        {/* Raison Sociale + Edit button */}
+                        <div className="d-flex justify-content-between align-items-start mb-1 position-relative">
+                          <span className="fw-semibold client-info-name">
+                            {c.raison_sociale}
+                          </span>
 
-                                                {/* Edit icon - positioned top-right */}
-                                                <button
-                                                  type="button"
-                                                  className="btn btn-link text-primary p-0 edit-client-btn"
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    e.preventDefault();
-                                                    handleEditClient(c, e);
-                                                  }}
-                                                  title="Modifier ce client"
-                                                  style={{
-                                                    opacity: 0.6,
-                                                    transition: "opacity 0.2s, transform 0.2s",
-                                                    background: "white",
-                                                    borderRadius: "50%",
-                                                    width: "28px",
-                                                    height: "28px",
-                                                    display: "flex",
-                                                    alignItems: "center",
-                                                    justifyContent: "center",
-                                                    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
-                                                    zIndex: 2,
-                                                    position: "relative", // Changed from absolute to relative
-                                                    marginLeft: "auto" // This pushes it to the end
-                                                  }}
-                                                  onMouseEnter={(e) => {
-                                                    e.currentTarget.style.opacity = "1";
-                                                    e.currentTarget.style.transform = "scale(1.1)";
-                                                  }}
-                                                  onMouseLeave={(e) => {
-                                                    e.currentTarget.style.opacity = "0.7";
-                                                    e.currentTarget.style.transform = "scale(1)";
-                                                  }}
-                                                >
-                                                  <i className="ri-edit-line fs-5"></i>
-                                                </button>
-                                              </div>
+                          {/* Edit icon - positioned top-right */}
+                          <button
+                            type="button"
+                            className="btn btn-link text-primary p-0 edit-client-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              handleEditClient(c, e);
+                            }}
+                            title="Modifier ce client"
+                            style={{
+                              opacity: 0.6,
+                              transition: "opacity 0.2s, transform 0.2s",
+                              background: "white",
+                              borderRadius: "50%",
+                              width: "28px",
+                              height: "28px",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                              zIndex: 2,
+                              position: "relative", // Changed from absolute to relative
+                              marginLeft: "auto" // This pushes it to the end
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.opacity = "1";
+                              e.currentTarget.style.transform = "scale(1.1)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.opacity = "0.7";
+                              e.currentTarget.style.transform = "scale(1)";
+                            }}
+                          >
+                            <i className="ri-edit-line fs-5"></i>
+                          </button>
+                        </div>
 
-                                              {/* Phone 1 */}
-                                              {c.telephone1 && (
-                                                <div className="mb-1">
-                                                  <span className="client-info-phone d-flex align-items-center">
-                                                    <i className="ri-phone-line me-1" style={{ fontSize: "0.75rem" }}></i>
-                                                    {formatPhoneDisplay(c.telephone1)}
-                                                  </span>
-                                                </div>
-                                              )}
+                        {/* Phone 1 */}
+                        {c.telephone1 && (
+                          <div className="mb-1">
+                            <span className="client-info-phone d-flex align-items-center">
+                              <i className="ri-phone-line me-1" style={{ fontSize: "0.75rem" }}></i>
+                              {formatPhoneDisplay(c.telephone1)}
+                            </span>
+                          </div>
+                        )}
 
-                                              {/* Phone 2 + Designation */}
-                                              <div className="d-flex justify-content-between align-items-center mt-1">
-                                                {c.designation && (
-                                                  <small className="client-info-designation">
-                                                    {c.designation}
-                                                  </small>
-                                                )}
-                                                {c.telephone2 && (
-                                                  <small className="client-info-phone">
-                                                    <i className="ri-phone-line me-1" style={{ fontSize: "0.75rem" }}></i>
-                                                    {formatPhoneDisplay(c.telephone2)}
-                                                  </small>
-                                                )}
-                                              </div>
+                        {/* Phone 2 + Designation */}
+                        <div className="d-flex justify-content-between align-items-center mt-1">
+                          {c.designation && (
+                            <small className="client-info-designation">
+                              {c.designation}
+                            </small>
+                          )}
+                          {c.telephone2 && (
+                            <small className="client-info-phone">
+                              <i className="ri-phone-line me-1" style={{ fontSize: "0.75rem" }}></i>
+                              {formatPhoneDisplay(c.telephone2)}
+                            </small>
+                          )}
+                        </div>
 
-                                              {/* Address */}
-                                              {c.adresse && (
-                                                <small className="client-info-address d-block mt-1">
-                                                  <i className="ri-map-pin-line me-1"></i>
-                                                  {c.adresse}
-                                                </small>
-                                              )}
-                                            </div>
-                                          </li>
-                                        ))}
-                                      </ul>
-                                    ) : (
-                                      <div className="text-muted p-3 text-center">
-                                        <i className="ri-search-line me-2"></i>
-                                        Aucun résultat trouvé
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
+                        {/* Address */}
+                        {c.adresse && (
+                          <small className="client-info-address d-block mt-1">
+                            <i className="ri-map-pin-line me-1"></i>
+                            {c.adresse}
+                          </small>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="text-muted p-3 text-center">
+                  <i className="ri-search-line me-2"></i>
+                  Aucun résultat trouvé
+                </div>
+              )}
+            </div>
+          )}
 
-                                {validation.touched.client_id && validation.errors.client_id && (
-                                  <div className="text-danger mt-1 fs-6">
-                                    <i className="ri-error-warning-line me-1"></i>
-                                    {validation.errors.client_id}
-                                  </div>
-                                )}
-                              </div>
-                            </CardBody>
-                          </Card>
-                        </Col>
+          {validation.touched.client_id && validation.errors.client_id && (
+            <div className="text-danger mt-1 fs-6">
+              <i className="ri-error-warning-line me-1"></i>
+              {validation.errors.client_id}
+            </div>
+          )}
+        </div>
+      </CardBody>
+    </Card>
+  </Col>
 
-                        <Col md={4}>
-                          <Card className="border-0 shadow-sm h-100">
-                            <CardBody className="p-4">
-                              <h6 className="fw-semibold mb-3 text-primary">
-                                <i className="ri-team-line me-2"></i>
-                                Informations Vendeur
-                              </h6>
-                              <div className="mb-3">
-                                <Label className="form-label-lg fw-semibold">
-                                  Vendeur<span className="text-danger"> *</span>
-                                </Label>
-                                <Input
-                                  type="select"
-                                  name="vendeur_id"
-                                  value={validation.values.vendeur_id}
-                                  onChange={(e) => {
-                                    const vendeurId = e.target.value;
-                                    validation.setFieldValue("vendeur_id", vendeurId);
-                                    const vendeur = vendeurs.find(
-                                      (v) => v.id === parseInt(vendeurId)
-                                    );
-                                    setSelectedVendeur(vendeur || null);
-                                  }}
-                                  invalid={
-                                    validation.touched.vendeur_id &&
-                                    !!validation.errors.vendeur_id
-                                  }
-                                  className="form-control-lg"
-                                  style={{
-                                    maxHeight: "200px",
-                                    overflowY: "auto",
-                                  }}
-                                >
-                                  <option value="">Sélectionner un vendeur</option>
-                                  {vendeurs.map((vendeur) => (
-                                    <option key={vendeur.id} value={vendeur.id}>
-                                      {vendeur.nom} {vendeur.prenom}
-                                    </option>
-                                  ))}
-                                </Input>
-                                <FormFeedback className="fs-6">
-                                  {validation.errors.vendeur_id}
-                                </FormFeedback>
-                              </div>
-                            </CardBody>
-                          </Card>
-                        </Col>
-
-                        {/* Depot Selection Section */}
-                        <Col md={4}>
-                          <Card className="border-0 shadow-sm h-100">
-                            <CardBody className="p-4">
-                              <h6 className="fw-semibold mb-3 text-primary">
-                                <i className="ri-database-2-line me-2"></i>
-                                Dépot et Stock
-                              </h6>
-                              <div className="mb-3">
-                                <Label className="form-label-lg fw-semibold">
-                                  Dépot de stockage<span className="text-danger"> *</span>
-                                </Label>
-                                <Input
-                                  type="select"
-                                  name="depot_id"
-                                  value={validation.values.depot_id}
-                                  onChange={(e) => {
-                                    const depotId = e.target.value;
-                                    validation.setFieldValue("depot_id", depotId);
-                                    const depot = depots.find(
-                                      (d) => d.id === parseInt(depotId)
-                                    );
-                                    setSelectedDepot(depot || null);
-                                  }}
-                                  invalid={
-                                    validation.touched.depot_id &&
-                                    !!validation.errors.depot_id
-                                  }
-                                  className="form-control-lg"
-                                >
-                                  <option value="">Sélectionner un dépot</option>
-                                  {depots.map((depot) => (
-                                    <option key={depot.id} value={depot.id}>
-                                      {depot.nom}
-                                    </option>
-                                  ))}
-                                </Input>
-                                <FormFeedback className="fs-6">
-                                  {validation.errors.depot_id}
-                                </FormFeedback>
-                              </div>
-                            </CardBody>
-                          </Card>
-                        </Col>
-                      </Row>
-
+  <Col md={6}>
+    <Card className="border-0 shadow-sm h-100">
+      <CardBody className="p-4">
+        <h6 className="fw-semibold mb-3 text-primary">
+          <i className="ri-team-line me-2"></i>
+          Informations Vendeur
+        </h6>
+        <div className="mb-3">
+          <Label className="form-label-lg fw-semibold">
+            Vendeur<span className="text-danger"> *</span>
+          </Label>
+          <Input
+            type="select"
+            name="vendeur_id"
+            value={validation.values.vendeur_id}
+            onChange={(e) => {
+              const vendeurId = e.target.value;
+              validation.setFieldValue("vendeur_id", vendeurId);
+              const vendeur = vendeurs.find(
+                (v) => v.id === parseInt(vendeurId)
+              );
+              setSelectedVendeur(vendeur || null);
+            }}
+            invalid={
+              validation.touched.vendeur_id &&
+              !!validation.errors.vendeur_id
+            }
+            className="form-control-lg"
+            style={{
+              maxHeight: "200px",
+              overflowY: "auto",
+            }}
+          >
+            <option value="">Sélectionner un vendeur</option>
+            {vendeurs.map((vendeur) => (
+              <option key={vendeur.id} value={vendeur.id}>
+                {vendeur.nom} {vendeur.prenom}
+              </option>
+            ))}
+          </Input>
+          <FormFeedback className="fs-6">
+            {validation.errors.vendeur_id}
+          </FormFeedback>
+        </div>
+      </CardBody>
+    </Card>
+  </Col>
+</Row>
                       {/* Payment Conditions and Options */}
 
                       {/* Global Discount Section <Card className="border-0 shadow-sm mb-4">
@@ -5591,7 +5497,7 @@ const ListFactureClient = () => {
                                     {selectedArticles.map((item, index) => {
                                       const article =
                                         articles.find(
-                                          (a) => Number(a.id) === Number(item.article_id)
+                                          (a) => a.id === item.article_id
                                         ) || item.articleDetails;
                                       const qty = Number(item.quantite) || 0;
 
@@ -6040,24 +5946,18 @@ const ListFactureClient = () => {
                                           </td>
                                         </tr>
                                         {showRemise && globalRemise > 0 && (
-                                          <tr className={`real-time-update ${discountPercentage > 10 ? "table-danger" : "table-success"}`}>
-                                            <th className={`text-end fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
+                                          <tr className="real-time-update">
+                                            <th className="text-end text-muted fs-6">
                                               {remiseType === "percentage"
                                                 ? `Remise (${globalRemise}%)`
-                                                : `Remise (Montant fixe) ${discountPercentage.toFixed(8)}%`
-                                              }
+                                                : `Remise (Montant fixe) ${(
+                                                  (discountAmount /
+                                                    grandTotal) *
+                                                  100
+                                                ).toFixed(2)}%`}
                                             </th>
-                                            <td className={`text-end fw-bold fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
+                                            <td className="text-end text-danger fw-bold fs-6">
                                               - {discountAmount.toFixed(3)} DT
-                                            </td>
-                                          </tr>
-                                        )}
-
-                                        {retentionMontant > 0 && (
-                                          <tr className="real-time-update">
-                                            <th className="text-end text-muted fs-6">Retenue à la source:</th>
-                                            <td className="text-end text-info fw-bold fs-6">
-                                              - {retentionMontant.toFixed(3)} DT
                                             </td>
                                           </tr>
                                         )}
@@ -6079,7 +5979,7 @@ const ListFactureClient = () => {
                                             NET À PAYER:
                                           </th>
                                           <td className="text-end fw-bold fs-5 text-primary">
-                                            {netAPayer.toFixed(3)} DT
+                                            {finalTotal.toFixed(3)} DT
                                             {exoneration && (
                                               <i
                                                 className="ri-shield-check-line text-warning ms-1"
@@ -6510,15 +6410,23 @@ const ListFactureClient = () => {
                                   }, 0)
                                 : 0;
 
-                            const totals = calculateFactureTotals(selectedFacture);
-                            const finalTotal = totals.netAPayer;
+                            // ✅ CHECK IF THERE'S REMISE AND USE THE APPROPRIATE TOTAL
+                            const hasRemise =
+                              selectedFacture.remise &&
+                              Number(selectedFacture.remise) > 0;
+                            const finalTotal = hasRemise
+                              ? Number(selectedFacture.totalTTCAfterRemise) ||
+                              Number(selectedFacture.totalTTC) ||
+                              0
+                              : Number(selectedFacture.totalTTC) || 0;
 
-                            // Note: netAPayer already factors in retention if present in paymentMethods
+                            const retentionAmount =
+                              Number(selectedFacture.montantRetenue) || 0;
                             const totalPaye = selectedFacture.montantPaye || 0;
 
                             const availableAmount = Math.max(
                               0,
-                              finalTotal - totalPaye
+                              finalTotal - retentionAmount - totalPaye
                             );
 
                             return availableAmount.toFixed(3).replace(".", ",");
@@ -6715,72 +6623,44 @@ const ListFactureClient = () => {
             </Card>
           </Col>
         </Row>
+        {selectedFactureForPdf && (
+          <FacturePDFModal
+            isOpen={pdfModal}
+            toggle={() => setPdfModal(false)}
+            facture={selectedFactureForPdf}
+            companyInfo={companyInfo}
+          />
+        )}
 
-        {/* Receipt Modal */}
-        {
-          selectedFactureForPdf && (
-            <FactureClientReceiptModal
-              isOpen={receiptModal}
-              toggle={() => setReceiptModal(false)}
-              facture={selectedFactureForPdf}
-              companyInfo={companyInfo}
-            />
-          )
-        }
+  <EditClientModal
+  isOpen={editClientModal}
+  toggle={() => setEditClientModal(false)}
+  client={editingClient}
+  onClientUpdated={(updatedClient) => {
+    // Update the client in the clients list
+    setClients(prev => prev.map(c => 
+      c.id === updatedClient.id ? updatedClient : c
+    ));
+    
+    // Update filtered clients if needed
+    setFilteredClients(prev => prev.map(c => 
+      c.id === updatedClient.id ? updatedClient : c
+    ));
+    
+    // If the updated client is currently selected, update it
+    if (selectedClient?.id === updatedClient.id) {
+      setSelectedClient(updatedClient);
+    }
+    
+    // Refresh clients list
+    loadClients(clientSearch, 1, 20);
+  }}
+/>
 
-        {
-          selectedFactureForPdf && (
-            <FacturePDFModal
-              isOpen={pdfModal}
-              toggle={() => setPdfModal(false)}
-              facture={selectedFactureForPdf}
-              companyInfo={companyInfo}
-            />
-          )
-        }
-
-        <EditClientModal
-          isOpen={editClientModal}
-          toggle={() => setEditClientModal(false)}
-          client={editingClient}
-          onClientUpdated={(updatedClient) => {
-            // Update the client in the clients list
-            setClients(prev => prev.map(c =>
-              c.id === updatedClient.id ? updatedClient : c
-            ));
-
-            // Update filtered clients if needed
-            setFilteredClients(prev => prev.map(c =>
-              c.id === updatedClient.id ? updatedClient : c
-            ));
-
-            // If the updated client is currently selected, update it
-            if (selectedClient?.id === updatedClient.id) {
-              setSelectedClient(updatedClient);
-            }
-
-            // Refresh clients list
-            loadClients(clientSearch, 1, 20);
-          }}
-        />
-
-        <DiscountAlertModal
-          show={showDiscountAlert}
-          discountPercentage={discountPercentage}
-          onConfirmClick={() => {
-            setIsDiscountConfirmed(true);
-            setShowDiscountAlert(false);
-            setTimeout(() => {
-              validation.handleSubmit();
-            }, 100);
-          }}
-          onCloseClick={() => setShowDiscountAlert(false)}
-        />
-
-      </Container >
+      </Container>
 
 
-
+      
     </div >
   );
 };
