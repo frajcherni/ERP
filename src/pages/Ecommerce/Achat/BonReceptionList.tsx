@@ -126,29 +126,23 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
     }
   }, [articleSearch, articles]);
   
-  // Fix the fournisseur search useEffect
+  // Update fournisseur search effect
   useEffect(() => {
-    if (fournisseurSearch.length >= 3) {
-      const filtered = fournisseurs.filter(
-        (fournisseur) =>
-          (fournisseur.raison_sociale?.toLowerCase() || "").includes(fournisseurSearch.toLowerCase())
-      );
-      setFilteredFournisseurs(filtered);
-    } else {
-      setFilteredFournisseurs([]);
-    }
-  }, [fournisseurSearch, fournisseurs]);
+    const searchFournisseursDebounced = async () => {
+      if (fournisseurSearch.length >= 3) {
+        const filtered = fournisseurs.filter(
+          (fournisseur) =>
+            (fournisseur.raison_sociale?.toLowerCase() || "").includes(fournisseurSearch.toLowerCase())
+        );
+        setFilteredFournisseurs(filtered);
+      } else {
+        setFilteredFournisseurs([]);
+      }
+    };
 
-    useEffect(() => {
-        if (fournisseurSearch.length >= 3) {
-            const filtered = fournisseurs.filter(fournisseur =>
-                fournisseur.raison_sociale.toLowerCase().includes(fournisseurSearch.toLowerCase())
-            );
-            setFilteredFournisseurs(filtered);
-        } else {
-            setFilteredFournisseurs([]);
-        }
-    }, [fournisseurSearch, fournisseurs]);
+    const timer = setTimeout(searchFournisseursDebounced, 300);
+    return () => clearTimeout(timer);
+  }, [fournisseurSearch, fournisseurs]);
 
     const fetchData = useCallback(async () => {
         try {

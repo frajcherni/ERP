@@ -86,7 +86,7 @@ import DiscountAlertModal from "../../../Components/Common/DiscountAlertModal";
 import {
   createClient,
   createArticle,
-  fetchFournisseurs,
+  searchFournisseurs,
   fetchCategories,
 } from "../../../Components/Article/ArticleServices";
 import { Categorie, Fournisseur } from "../../../Components/Article/Interfaces";
@@ -129,6 +129,7 @@ const BonLivraisonList = () => {
   const [pageSize, setPageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(0);
   const isFirstRender = useRef(true);
+  const hasLoadedSecondary = useRef(false);
 
   const getSafeNumber = useCallback((value: any): number => {
     if (value === null || value === undefined) return 0;
@@ -170,6 +171,9 @@ const BonLivraisonList = () => {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [filteredArticles, setFilteredArticles] = useState<Article[]>([]);
   const [filteredClients, setFilteredClients] = useState<Client[]>([]);
+  const [fournisseurSearch, setFournisseurSearch] = useState("");
+  const [filteredFournisseurs, setFilteredFournisseurs] = useState<Fournisseur[]>([]);
+  const [fournisseursLoading, setFournisseursLoading] = useState(false);
   const [showRemise, setShowRemise] = useState(false);
   const [showDiscountAlert, setShowDiscountAlert] = useState(false);
   const [isDiscountConfirmed, setIsDiscountConfirmed] = useState(false);
@@ -622,7 +626,6 @@ const BonLivraisonList = () => {
   });
 
   const [categories, setCategories] = useState<Categorie[]>([]);
-  const [fournisseurs, setFournisseurs] = useState<Fournisseur[]>([]);
   const [subcategories, setSubcategories] = useState<Categorie[]>([]);
 
   const tvaOptions = [
@@ -897,6 +900,7 @@ const BonLivraisonList = () => {
         });
 
         let paginatedResult;
+        let depotsDataForAutoSelect: Depot[] = [];
         if (!skipSecondary) {
           const [resPaginated, resVendeurs, resDepots] = await Promise.all([
             paginatedPromise,
@@ -906,6 +910,7 @@ const BonLivraisonList = () => {
           paginatedResult = resPaginated;
           setVendeurs(resVendeurs);
           setDepots(resDepots);
+          depotsDataForAutoSelect = resDepots;
         } else {
           paginatedResult = await paginatedPromise;
         }
@@ -1010,23 +1015,16 @@ const BonLivraisonList = () => {
         if (!skipSecondary) {
           setSecondaryLoading(true);
           try {
-            const [categoriesData, articlesResult, clientsResult, fournisseursData] =
+            const [categoriesData] =
               await Promise.all([
                 fetchCategories(),
-                searchArticles({ query: "", page: 1, limit: 10 }),
-                searchClients({ query: "", page: 1, limit: 10 }),
-                fetchFournisseurs(),
               ]);
 
             setCategories(categoriesData);
-            setArticles(articlesResult.articles || []);
-            setFilteredClients(clientsResult.clients || []);
-            setFournisseurs(fournisseursData);
 
             // Auto-select "magazin" depot
-            const depotsData = (await fetchDepots());
-            if (depotsData.length > 0 && !selectedDepot) {
-              const magazinDepot = depotsData.find(d =>
+            if (depotsDataForAutoSelect.length > 0 && !selectedDepot) {
+              const magazinDepot = depotsDataForAutoSelect.find(d =>
                 d.nom.toLowerCase().includes("magazin")
               );
               if (magazinDepot) {
@@ -1052,47 +1050,68 @@ const BonLivraisonList = () => {
     [searchText, startDate, endDate, pageSize, activeTab]
   );
 
-  // Initial load - only critical data
-  // Initial load
+  // Combined fetch effect (Initial load + debounced filters)
   useEffect(() => {
-    fetchData(1, pageSize, false);
-  }, []); // eslint-disable-line
+    let active = true;
 
-  // Re-fetch whenever filters change (debounced)
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    setCurrentPage(1);
     const timer = setTimeout(() => {
-      // Map activeTab to status for backend
-      let statusFilter = "";
-      if (activeTab === "2") statusFilter = "Brouillon";
-      else if (activeTab === "3") statusFilter = "Livré";
-      else if (activeTab === "4") statusFilter = "Partiellement Livré";
-      else if (activeTab === "5") statusFilter = "Annule";
+      if (active) {
+        const skipSecondary = hasLoadedSecondary.current;
+        fetchData(1, pageSize, skipSecondary);
+        if (!skipSecondary) hasLoadedSecondary.current = true;
+      }
+    }, isFirstRender.current ? 0 : 400);
 
-      fetchData(1, pageSize, true);
-    }, 400);
+    isFirstRender.current = false;
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [searchText, startDate, endDate, activeTab, phoneSearch, pageSize]);
+
+
+  // Load fournisseurs only when needed
+  const loadFournisseurs = async (query = "", page = 1, limit = 15) => {
+    if (modal || fournisseurSearch) {
+      setFournisseursLoading(true);
+      try {
+        const result = await searchFournisseurs({ query, page, limit });
+        setFilteredFournisseurs(result.fournisseurs || []);
+      } catch (err) {
+        console.error("Failed to load fournisseurs:", err);
+      } finally {
+        setFournisseursLoading(false);
+      }
+    }
+  };
+
+  // Update fournisseur search effect
+  useEffect(() => {
+    const searchFournisseursDebounced = async () => {
+      if (fournisseurSearch.length >= 3) {
+        await loadFournisseurs(fournisseurSearch, 1, 20);
+      } else {
+        setFilteredFournisseurs([]);
+      }
+    };
+
+    const timer = setTimeout(searchFournisseursDebounced, 300);
     return () => clearTimeout(timer);
-  }, [searchText, startDate, endDate, activeTab, phoneSearch]);
-
+  }, [fournisseurSearch]);
 
   // Load modal data only when modal opens
   const loadModalData = async () => {
     if (modal) {
       setModalLoading(true);
       try {
-        const [depotsResult, categoriesResult, fournisseursResult] = await Promise.all([
+        const [depotsResult, categoriesResult] = await Promise.all([
           fetchDepots(),
           fetchCategories(),
-          fetchFournisseurs(),
         ]);
 
         setDepots(depotsResult);
         setCategories(categoriesResult);
-        setFournisseurs(fournisseursResult || []);
 
         // Auto-select "magazin" depot ONLY if not in edit mode and no depot is selected
         if (!isEdit && depotsResult.length > 0 && !selectedDepot) {
@@ -1105,11 +1124,6 @@ const BonLivraisonList = () => {
           }
         }
 
-        // Load initial articles and clients for modal
-        await Promise.all([
-          loadArticles("", 1, 15),
-          loadClients("", 1, 15),
-        ]);
       } catch (err) {
         console.error("Modal data loading failed:", err);
       } finally {
@@ -2966,26 +2980,104 @@ const BonLivraisonList = () => {
                                 <Label className="form-label-lg fw-semibold">
                                   Fournisseur
                                 </Label>
-                                <Input
-                                  type="select"
-                                  value={newArticle.fournisseur_id}
-                                  onChange={(e) =>
-                                    setNewArticle({
-                                      ...newArticle,
-                                      fournisseur_id: e.target.value,
-                                    })
-                                  }
-                                  className="form-control-lg"
-                                >
-                                  <option value="">
-                                    Sélectionner un fournisseur
-                                  </option>
-                                  {fournisseurs.map((f) => (
-                                    <option key={f.id} value={f.id}>
-                                      {f.raison_sociale}
-                                    </option>
-                                  ))}
-                                </Input>
+                                  <div className="position-relative">
+                                    <Input
+                                      type="text"
+                                      placeholder="Rechercher un fournisseur (3 caractères min)..."
+                                      value={fournisseurSearch}
+                                      onChange={(e) => setFournisseurSearch(e.target.value)}
+                                      className="form-control-lg pe-10"
+                                      readOnly={!!newArticle.fournisseur_id}
+                                    />
+                                    {fournisseursLoading && (
+                                      <div className="position-absolute end-0 top-50 translate-middle-y me-3">
+                                        <div className="spinner-border spinner-border-sm text-primary" role="status">
+                                          <span className="visually-hidden">Chargement...</span>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Clear button when fournisseur is selected */}
+                                    {newArticle.fournisseur_id && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-link text-danger position-absolute end-0 top-50 translate-middle-y p-0 me-3"
+                                        onClick={() => {
+                                          setNewArticle({ ...newArticle, fournisseur_id: "" });
+                                          setFournisseurSearch("");
+                                        }}
+                                        title="Changer de fournisseur"
+                                      >
+                                        <i className="ri-close-line fs-5"></i>
+                                      </button>
+                                    )}
+
+                                    {/* Enhanced Fournisseur Dropdown Results */}
+                                    {!newArticle.fournisseur_id && fournisseurSearch.length >= 3 && (
+                                      <div
+                                        className="search-results fournisseur-results mt-1"
+                                        style={{
+                                          position: "absolute",
+                                          top: "100%",
+                                          left: 0,
+                                          right: 0,
+                                          zIndex: 1050,
+                                          backgroundColor: "#fafafa",
+                                          border: "1px solid #e9ecef",
+                                          borderRadius: "0.375rem",
+                                          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)",
+                                          maxHeight: "250px",
+                                          overflowY: "auto"
+                                        }}
+                                      >
+                                        {filteredFournisseurs.length > 0 ? (
+                                          <ul className="list-group list-group-flush">
+                                            {filteredFournisseurs.map((f) => (
+                                              <li
+                                                key={f.id}
+                                                className="list-group-item list-group-item-action"
+                                                onClick={() => {
+                                                  setNewArticle({
+                                                    ...newArticle,
+                                                    fournisseur_id: f.id.toString(),
+                                                  });
+                                                  setFournisseurSearch(f.raison_sociale);
+                                                  setFilteredFournisseurs([]);
+                                                }}
+                                                style={{
+                                                  cursor: "pointer",
+                                                  padding: "12px 16px",
+                                                  transition: "all 0.15s ease",
+                                                  backgroundColor: "transparent",
+                                                  borderBottom: "1px solid #f1f3f5"
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                  e.currentTarget.style.backgroundColor = "#f5f5f5";
+                                                  e.currentTarget.style.borderLeft = "3px solid #0d6efd";
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                  e.currentTarget.style.backgroundColor = "transparent";
+                                                  e.currentTarget.style.borderLeft = "none";
+                                                }}
+                                              >
+                                                <div className="d-flex flex-column">
+                                                  <span className="fw-semibold text-dark">{f.raison_sociale}</span>
+                                                  <small className="text-muted">
+                                                    <i className="ri-phone-line me-1"></i>
+                                                    {f.telephone1 || "Pas de téléphone"}
+                                                  </small>
+                                                </div>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        ) : (
+                                          <div className="p-3 text-center text-muted">
+                                            Aucun fournisseur trouvé
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
                                 <small className="text-muted">
                                   Fournisseur principal
                                 </small>
@@ -3627,11 +3719,11 @@ const BonLivraisonList = () => {
                                               {grandTotalValue.toFixed(3)} DT
                                             </td>
                                           </tr>
-                                          {remiseValue > 0 && (
+                                          {discountPercentageValue > 0 && (
                                             <tr className={`real-time-update ${discountPercentageValue > 10 ? "table-danger" : "table-success"}`}>
                                               <th className={`text-end fs-6 ${discountPercentageValue > 10 ? "text-danger" : "text-success"}`}>
                                                 {remiseTypeValue === "percentage"
-                                                  ? `Remise (${remiseValue}%)`
+                                                  ? `Remise (${discountPercentageValue.toFixed(2)}%)`
                                                   : `Remise (Montant fixe) ${discountPercentageValue.toFixed(2)}%`}
                                               </th>
                                               <td className={`text-end fw-bold fs-6 ${discountPercentageValue > 10 ? "text-danger" : "text-success"}`}>
@@ -5048,13 +5140,13 @@ const BonLivraisonList = () => {
                                             style={{ width: "10%" }}
                                             className="text-end fw-semibold"
                                           >
-                                            {montantHTLigne} DT
+                                            {Number(montantHTLigne).toFixed(3)} DT
                                           </td>
                                           <td
                                             style={{ width: "10%" }}
                                             className="text-end fw-semibold text-primary"
                                           >
-                                            {montantTTCLigne} DT
+                                            {Number(montantTTCLigne).toFixed(3)} DT
                                           </td>
                                           <td style={{ width: "5%" }}>
                                             <Button
@@ -5232,18 +5324,18 @@ const BonLivraisonList = () => {
                                             {grandTotal.toFixed(3)} DT
                                           </td>
                                         </tr>
-                                        {showRemise && discountAmount > 0.001 && (
-                                          <tr className={`real-time-update ${discountPercentage > 10 ? "table-danger" : "table-success"}`}>
-                                            <th className={`text-end fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
-                                              {remiseType === "percentage"
-                                                ? `Remise (Global) ${Number(globalRemise).toFixed(8)}%`
-                                                : `Remise (Montant fixe) ${discountPercentage.toFixed(8)}%`}
-                                            </th>
-                                            <td className={`text-end fw-bold fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
-                                              - {discountAmount.toFixed(3)} DT
-                                            </td>
-                                          </tr>
-                                        )}
+                                        {discountPercentage > 0 && (
+                                           <tr className={`real-time-update ${discountPercentage > 10 ? "table-danger" : "table-success"}`}>
+                                             <th className={`text-end fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
+                                               {remiseType === "percentage"
+                                                 ? `Remise (Global) ${Number(discountPercentage).toFixed(2)}%`
+                                                 : `Remise (Montant fixe) ${discountPercentage.toFixed(2)}%`}
+                                             </th>
+                                             <td className={`text-end fw-bold fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
+                                               - {discountAmount.toFixed(3)} DT
+                                             </td>
+                                           </tr>
+                                         )}
 
                                         {/* Timbre Fiscal for Factures */}
                                         {isCreatingFacture && timbreFiscal && (

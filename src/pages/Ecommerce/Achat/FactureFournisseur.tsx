@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import {
     Card, CardBody, Col, Container, CardHeader, Row, Modal, ModalHeader, Nav,
     NavItem, NavLink, Form, ModalBody, ModalFooter, Label, Input, FormFeedback,
@@ -147,28 +147,25 @@ useEffect(() => {
     }
   }, [articleSearch, articles]);
  
-  // Fix the fournisseur search useEffect
+  // Update fournisseur search effect
   useEffect(() => {
-    if (fournisseurSearch.length >= 3) {
-      const filtered = fournisseurs.filter(
-        (fournisseur) =>
-          (fournisseur.raison_sociale?.toLowerCase() || "").includes(fournisseurSearch.toLowerCase())
-      );
-      setFilteredFournisseurs(filtered);
-    } else {
-      setFilteredFournisseurs([]);
-    }
+    const searchFournisseursDebounced = async () => {
+      if (fournisseurSearch.length >= 3) {
+        // We can either filter local list or call API. 
+        // To be consistent with 3-char requirement:
+        const filtered = fournisseurs.filter(
+          (fournisseur) =>
+            (fournisseur.raison_sociale?.toLowerCase() || "").includes(fournisseurSearch.toLowerCase())
+        );
+        setFilteredFournisseurs(filtered);
+      } else {
+        setFilteredFournisseurs([]);
+      }
+    };
+
+    const timer = setTimeout(searchFournisseursDebounced, 300);
+    return () => clearTimeout(timer);
   }, [fournisseurSearch, fournisseurs]);
-    useEffect(() => {
-        if (fournisseurSearch.length >= 3) {
-            const filtered = fournisseurs.filter(fournisseur =>
-                fournisseur.raison_sociale.toLowerCase().includes(fournisseurSearch.toLowerCase())
-            );
-            setFilteredFournisseurs(filtered);
-        } else {
-            setFilteredFournisseurs([]);
-        }
-    }, [fournisseurSearch, fournisseurs]);
     const fetchData = useCallback(async () => {
         try {
             setLoading(true);
@@ -1518,7 +1515,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                 <div className="position-relative">
                   <Input
                     type="text"
-                    placeholder="Rechercher fournisseur..."
+                    placeholder="Rechercher fournisseur (3 caractères min)..."
                     value={selectedFournisseur ? selectedFournisseur.raison_sociale : fournisseurSearch}
                     onChange={(e) => {
                       if (!e.target.value) {
@@ -1527,78 +1524,88 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                       }
                       setFournisseurSearch(e.target.value);
                     }}
-                    onFocus={() => {
-                      if (fournisseurSearch.length >= 1) {
-                        setFilteredFournisseurs(fournisseurs);
-                      }
-                    }}
                     readOnly={!!selectedFournisseur}
-                    className="form-control-lg"
+                    className="form-control-lg pe-10"
                   />
                   {selectedFournisseur && (
-                    <Button
-                      color="link"
-                      size="sm"
-                      className="position-absolute end-0 top-50 translate-middle-y text-danger p-0 me-3"
+                    <button
+                      type="button"
+                      className="btn btn-link text-danger position-absolute end-0 top-50 translate-middle-y p-0 me-3"
                       onClick={() => {
                         setSelectedFournisseur(null);
                         validation.setFieldValue("fournisseur_id", "");
                         setFournisseurSearch("");
                       }}
+                      title="Changer de fournisseur"
                     >
                       <i className="ri-close-line fs-5"></i>
-                    </Button>
+                    </button>
+                  )}
+
+                  {/* Enhanced Fournisseur Dropdown Results */}
+                  {!selectedFournisseur && fournisseurSearch.length >= 3 && (
+                    <div
+                      className="search-results fournisseur-results mt-1"
+                      style={{
+                        position: "absolute",
+                        top: "100%",
+                        left: 0,
+                        right: 0,
+                        zIndex: 1050,
+                        backgroundColor: "#fafafa",
+                        border: "1px solid #e9ecef",
+                        borderRadius: "0.375rem",
+                        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)",
+                        maxHeight: "250px",
+                        overflowY: "auto"
+                      }}
+                    >
+                      {filteredFournisseurs.length > 0 ? (
+                        <ul className="list-group list-group-flush">
+                          {filteredFournisseurs.map((f) => (
+                            <li
+                              key={f.id}
+                              className="list-group-item list-group-item-action"
+                              onClick={() => {
+                                setSelectedFournisseur(f);
+                                validation.setFieldValue("fournisseur_id", f.id);
+                                setFournisseurSearch(f.raison_sociale);
+                                setFilteredFournisseurs([]);
+                              }}
+                              style={{
+                                cursor: "pointer",
+                                padding: "12px 16px",
+                                transition: "all 0.15s ease",
+                                backgroundColor: "transparent",
+                                borderBottom: "1px solid #f1f3f5"
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = "#f5f5f5";
+                                e.currentTarget.style.borderLeft = "3px solid #0d6efd";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = "transparent";
+                                e.currentTarget.style.borderLeft = "none";
+                              }}
+                            >
+                              <div className="d-flex flex-column">
+                                <span className="fw-semibold text-dark">{f.raison_sociale}</span>
+                                <small className="text-muted">
+                                  <i className="ri-phone-line me-1"></i>
+                                  {f.telephone1 || "Pas de téléphone"}
+                                </small>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <div className="p-3 text-center text-muted">
+                          Aucun fournisseur trouvé
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-               
-                {/* Scrollable Dropdown Results */}
-                {!selectedFournisseur && fournisseurSearch.length >= 1 && (
-                  <div
-                    className="search-results mt-2 border rounded shadow-sm"
-                    style={{
-                      maxHeight: "200px",
-                      overflowY: "auto",
-                      position: "absolute",
-                      width: "100%",
-                      zIndex: 1000,
-                      backgroundColor: "white"
-                    }}
-                  >
-                    {filteredFournisseurs.length > 0 ? (
-                      <ul className="list-group list-group-flush">
-                        {filteredFournisseurs.map((f) => (
-                          <li
-                            key={f.id}
-                            className="list-group-item list-group-item-action"
-                            onClick={() => {
-                              setSelectedFournisseur(f);
-                              validation.setFieldValue("fournisseur_id", f.id);
-                              setFournisseurSearch("");
-                              setFilteredFournisseurs([]);
-                            }}
-                            style={{ cursor: "pointer", padding: "10px 15px" }}
-                          >
-                            <div className="d-flex justify-content-between align-items-center">
-                              <span className="fw-medium">{f.raison_sociale}</span>
-                              <small className="text-muted">{f.telephone1}</small>
-                            </div>
-                            {f.adresse && (
-                              <small className="text-muted d-block mt-1">
-                                <i className="ri-map-pin-line me-1"></i>
-                                {f.adresse}
-                              </small>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <div className="text-muted p-3 text-center">
-                        <i className="ri-search-line me-1"></i>
-                        Aucun résultat trouvé
-                      </div>
-                    )}
-                  </div>
-                )}
                
                 {validation.touched.fournisseur_id && validation.errors.fournisseur_id && (
                   <div className="text-danger mt-1 fs-6">

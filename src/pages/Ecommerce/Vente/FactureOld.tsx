@@ -1952,11 +1952,11 @@ const toggleCreateEditModal = useCallback(() => {
           }, 0);
 
           // Check if total payments exceed the final total (BEFORE retention)
-          if (totalPaymentAmount > finalTotal) {
+          if (totalPaymentAmount > netAPayer) {
             toast.error(
               `Le total des règlements (${totalPaymentAmount.toFixed(
                 3
-              )} DT) dépasse le montant total (${finalTotal.toFixed(3)} DT)`
+              )} DT) dépasse le montant net à payer (${netAPayer.toFixed(3)} DT)`
             );
             return;
           }
@@ -1968,12 +1968,12 @@ const toggleCreateEditModal = useCallback(() => {
               typeof pm.amount === "string"
                 ? parseFloat(pm.amount.replace(",", ".")) || 0
                 : Number(pm.amount) || 0;
-            return amountValue > finalTotal;
+            return amountValue > netAPayer;
           });
 
           if (hasIndividualExceed) {
             toast.error(
-              "Le montant d'une méthode de règlement dépasse le montant total"
+              "Le montant d'une méthode de règlement dépasse le montant net à payer"
             );
             return;
           }

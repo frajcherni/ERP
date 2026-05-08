@@ -10,7 +10,7 @@ import {
 } from "@react-pdf/renderer";
 import moment from "moment";
 import { FactureClient } from "../../../Components/Article/Interfaces";
-import { calculateDocumentTotals } from "../../../Utils/CalculationEngine";
+import { calculateDocumentTotals, calculateLineTotals } from "../../../Utils/CalculationEngine";
 
 Font.register({
   family: "Open Sans",
@@ -333,7 +333,7 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
   facture,
   companyInfo,
 }) => {
-  const exoneration = facture?.exoneration || false;
+  const isExonerated = !!facture?.exoneration;
 
   // ─────────────────────────────────────────────
   // TOTALS CALCULATION
@@ -345,8 +345,11 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
     totalTax,
     finalTotal,
     discountAmount,
+    timbre,
+    netAPayer,
+    retentionMontant,
     tvaBreakdown = {},
-  } = totals as any;
+  } = totals;
 
 
   // ─────────────────────────────────────────────
@@ -398,7 +401,7 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
     return words.charAt(0).toUpperCase() + words.slice(1) + " uniquement";
   };
 
-  const amountInWords = numberToWords(finalTotal);
+  const amountInWords = numberToWords(netAPayer);
 
   const wrapTextHelper = (text: string, maxCharsPerLine: number = 40): string[] => {
     if (!text || text.trim() === "") return [];
@@ -438,23 +441,33 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
       <View style={styles.tvaTable}>
         <View style={styles.tvaHeader}>
           <Text style={styles.tvaHeaderTaux}>Taux TVA</Text>
-          <Text style={styles.tvaHeaderBase}>Base HT</Text>
-          <Text style={styles.tvaHeaderMontant}>Montant TVA</Text>
+          <Text style={styles.tvaHeaderBase}>Base Net HT</Text>
+          <Text style={styles.tvaHeaderMontant}>Total TVA</Text>
         </View>
-        {tvaRates.length === 0 ? (
+        {tvaRates.length === 0 && (
           <View style={styles.tvaRow}>
             <Text style={styles.tvaColTaux}>-</Text>
             <Text style={styles.tvaColBase}>0.000 DT</Text>
             <Text style={styles.tvaColMontant}>0.000 DT</Text>
           </View>
-        ) : (
-          tvaRates.map((rate) => (
-            <View style={styles.tvaRow} key={rate}>
-              <Text style={styles.tvaColTaux}>{rate}%</Text>
-              <Text style={styles.tvaColBase}>{formatCurrency(tvaBreakdown[rate].base)} DT</Text>
-              <Text style={styles.tvaColMontant}>{formatCurrency(tvaBreakdown[rate].montant)} DT</Text>
-            </View>
-          ))
+        )}
+        {tvaRates.length > 0 && tvaRates.map((rate) => (
+          <View style={styles.tvaRow} key={rate}>
+            <Text style={styles.tvaColTaux}>{rate}%</Text>
+            <Text style={styles.tvaColBase}>{formatCurrency(tvaBreakdown[rate].base)} DT</Text>
+            <Text style={styles.tvaColMontant}>{formatCurrency(tvaBreakdown[rate].montant)} DT</Text>
+          </View>
+        ))}
+        {isExonerated && tvaRates.length > 0 && (
+          <View style={styles.tvaRow}>
+            <Text style={styles.tvaColTaux}>Exonoré</Text>
+            <Text style={styles.tvaColBase}>
+              {formatCurrency(tvaRates.reduce((acc, r) => acc + tvaBreakdown[r].base, 0))} DT
+            </Text>
+            <Text style={styles.tvaColMontant}>
+              {formatCurrency(tvaRates.reduce((acc, r) => acc + tvaBreakdown[r].montant, 0))} DT
+            </Text>
+          </View>
         )}
       </View>
     );
@@ -483,26 +496,32 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
               </View>
             )}
             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Net H.T:</Text>
+              <Text style={styles.summaryLabel}>Total Net H.T:</Text>
               <Text style={styles.summaryValue}>{formatCurrency(netHT)} DT</Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Total TVA:</Text>
-              <Text style={styles.summaryValue}>{exoneration ? "0.000" : formatCurrency(totalTax)} DT</Text>
+              <Text style={styles.summaryValue}>{isExonerated ? "0.000" : formatCurrency(totalTax)} DT</Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Total TTC:</Text>
-              <Text style={styles.summaryValue}>{formatCurrency(facture.timbreFiscal ? finalTotal - 1 : finalTotal)} DT</Text>
+              <Text style={styles.summaryValue}>{isExonerated ? "0.000" : formatCurrency(finalTotal)} DT</Text>
             </View>
-            {facture.timbreFiscal && (
+            {timbre > 0 && (
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Timbre Fiscal:</Text>
-                <Text style={styles.summaryValue}>1.000 DT</Text>
+                <Text style={styles.summaryValue}>{formatCurrency(timbre)} DT</Text>
+              </View>
+            )}
+            {retentionMontant > 0 && (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Retenue à la source:</Text>
+                <Text style={styles.summaryValue}>- {formatCurrency(retentionMontant)} DT</Text>
               </View>
             )}
             <View style={styles.netAPayerContainer}>
               <Text style={styles.netAPayerLabel}>NET À PAYER:</Text>
-              <Text style={styles.netAPayerValue}>{formatCurrency(finalTotal)} DT</Text>
+              <Text style={styles.netAPayerValue}>{formatCurrency(netAPayer)} DT</Text>
             </View>
           </View>
         </View>
@@ -528,22 +547,19 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
 
         {group.articles.map((item, index) => {
           const globalRowNumber = group.startIndex + index + 1;
-          const qty = Number(item.quantite) || 0;
-          const priceHT = Number(item.prixUnitaire) || 0;
+          const line = calculateLineTotals(item, group.startIndex + index, { isExonerated });
           const tvaRate = Number(item.tva) || 0;
-          const prixTTC = Number(item.prix_ttc) || priceHT * (1 + tvaRate / 100);
-          const montantTTC = Math.round(qty * prixTTC * 1000) / 1000;
 
           return (
             <View style={styles.tableRow} key={index}>
               <View style={[styles.colN, styles.tableCol]}><Text>{globalRowNumber}</Text></View>
               <View style={[styles.colArticle, styles.tableCol]}><Text>{item.article?.reference || "-"}</Text></View>
               <View style={[styles.colDesignation, styles.tableCol]}><Text>{item.designation || item.article?.designation || "-"}</Text></View>
-              <View style={[styles.colQuantite, styles.tableCol]}><Text>{qty}</Text></View>
-              <View style={[styles.colPUHT, styles.tableCol]}><Text>{formatCurrency(priceHT)}</Text></View>
+              <View style={[styles.colQuantite, styles.tableCol]}><Text>{Number(item.quantite) || 0}</Text></View>
+              <View style={[styles.colPUHT, styles.tableCol]}><Text>{formatCurrency(line.unitHT)}</Text></View>
               <View style={[styles.colTVA, styles.tableCol]}><Text>{tvaRate > 0 ? `${tvaRate}%` : "-"}</Text></View>
-              <View style={[styles.colPUTTC, styles.tableCol]}><Text>{formatCurrency(prixTTC)}</Text></View>
-              <View style={[styles.colMontantTTC, styles.tableCol]}><Text>{formatCurrency(montantTTC)}</Text></View>
+              <View style={[styles.colPUTTC, styles.tableCol]}><Text>{formatCurrency(line.unitTTC)}</Text></View>
+              <View style={[styles.colMontantTTC, styles.tableCol]}><Text>{formatCurrency(line.ttc)}</Text></View>
             </View>
           );
         })}
@@ -599,7 +615,7 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
           <View style={styles.clientInfoContainer}>
             <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 3 }}>
               <Text style={styles.sectionTitle}>CLIENT</Text>
-              {exoneration && <Text style={styles.exonerationBadge}>EXONORÉ</Text>}
+              {isExonerated && <Text style={styles.exonerationBadge}>EXONORÉ</Text>}
             </View>
             {facture.client && (
               <>

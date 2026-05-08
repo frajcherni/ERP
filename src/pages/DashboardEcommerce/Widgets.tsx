@@ -415,64 +415,57 @@ const Trésorerie: React.FC = () => {
   // Group transactions by document to handle retention properly
 
   const groupTransactionsByDocument = (): GroupedTransaction[] => {
-    const groupedMap = new Map<string, GroupedTransaction>();
+    const flattenedTransactions: GroupedTransaction[] = [];
 
     data.transactions.forEach((transaction: Transaction) => {
-      // Clean the numero by removing "(Retenue)" suffix
-      const cleanNumero = transaction.numero.replace(/\s*\(Retenue\)\s*$/, '');
+      // Create a map to group payments by date for this transaction
+      const paymentsByDate = new Map<string, { regular: PaymentMethod[], retention: PaymentMethod[] }>();
 
-      // Create a key based on type, cleaned numero, date, and client
-      const key = `${transaction.type}-${cleanNumero}-${moment(transaction.date).format('YYYY-MM-DD')}-${transaction.client.name}`;
+      transaction.paymentMethods.forEach((pm: PaymentMethod) => {
+        // Use payment date if exists, else transaction date
+        const date = pm.dateEcheance ? moment(pm.dateEcheance).format('YYYY-MM-DD') : moment(transaction.date).format('YYYY-MM-DD');
+        
+        if (!paymentsByDate.has(date)) {
+          paymentsByDate.set(date, { regular: [], retention: [] });
+        }
+        
+        const group = paymentsByDate.get(date)!;
+        if (isRetentionMethod(pm.method)) {
+          group.retention.push(pm);
+        } else {
+          group.regular.push(pm);
+        }
+      });
 
-      if (!groupedMap.has(key)) {
-        // Initialize new grouped transaction
-        groupedMap.set(key, {
-          ...transaction,
-          numero: cleanNumero,
-          regularPayments: [],
-          retentionPayments: [],
-          retentionRate: null,
-          montant: 0 // We'll accumulate this
-        });
+      // If no payment methods, fallback to transaction date (though should not happen with current logic)
+      if (paymentsByDate.size === 0) {
+        const date = moment(transaction.date).format('YYYY-MM-DD');
+        paymentsByDate.set(date, { regular: [], retention: [] });
       }
 
-      const grouped = groupedMap.get(key) as GroupedTransaction;
+      // Clean the numero
+      const cleanNumero = transaction.numero.replace(/\s*\(Retenue\)\s*$/, '');
 
-      // Add this transaction's montant to the total
-      grouped.montant += transaction.montant;
-
-      // Process each payment method
-      transaction.paymentMethods.forEach((payment: PaymentMethod) => {
-        const isRetention = isRetentionMethod(payment.method);
-        const amount = Number(payment.amount || 0);
-
-        if (isRetention) {
-          // Check if this is a rate-only retention (amount 0 with taux)
-          if (amount === 0 && payment.tauxRetention) {
-            grouped.retentionRate = payment.tauxRetention;
-          } else {
-            // Check if this retention payment already exists (by amount)
-            const exists = grouped.retentionPayments.some(
-              p => Math.abs(Number(p.amount || 0) - amount) < 0.001
-            );
-            if (!exists) {
-              grouped.retentionPayments.push(payment);
-            }
-          }
-        } else {
-          // Check if this regular payment already exists (by method and amount)
-          const exists = grouped.regularPayments.some(
-            p => p.method === payment.method &&
-              Math.abs(Number(p.amount || 0) - amount) < 0.001
-          );
-          if (!exists) {
-            grouped.regularPayments.push(payment);
-          }
+      // Add a virtual transaction for each date
+      paymentsByDate.forEach((group, date) => {
+        const totalAmount = [...group.regular, ...group.retention].reduce((sum, p) => sum + (p.amount || 0), 0);
+        
+        if (totalAmount > 0 || group.regular.length > 0 || group.retention.length > 0) {
+          flattenedTransactions.push({
+            ...transaction,
+            numero: cleanNumero,
+            date: date, // Use the payment date
+            regularPayments: group.regular,
+            retentionPayments: group.retention,
+            retentionRate: group.retention.find(p => p.tauxRetention)?.tauxRetention || null,
+            montant: totalAmount
+          });
         }
       });
     });
 
-    return Array.from(groupedMap.values());
+    // Sort by date descending
+    return flattenedTransactions.sort((a, b) => moment(b.date).diff(moment(a.date)));
   };
   const groupedTransactions = groupTransactionsByDocument();
 

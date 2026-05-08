@@ -26,6 +26,6 @@ export const calculateFactureTotals = (facture: any) => {
     totalTax: totals.totalTax,
     totalTTC: totals.finalTotal,
     netAPayer: totals.netAPayer,
-   // timbre: totals.timbreFiscal ? 1 : 0
+    timbre: totals.timbreFiscal ? 1 : 0
   };
 };

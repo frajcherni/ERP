@@ -398,6 +398,44 @@ export const fetchFournisseurs = async (): Promise<Fournisseur[]> => {
   return response.json();
 };
 
+export const searchFournisseurs = async (params: {
+  query?: string;
+  page?: number;
+  limit?: number;
+}): Promise<{ 
+  fournisseurs: Fournisseur[]; 
+  totalCount: number; 
+  page: number;
+  limit: number;
+  totalPages: number;
+}> => {
+  try {
+    const queryParams = new URLSearchParams();
+    if (params.query) queryParams.append("query", params.query);
+    if (params.page) queryParams.append("page", params.page.toString());
+    if (params.limit) queryParams.append("limit", params.limit.toString());
+
+    const response = await fetch(`${API_BASE}/fournisseurs/search?${queryParams.toString()}`);
+    
+    if (!response.ok) {
+      throw new Error(`Search failed: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    return {
+      fournisseurs: data.fournisseurs || [],
+      totalCount: data.pagination.totalCount,
+      page: data.pagination.page,
+      limit: data.pagination.limit,
+      totalPages: data.pagination.totalPages
+    };
+    
+  } catch (error) {
+    console.error("Error searching fournisseurs:", error);
+    throw error;
+  }
+};
+
 
 export const createFournisseur = async (fournisseur: Omit<Fournisseur, "id" | "createdAt" | "updatedAt">): Promise<Fournisseur> => {
   const response = await fetch(`${API_BASE}/fournisseurs/addfournisseur`, {

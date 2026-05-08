@@ -18,9 +18,77 @@ export interface DocTotals {
   discountPercentage: number;
   retentionMontant: number;
   timbre: number;
+  timbreFiscal: boolean;
   netAPayer: number;
   tvaBreakdown: { [key: number]: { base: number; montant: number } };
 }
+
+export interface LineTotals {
+  unitHT: number;
+  unitTTC: number;
+  grossHT: number;
+  netHT: number;
+  taxAmount: number;
+  ttc: number;
+}
+
+export const calculateLineTotals = (
+  art: any,
+  index: number,
+  options: {
+    editingHT?: { [key: number]: string | number };
+    editingTTC?: { [key: number]: string | number };
+    newDeliveryQuantities?: { [key: number]: number | "" };
+    isExonerated?: boolean;
+  } = {}
+) => {
+  const {
+    editingHT = {},
+    editingTTC = {},
+    newDeliveryQuantities = {},
+    isExonerated = false,
+  } = options;
+
+  const artId = art.article_id || art.article?.id || index;
+  let qty = (art.quantite === "" || art.quantite === undefined) ? 0 : Number(art.quantite) || 0;
+
+  if (newDeliveryQuantities[artId] !== undefined) {
+    qty = (newDeliveryQuantities[artId] === "") ? 0 : Number(newDeliveryQuantities[artId]) || 0;
+  }
+
+  const lineRemise = Number(art.remise) || 0;
+  const tvaRate = Number(art.tva ?? 0);
+
+  // Resolve unit prices, respecting in-cell edits if provided
+  let unitHT = Number(art.prixUnitaire || art.prix_unitaire) || 0;
+  let unitTTC = Number(art.prixTTC || art.prix_ttc) || 0;
+
+  if (editingHT[artId] !== undefined) {
+    unitHT = Number(String(editingHT[artId]).replace(",", ".")) || 0;
+    unitTTC = unitHT * (1 + tvaRate / 100);
+  } else if (editingTTC[artId] !== undefined) {
+    unitTTC = Number(String(editingTTC[artId]).replace(",", ".")) || 0;
+    unitHT = unitTTC / (1 + tvaRate / 100);
+  } else if (unitTTC === 0) {
+    // Fallback if TTC isn't stored
+    unitTTC = Number(art.article?.puv_ttc) || (unitHT * (1 + tvaRate / 100));
+  }
+
+  // Line amounts (Full precision)
+  const lineGrossHT = qty * unitHT;
+  const lineNetHT = lineGrossHT * (1 - lineRemise / 100);
+  const lineTTC = isExonerated ? lineNetHT : qty * unitTTC;
+  const lineTVA = isExonerated ? 0 : lineTTC - lineNetHT;
+
+  return {
+    unitHT,
+    unitTTC,
+    grossHT: lineGrossHT,
+    netHT: lineNetHT,
+    taxAmount: lineTVA,
+    ttc: lineTTC
+  };
+};
 
 /**
  * calculateDocumentTotals
@@ -50,7 +118,7 @@ export const calculateDocumentTotals = (
     return {
       sousTotalHT: 0, netHT: 0, totalTax: 0, grandTotal: 0,
       finalTotal: 0, discountAmount: 0, discountPercentage: 0,
-      retentionMontant: 0, timbre: 0, netAPayer: 0,
+      retentionMontant: 0, timbre: 0, timbreFiscal: false, netAPayer: 0,
       tvaBreakdown: {}
     };
   }
@@ -58,87 +126,46 @@ export const calculateDocumentTotals = (
   const articles = doc.articles;
   const isExonerated = doc.exoneration === "OUI" || doc.exoneration === true;
   const globalRemise = Number(doc.remise) || 0;
-  const remiseType   = doc.remiseType   || "percentage";
-  const hasTimbre    = !!doc.timbreFiscal;
+  const remiseType = doc.remiseType || "percentage";
+  const hasTimbre = !!doc.timbreFiscal;
 
   // STEP 1: Accumulate line-by-line (Full precision)
-  let sousTotalHTAcc    = 0;
-  let netHTBeforeAcc    = 0;
-  let totalTVAAcc       = 0;
-  let grandTTCAcc       = 0;
+  let sousTotalHTAcc = 0;
+  let netHTBeforeAcc = 0;
+  let totalTVAAcc = 0;
+  let grandTTCAcc = 0;
 
   articles.forEach((art: any, index: number) => {
-    // Determine quantity (handle partial delivery case)
-    const artId = art.article_id || art.article?.id || index;
-    let qty = (art.quantite === "" || art.quantite === undefined) ? 0 : Number(art.quantite) || 0;
-    
-    if (newDeliveryQuantities[artId] !== undefined) {
-      qty = (newDeliveryQuantities[artId] === "") ? 0 : Number(newDeliveryQuantities[artId]) || 0;
-    }
+    // Do NOT pass isExonerated here — accumulate raw TVA so STEP 2 fixed-remise
+    // back-calculation always has the correct avgTvaRate available.
+    const line = calculateLineTotals(art, index, options);
 
-    const lineRemise = Number(art.remise) || 0;
-    const tvaRate    = Number(art.tva ?? 0);
-
-    // Resolve unit prices, respecting in-cell edits if provided
-    let unitHT  = Number(art.prixUnitaire || art.prix_unitaire) || 0;
-    let unitTTC = Number(art.prixTTC || art.prix_ttc) || 0;
-
-    if (editingHT[artId] !== undefined) {
-      unitHT = Number(String(editingHT[artId]).replace(",", ".")) || 0;
-      unitTTC = unitHT * (1 + tvaRate / 100);
-    } else if (editingTTC[artId] !== undefined) {
-      unitTTC = Number(String(editingTTC[artId]).replace(",", ".")) || 0;
-      unitHT = unitTTC / (1 + tvaRate / 100);
-    } else if (unitTTC === 0) {
-      // Fallback if TTC isn't stored
-      unitTTC = Number(art.article?.puv_ttc) || (unitHT * (1 + tvaRate / 100));
-    }
-
-    // Line amounts (Full precision)
-    const lineGrossHT = qty * unitHT;
-    const lineNetHT   = lineGrossHT * (1 - lineRemise / 100);
-    const lineTTC     = qty * unitTTC;
-    const lineTVA     = lineTTC - lineNetHT;
-
-    sousTotalHTAcc += lineGrossHT;
-    netHTBeforeAcc += lineNetHT;
-    totalTVAAcc    += lineTVA;
-    grandTTCAcc    += lineTTC;
+    sousTotalHTAcc += line.grossHT;
+    netHTBeforeAcc += line.netHT;
+    totalTVAAcc += line.taxAmount;
+    grandTTCAcc += line.ttc;
   });
 
   // PRE-CALCULATE TVA BREAKDOWN (Full precision)
   const tvaBreakdownAcc: { [key: number]: { base: number; montant: number } } = {};
   articles.forEach((art: any, index: number) => {
-    const artId = art.article_id || art.article?.id || index;
-    let qty = (art.quantite === "" || art.quantite === undefined) ? 0 : Number(art.quantite) || 0;
-    if (newDeliveryQuantities[artId] !== undefined) {
-      qty = (newDeliveryQuantities[artId] === "") ? 0 : Number(newDeliveryQuantities[artId]) || 0;
-    }
-    const lineRemise = Number(art.remise) || 0;
+    // Same: raw TVA breakdown (exoneration only affects STEP 3, not per-line accumulation)
+    const line = calculateLineTotals(art, index, options);
     const tvaRate = Number(art.tva ?? 0);
-    let unitHT = Number(art.prixUnitaire || art.prix_unitaire) || 0;
-    if (editingHT[artId] !== undefined) {
-      unitHT = Number(String(editingHT[artId]).replace(",", ".")) || 0;
-    } else if (editingTTC[artId] !== undefined) {
-      const unitTTC = Number(String(editingTTC[artId]).replace(",", ".")) || 0;
-      unitHT = unitTTC / (1 + tvaRate / 100);
-    }
-    const lineNetHT = qty * unitHT * (1 - lineRemise / 100);
-    const lineTVA = lineNetHT * (tvaRate / 100);
 
     if (tvaRate > 0) {
       if (!tvaBreakdownAcc[tvaRate]) tvaBreakdownAcc[tvaRate] = { base: 0, montant: 0 };
-      tvaBreakdownAcc[tvaRate].base += lineNetHT;
-      tvaBreakdownAcc[tvaRate].montant += lineTVA;
+      tvaBreakdownAcc[tvaRate].base += line.netHT;
+      tvaBreakdownAcc[tvaRate].montant += line.taxAmount;
     }
   });
 
   // STEP 2: Apply global remise
-  let netHTAfter    = netHTBeforeAcc;
+  let netHTAfter = netHTBeforeAcc;
   let totalTVAAfter = totalTVAAcc;
-  let finalTTC      = grandTTCAcc;
-  let discAmount    = 0;
-  let discPerc      = 0;
+  let finalTTC = grandTTCAcc;
+  let discAmount = 0;
+  let discPerc = 0;
 
   const effectiveLockedPerc = (lockedPercentage !== null) ? lockedPercentage : (doc.lockedPercentage ?? doc.locked_percentage ?? null);
 
@@ -146,10 +173,10 @@ export const calculateDocumentTotals = (
     if (remiseType === "percentage" || effectiveLockedPerc !== null) {
       // Percentage mode OR locked proportional mode
       discPerc = (effectiveLockedPerc !== null) ? effectiveLockedPerc : globalRemise;
-      netHTAfter    = netHTBeforeAcc * (1 - discPerc / 100);
+      netHTAfter = netHTBeforeAcc * (1 - discPerc / 100);
       totalTVAAfter = netHTBeforeAcc > 0 ? totalTVAAcc * (netHTAfter / netHTBeforeAcc) : 0;
-      finalTTC      = netHTAfter + totalTVAAfter;
-      discAmount    = netHTBeforeAcc - netHTAfter;
+      finalTTC = netHTAfter + totalTVAAfter;
+      discAmount = netHTBeforeAcc - netHTAfter;
     } else {
       // Fixed amount — globalRemise IS the exact target TTC.
       // Reverse-derive the HT discount that produces this TTC.
@@ -157,11 +184,11 @@ export const calculateDocumentTotals = (
       // => newNetHT = targetTTC / (1 + avgTvaRate)
       finalTTC = globalRemise;
       const avgTvaRate = netHTBeforeAcc > 0 ? totalTVAAcc / netHTBeforeAcc : 0;
-      netHTAfter    = (1 + avgTvaRate) > 0 ? finalTTC / (1 + avgTvaRate) : finalTTC;
+      netHTAfter = (1 + avgTvaRate) > 0 ? finalTTC / (1 + avgTvaRate) : finalTTC;
       totalTVAAfter = finalTTC - netHTAfter;
-      discAmount    = netHTBeforeAcc - netHTAfter;
+      discAmount = netHTBeforeAcc - netHTAfter;
       // This is the HT-based percentage — same base as percentage mode
-      discPerc      = netHTBeforeAcc > 0 ? (discAmount / netHTBeforeAcc) * 100 : 0;
+      discPerc = netHTBeforeAcc > 0 ? (discAmount / netHTBeforeAcc) * 100 : 0;
     }
 
     // Apply global discount to TVA breakdown proportionally
@@ -176,7 +203,7 @@ export const calculateDocumentTotals = (
   // STEP 3: Handle Exoneration
   if (isExonerated) {
     totalTVAAfter = 0;
-    finalTTC      = netHTAfter;
+    finalTTC = netHTAfter;
   }
 
   // STEP 4: Retention (WITHHOLDING TAX)
@@ -199,16 +226,17 @@ export const calculateDocumentTotals = (
   const netAPayer = finalTTC + timbreVal - retentionVal;
 
   return {
-    sousTotalHT:      sousTotalHTAcc,
-    netHT:            netHTAfter,
-    totalTax:         totalTVAAfter,
-    grandTotal:       grandTTCAcc,
-    finalTotal:       finalTTC,
-    discountAmount:   discAmount,
+    sousTotalHT: sousTotalHTAcc,
+    netHT: netHTAfter,
+    totalTax: totalTVAAfter,
+    grandTotal: grandTTCAcc,
+    finalTotal: finalTTC,
+    discountAmount: discAmount,
     discountPercentage: discPerc,
     retentionMontant: retentionVal,
-    timbre:           timbreVal,
-    netAPayer:        Math.max(0, netAPayer),
-    tvaBreakdown:     tvaBreakdownAcc
+    timbre: timbreVal,
+    timbreFiscal: hasTimbre,
+    netAPayer: Math.max(0, netAPayer),
+    tvaBreakdown: tvaBreakdownAcc
   };
 };

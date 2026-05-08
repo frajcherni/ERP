@@ -79,7 +79,7 @@ import {
 import {
   createClient,
   createArticle,
-  fetchFournisseurs,
+  searchFournisseurs,
   fetchCategories,
 } from "../../../Components/Article/ArticleServices";
 import { Categorie, Fournisseur } from "../../../Components/Article/Interfaces";
@@ -128,6 +128,9 @@ const BonCommandeClientList = () => {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [filteredArticles, setFilteredArticles] = useState<Article[]>([]);
   const [filteredClients, setFilteredClients] = useState<Client[]>([]);
+  const [fournisseurSearch, setFournisseurSearch] = useState("");
+  const [filteredFournisseurs, setFilteredFournisseurs] = useState<Fournisseur[]>([]);
+  const [fournisseursLoading, setFournisseursLoading] = useState(false);
   const [showRemise, setShowRemise] = useState(false);
   const [nextNumeroCommande, setNextNumeroCommande] = useState("");
   const [nextNumeroLivraison, setNextNumeroLivraison] = useState("");
@@ -407,7 +410,6 @@ const BonCommandeClientList = () => {
   });
 
   const [categories, setCategories] = useState<Categorie[]>([]);
-  const [fournisseurs, setFournisseurs] = useState<Fournisseur[]>([]);
   const [subcategories, setSubcategories] = useState<Categorie[]>([]);
 
   // Add near your other state declarations
@@ -935,23 +937,6 @@ const BonCommandeClientList = () => {
         setCurrentPage(paginatedResult.pagination.page);
         setPageSize(limit);
 
-        if (!skipSecondary) {
-          setSecondaryLoading(true);
-          try {
-            // Load initial articles and clients for modal searches
-            const [articlesResult, clientsResult] = await Promise.all([
-              searchArticles({ query: "", page: 1, limit: 10 }),
-              searchClients({ query: "", page: 1, limit: 10 }),
-            ]);
-            setArticles(articlesResult.articles || []);
-            setClients(clientsResult.clients || []);
-            setFilteredClients(clientsResult.clients || []);
-          } catch (secondaryErr) {
-            console.error("Secondary data loading failed:", secondaryErr);
-          } finally {
-            setSecondaryLoading(false);
-          }
-        }
 
         setLoading(false);
         setError(null);
@@ -966,24 +951,27 @@ const BonCommandeClientList = () => {
   );
 
   const isFirstRender = useRef(true);
+  const hasLoadedSecondary = useRef(false);
 
-  // Re-fetch whenever filters change (debounced)
+  // Combined fetch effect (Initial load + debounced filters)
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    setCurrentPage(1);
+    let active = true;
+
     const timer = setTimeout(() => {
-      fetchData(1, pageSize, true);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [searchText, startDate, endDate, activeTab]);
+      if (active) {
+        const skipSecondary = hasLoadedSecondary.current;
+        fetchData(1, pageSize, skipSecondary);
+        if (!skipSecondary) hasLoadedSecondary.current = true;
+      }
+    }, isFirstRender.current ? 0 : 400);
 
-  // Initial load
-  useEffect(() => {
-    fetchData(1, pageSize, false);
-  }, []); // eslint-disable-line
+    isFirstRender.current = false;
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [searchText, startDate, endDate, activeTab, pageSize]);
 
   // Load articles only when needed (modal opens or search)
   const loadArticles = async (query = "", page = 1, limit = 15) => {
@@ -1022,17 +1010,44 @@ const BonCommandeClientList = () => {
     }
   };
 
+  // Load fournisseurs only when needed
+  const loadFournisseurs = async (query = "", page = 1, limit = 15) => {
+    if (modal || fournisseurSearch) {
+      setFournisseursLoading(true);
+      try {
+        const result = await searchFournisseurs({ query, page, limit });
+        setFilteredFournisseurs(result.fournisseurs || []);
+      } catch (err) {
+        console.error("Failed to load fournisseurs:", err);
+      } finally {
+        setFournisseursLoading(false);
+      }
+    }
+  };
+
+  // Update fournisseur search effect
+  useEffect(() => {
+    const searchFournisseursDebounced = async () => {
+      if (fournisseurSearch.length >= 3) {
+        await loadFournisseurs(fournisseurSearch, 1, 20);
+      } else {
+        setFilteredFournisseurs([]);
+      }
+    };
+
+    const timer = setTimeout(searchFournisseursDebounced, 300);
+    return () => clearTimeout(timer);
+  }, [fournisseurSearch]);
+
   // Load modal data only when modal opens
   const loadModalData = async () => {
     if (modal) {
       setModalLoading(true);
       try {
         // Load only what's needed for the modal
-        const [depotsResult, categoriesResult, fournisseursData] = await Promise.all([
+        const [depotsResult, categoriesResult] = await Promise.all([
           fetchDepots(),
           fetchCategories(),
-          fetchFournisseurs(), // ADD THIS LINE
-
         ]);
 
         setDepots(depotsResult);
@@ -1047,10 +1062,7 @@ const BonCommandeClientList = () => {
             setSelectedDepot(magazinDepot);
           }
         }
-        setFournisseurs(fournisseursData); // ADD THIS LINE
 
-        // Load initial articles and clients for modal
-        await Promise.all([loadArticles("", 1, 15), loadClients("", 1, 15)]);
       } catch (err) {
         console.error("Modal data loading failed:", err);
       } finally {
@@ -1729,11 +1741,11 @@ const BonCommandeClientList = () => {
           }, 0);
 
           // Check if total payments exceed the final total (BEFORE retention)
-          if (totalPaymentAmount > finalTotal) {
+          if (totalPaymentAmount > netAPayer) {
             toast.error(
               `Le total des règlements (${totalPaymentAmount.toFixed(
                 3
-              )} DT) dépasse le montant total (${finalTotal.toFixed(3)} DT)`
+              )} DT) dépasse le montant net à payer (${netAPayer.toFixed(3)} DT)`
             );
             return;
           }
@@ -1745,12 +1757,12 @@ const BonCommandeClientList = () => {
               typeof pm.amount === "string"
                 ? parseFloat(pm.amount.replace(",", ".")) || 0
                 : Number(pm.amount) || 0;
-            return amountValue > finalTotal;
+            return amountValue > netAPayer;
           });
 
           if (hasIndividualExceed) {
             toast.error(
-              "Le montant d'une méthode de règlement dépasse le montant total"
+              "Le montant d'une méthode de règlement dépasse le montant net à payer"
             );
             return;
           }
@@ -4216,8 +4228,8 @@ const BonCommandeClientList = () => {
                                           <tr className={`real-time-update ${(discountPercentage ?? 0) > 10 ? "table-danger" : "table-success"}`}>
                                             <th className={`text-end fs-6 ${(discountPercentage ?? 0) > 10 ? "text-danger" : "text-success"}`}>
                                               {remiseType === "percentage"
-                                                ? `Remise (${globalRemise}%)`
-                                                : `Remise (Montant fixe) ${(discountPercentage ?? 0).toFixed(8)}%`}
+                                                ? `Remise (${Number(globalRemise).toFixed(2)}%)`
+                                                : `Remise (Montant fixe) ${(discountPercentage ?? 0).toFixed(2)}%`}
                                             </th>
                                             <td className={`text-end fw-bold fs-6 ${(discountPercentage ?? 0) > 10 ? "text-danger" : "text-success"}`}>
                                               - {discountAmount.toFixed(3)} DT
@@ -4931,6 +4943,8 @@ const BonCommandeClientList = () => {
                                       netAPayer: netAPayerValue,
                                     } = totals;
 
+                                    const discountPercentage = totals.discountPercentage || 0;
+
                                     // Calculate payments (acompte)
                                     const acompteTotal = (selectedBonCommande.paymentMethods || [])
                                       .filter((pm: any) => pm.method !== "retenue")
@@ -4974,8 +4988,8 @@ const BonCommandeClientList = () => {
                                             <tr className={`real-time-update ${discountPercentage > 10 ? "table-danger" : "table-success"}`}>
                                               <th className={`text-end fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                                 {selectedBonCommande.remiseType === "percentage"
-                                                  ? `Remise (Global) ${Number(selectedBonCommande.remise)}%`
-                                                  : `Remise (Montant fixe) ${discountPercentage}%`}
+                                                  ? `Remise (Global) ${Number(selectedBonCommande.remise).toFixed(2)}%`
+                                                  : `Remise (Montant fixe) ${Number(discountPercentage).toFixed(2)}%`}
                                               </th>
                                               <td className={`text-end fw-bold fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                                 - {discountAmountValue.toFixed(3)} DT
@@ -5621,26 +5635,104 @@ const BonCommandeClientList = () => {
                                 <Label className="form-label-lg fw-semibold">
                                   Fournisseur
                                 </Label>
-                                <Input
-                                  type="select"
-                                  value={newArticle.fournisseur_id}
-                                  onChange={(e) =>
-                                    setNewArticle({
-                                      ...newArticle,
-                                      fournisseur_id: e.target.value,
-                                    })
-                                  }
-                                  className="form-control-lg"
-                                >
-                                  <option value="">
-                                    Sélectionner un fournisseur
-                                  </option>
-                                  {fournisseurs.map((f) => (
-                                    <option key={f.id} value={f.id}>
-                                      {f.raison_sociale}
-                                    </option>
-                                  ))}
-                                </Input>
+                                  <div className="position-relative">
+                                    <Input
+                                      type="text"
+                                      placeholder="Rechercher un fournisseur (3 caractères min)..."
+                                      value={fournisseurSearch}
+                                      onChange={(e) => setFournisseurSearch(e.target.value)}
+                                      className="form-control-lg pe-10"
+                                      readOnly={!!newArticle.fournisseur_id}
+                                    />
+                                    {fournisseursLoading && (
+                                      <div className="position-absolute end-0 top-50 translate-middle-y me-3">
+                                        <div className="spinner-border spinner-border-sm text-primary" role="status">
+                                          <span className="visually-hidden">Chargement...</span>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Clear button when fournisseur is selected */}
+                                    {newArticle.fournisseur_id && (
+                                      <button
+                                        type="button"
+                                        className="btn btn-link text-danger position-absolute end-0 top-50 translate-middle-y p-0 me-3"
+                                        onClick={() => {
+                                          setNewArticle({ ...newArticle, fournisseur_id: "" });
+                                          setFournisseurSearch("");
+                                        }}
+                                        title="Changer de fournisseur"
+                                      >
+                                        <i className="ri-close-line fs-5"></i>
+                                      </button>
+                                    )}
+
+                                    {/* Enhanced Fournisseur Dropdown Results */}
+                                    {!newArticle.fournisseur_id && fournisseurSearch.length >= 3 && (
+                                      <div
+                                        className="search-results fournisseur-results mt-1"
+                                        style={{
+                                          position: "absolute",
+                                          top: "100%",
+                                          left: 0,
+                                          right: 0,
+                                          zIndex: 1050,
+                                          backgroundColor: "#fafafa",
+                                          border: "1px solid #e9ecef",
+                                          borderRadius: "0.375rem",
+                                          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.08)",
+                                          maxHeight: "250px",
+                                          overflowY: "auto"
+                                        }}
+                                      >
+                                        {filteredFournisseurs.length > 0 ? (
+                                          <ul className="list-group list-group-flush">
+                                            {filteredFournisseurs.map((f) => (
+                                              <li
+                                                key={f.id}
+                                                className="list-group-item list-group-item-action"
+                                                onClick={() => {
+                                                  setNewArticle({
+                                                    ...newArticle,
+                                                    fournisseur_id: f.id.toString(),
+                                                  });
+                                                  setFournisseurSearch(f.raison_sociale);
+                                                  setFilteredFournisseurs([]);
+                                                }}
+                                                style={{
+                                                  cursor: "pointer",
+                                                  padding: "12px 16px",
+                                                  transition: "all 0.15s ease",
+                                                  backgroundColor: "transparent",
+                                                  borderBottom: "1px solid #f1f3f5"
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                  e.currentTarget.style.backgroundColor = "#f5f5f5";
+                                                  e.currentTarget.style.borderLeft = "3px solid #0d6efd";
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                  e.currentTarget.style.backgroundColor = "transparent";
+                                                  e.currentTarget.style.borderLeft = "none";
+                                                }}
+                                              >
+                                                <div className="d-flex flex-column">
+                                                  <span className="fw-semibold text-dark">{f.raison_sociale}</span>
+                                                  <small className="text-muted">
+                                                    <i className="ri-phone-line me-1"></i>
+                                                    {f.telephone1 || "Pas de téléphone"}
+                                                  </small>
+                                                </div>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        ) : (
+                                          <div className="p-3 text-center text-muted">
+                                            Aucun fournisseur trouvé
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
                                 <small className="text-muted">
                                   Fournisseur principal
                                 </small>
@@ -6916,10 +7008,10 @@ const BonCommandeClientList = () => {
 
                                       const montantHTLigne = (
                                         qtyCommandee * priceHT
-                                      ).toFixed(3);
+                                      );
                                       const montantTTCLigne = (
                                         qtyCommandee * priceTTC
-                                      ).toFixed(3);
+                                      );
 
                                       return (
                                         <tr
@@ -7354,12 +7446,12 @@ const BonCommandeClientList = () => {
                                           </td>
                                           <td style={{ width: "9%" }}>
                                             <div className="article-total-cell article-total-ht">
-                                              {montantHTLigne} DT
+                                              {Number(montantHTLigne).toFixed(3)} DT
                                             </div>
                                           </td>
                                           <td style={{ width: "9%" }}>
                                             <div className="article-total-cell article-total-ttc">
-                                              {montantTTCLigne} DT
+                                              {Number(montantTTCLigne).toFixed(3)} DT
                                             </div>
                                           </td>
                                           <td style={{ width: "4%" }}>
@@ -7534,8 +7626,8 @@ const BonCommandeClientList = () => {
                                           <tr className={`real-time-update ${(discountPercentage ?? 0) > 10 ? "table-danger" : "table-success"}`}>
                                             <th className={`text-end fs-6 ${(discountPercentage ?? 0) > 10 ? "text-danger" : "text-success"}`}>
                                               {remiseType === "percentage"
-                                                ? `Remise (Global) ${Number(globalRemise)}%`
-                                                : `Remise (Montant fixe) ${(discountPercentage ?? 0)}%`}
+                                                ? `Remise (Global) ${Number(globalRemise).toFixed(2)}%`
+                                                : `Remise (Montant fixe) ${Number(discountPercentage ?? 0).toFixed(2)}%`}
                                             </th>
                                             <td className={`text-end fw-bold fs-6 ${(discountPercentage ?? 0) > 10 ? "text-danger" : "text-success"}`}>
                                               - {discountAmount.toFixed(3)} DT
