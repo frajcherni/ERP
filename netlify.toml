@@ -1,0 +1,6 @@
+# Netlify sets CI=true, which makes Create React App fail the whole build on any
+# ESLint warning — and this project has many old ones. CI=false keeps them as
+# warnings, like a local `npm run build`.
+[build]
+  command = "CI=false npm run build"
+  publish = "build"
