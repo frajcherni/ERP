@@ -36,7 +36,7 @@ import SellerChats from "./SellerChats";
 import { createSelector } from "reselect";
 
 const EcommerceSellers = () => {
-  document.title = "Sellers | Velzon - React Admin & Dashboard Template";
+  document.title = "Sellers | Royal Lumiere";
 
   const dispatch :any= useDispatch();
   const [sellerList, setSellerList] = useState<any>([]);

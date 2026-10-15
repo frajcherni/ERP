@@ -30,7 +30,7 @@ import small9 from "../../../assets/images/small/img-9.jpg";
 const Timeline = () => {
 
     const [thumbsSwiper] = useState<any>(null);
-    document.title="Timeline | Velzon - React Admin & Dashboard Template";
+    document.title="Timeline | Royal Lumiere";
 
 
     return (

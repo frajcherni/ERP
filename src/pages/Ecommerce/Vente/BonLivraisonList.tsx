@@ -46,6 +46,10 @@ import Flatpickr from "react-flatpickr";
 import { fetchDepots } from "../Stock/DepotServices";
 import { Depot } from "../../../Components/Article/Interfaces";
 import {
+  buildRootCategoryOptions,
+  buildSubcategoryOptions,
+} from "../../../Components/Article/CategoryTree";
+import {
   FetchBonLivraison,
   FetchBonLivraisonPaginated,
   createBonLivraison,
@@ -54,6 +58,8 @@ import {
   fetchNextLivraisonNumberAPI,
 } from "../../../Components/CommandeClient/BonLivraisonServices";
 import EditClientModal from "./EditClientModal";
+import PhoneInput from "../../../Components/Common/PhoneInput";
+import { formatPhoneDisplay, formatPhoneSearch, PHONE_FORMAT_HINT } from "../../../helpers/phone_helper";
 
 import {
 
@@ -139,15 +145,12 @@ const BonLivraisonList = () => {
 
   const calculateEffectiveTotal = useCallback((bon: any) => {
     if (!bon) return 0;
-    const totals = calculateDocumentTotals({
-      articles: bon.articles || [],
-      remise: bon.remise || 0,
-      remiseType: bon.remiseType || "percentage",
-      exoneration: bon.exoneration === "OUI" || bon.exoneration === true,
-      timbreFiscal: (bon as any).timbreFiscal || false
-    });
-    return totals.finalTotal;
-  }, []);
+    const hasRemise = bon.remise && Number(bon.remise) > 0;
+    if (hasRemise) {
+      return getSafeNumber(bon.totalTTCAfterRemise) || getSafeNumber(bon.totalTTC);
+    }
+    return getSafeNumber(bon.totalTTC);
+  }, [getSafeNumber]);
 
   const calculateTotalPaid = useCallback((bon: any) => {
     if (!bon) return 0;
@@ -157,13 +160,32 @@ const BonLivraisonList = () => {
       .filter((pm: any) => pm.method !== "retenue")
       .reduce((sum: number, pm: any) => sum + getSafeNumber(pm.amount), 0);
 
-    // fetchData pre-aggregates both paiements table + paymentMethods into montantPaye.
-    // Use Math.max to avoid double-counting: if montantPaye already includes
-    // paymentMethods, we don't add them again.
-    const montantPayeFromState = getSafeNumber(bon.montantPaye);
+    // Sum regular payments from paiements table (direct BL payments)
+    const paiementsSum = (bon.paiements || [])
+      .filter((p: any) => p.modePaiement !== "Retention")
+      .reduce((sum: number, p: any) => sum + getSafeNumber(p.montant), 0);
+
+    // Same pattern as FactureClient: also aggregate payments from the linked
+    // bonCommandeClient so that paying the commande is reflected on the BL
+    const bonCommandePaymentMethodsSum = (bon.bonCommandeClient?.paymentMethods || [])
+      .filter((pm: any) => pm.method !== "retenue")
+      .reduce((sum: number, pm: any) => sum + getSafeNumber(pm.amount), 0);
+
+    const bonCommandePaiementsSum = (bon.bonCommandeClient?.paiements || [])
+      .filter((p: any) => p.modePaiement !== "Retention")
+      .reduce((sum: number, p: any) => sum + getSafeNumber(p.montant), 0);
+
+    // Include payments from the linked venteComptoire (display only — not re-saved)
+    const venteComptoirePaiementsSum = (bon.venteComptoire?.paiements || [])
+      .filter((p: any) => p.modePaiement !== "Retention")
+      .reduce((sum: number, p: any) => sum + getSafeNumber(p.montant), 0);
+
+    const venteComptoireMethodsSum = (bon.venteComptoire?.paymentMethods || [])
+      .filter((pm: any) => pm.method !== "retenue")
+      .reduce((sum: number, pm: any) => sum + getSafeNumber(pm.amount), 0);
 
     return Math.round(
-      Math.max(paymentMethodsSum, montantPayeFromState) * 1000
+      (paymentMethodsSum + paiementsSum + bonCommandePaymentMethodsSum + bonCommandePaiementsSum + venteComptoirePaiementsSum + venteComptoireMethodsSum) * 1000
     ) / 1000;
   }, [getSafeNumber]);
   const [articleSearch, setArticleSearch] = useState("");
@@ -218,6 +240,7 @@ const BonLivraisonList = () => {
       numero?: string;
       banque?: string;
       dateEcheance?: string;
+      date?: string;
       tauxRetention?: number;
     }>
   >([]);
@@ -229,8 +252,10 @@ const BonLivraisonList = () => {
       const nextNumber = await fetchNextPaiementNumberFromAPI();
       setNextPaiementNumber(nextNumber);
 
-      // Use the pre-computed resteAPayer from fetchData (authoritative)
-      const availableAmount = Math.max(0, getSafeNumber(bon.resteAPayer));
+      const finalTotal = calculateEffectiveTotal(bon);
+      const paye = calculateTotalPaid(bon);
+      const retentionAmount = getSafeNumber(bon.montantRetenue);
+      const availableAmount = Math.max(0, finalTotal - paye - retentionAmount);
       const initialMontant = availableAmount.toFixed(3).replace(".", ",");
 
       paiementValidation.setValues({
@@ -251,7 +276,10 @@ const BonLivraisonList = () => {
       const year = moment().format("YYYY");
       const defaultNumber = `PAY-C${year}${String(0 + 1).padStart(5, "0")}`;
 
-      const availableAmount = Math.max(0, getSafeNumber(bon.resteAPayer));
+      const finalTotal = calculateEffectiveTotal(bon);
+      const paye = calculateTotalPaid(bon);
+      const retentionAmount = getSafeNumber(bon.montantRetenue);
+      const availableAmount = Math.max(0, finalTotal - paye - retentionAmount);
       const initialMontant = availableAmount.toFixed(3).replace(".", ",");
 
       paiementValidation.setValues({
@@ -351,7 +379,7 @@ const BonLivraisonList = () => {
 
             const baseTotal = calculateEffectiveTotal(selectedBonForPaiement);
             const retentionAmount = getSafeNumber(selectedBonForPaiement.montantRetenue);
-            const montantPaye = getSafeNumber(selectedBonForPaiement.montantPaye);
+            const montantPaye = calculateTotalPaid(selectedBonForPaiement);
 
             const availableAmount = Math.max(0, baseTotal - retentionAmount - montantPaye);
 
@@ -379,6 +407,7 @@ const BonLivraisonList = () => {
         id: Date.now().toString(),
         method: "especes",
         amount: "0,000",
+        date: moment().format("YYYY-MM-DD"),
       },
     ]);
   };
@@ -389,7 +418,18 @@ const BonLivraisonList = () => {
 
   const updateMethodeReglement = (id: string, field: string, value: any) => {
     setMethodesReglement(
-      methodesReglement.map((m) => (m.id === id ? { ...m, [field]: value } : m))
+      methodesReglement.map((m) => {
+        if (m.id !== id) return m;
+        if (field === "amount" && typeof value === "string") {
+          const normalized = value.replace(/\./g, ",");
+          const parts = normalized.split(",");
+          if (parts.length <= 2 && parts.every((p: string) => /^[0-9]*$/.test(p))) {
+            return { ...m, [field]: normalized };
+          }
+          return m;
+        }
+        return { ...m, [field]: value };
+      })
     );
   };
 
@@ -626,7 +666,6 @@ const BonLivraisonList = () => {
   });
 
   const [categories, setCategories] = useState<Categorie[]>([]);
-  const [subcategories, setSubcategories] = useState<Categorie[]>([]);
 
   const tvaOptions = [
     { value: null, label: "Non applicable" },
@@ -668,13 +707,10 @@ const BonLivraisonList = () => {
   );
 
   const handleMontantChangePaiement = (e: any) => {
-    let value = e.target.value;
-    if (value === "" || /^[0-9]*[,.]?[0-9]*$/.test(value)) {
-      value = value.replace(".", ",");
-      const commaCount = (value.match(/,/g) || []).length;
-      if (commaCount <= 1) {
-        paiementValidation.setFieldValue("montant", value);
-      }
+    const normalized = e.target.value.replace(/\./g, ",");
+    const parts = normalized.split(",");
+    if (parts.length <= 2 && parts.every((p: string) => /^[0-9]*$/.test(p))) {
+      paiementValidation.setFieldValue("montant", normalized);
     }
   };
 
@@ -747,28 +783,19 @@ const BonLivraisonList = () => {
         throw new Error("Invalid number format received from API");
       }
 
+      // The backend is authoritative: use its value as-is.
       setNextNumeroLivraison(numero);
       return numero;
     } catch (err) {
       console.error("❌ Error fetching next livraison number:", err);
 
-      // Show user-friendly error
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       toast.error(
         `Échec de la récupération du numéro de livraison: ${errorMessage}`
       );
-
-      // Fallback: Generate a number locally
-      const year = moment().format("YYYY");
-      const nextNum = `LIVRAISON-${String(350 + bonsLivraison.length).padStart(
-        3,
-        "0"
-      )}/${year}`;
-      console.log("🔄 Using fallback number:", nextNum);
-      setNextNumeroLivraison(nextNum);
-      return nextNum;
+      throw err;
     }
-  }, [bonsLivraison]);
+  }, []);
   const fetchNextFactureNumber = useCallback(async () => {
     try {
       const numero = await fetchNextFactureNumberFromAPI();
@@ -804,7 +831,7 @@ const BonLivraisonList = () => {
   // Replace the current useEffect for articleSearch:
   useEffect(() => {
     const searchArticlesDebounced = async () => {
-      if (articleSearch.length >= 3 || modal) {
+      if (articleSearch.length >= 1) {
         await loadArticles(articleSearch, 1, 20);
       } else {
         setFilteredArticles([]);
@@ -829,46 +856,11 @@ const BonLivraisonList = () => {
   }, [modal]);
 
 
-  // Phone formatting functions - add these near the top of your component
-  const formatPhoneInput = (value: string): string => {
-    // Remove all non-digit characters
-    const cleaned = value.replace(/\D/g, "");
-
-    // Limit to 8 digits (Tunisian phone number length)
-    const limited = cleaned.slice(0, 8);
-
-    // Format as XX XXX XXX
-    if (limited.length <= 2) {
-      return limited;
-    } else if (limited.length <= 5) {
-      return `${limited.substring(0, 2)} ${limited.substring(2)}`;
-    } else {
-      return `${limited.substring(0, 2)} ${limited.substring(
-        2,
-        5
-      )} ${limited.substring(5, 8)}`;
-    }
-  };
-
-  // Display formatting function
-  const formatPhoneDisplay = (phone: string | null | undefined): string => {
-    if (!phone) return "N/A";
-
-    const cleanPhone = phone.replace(/\D/g, "");
-    if (cleanPhone.length === 8) {
-      return `${cleanPhone.substring(0, 2)} ${cleanPhone.substring(
-        2,
-        5
-      )} ${cleanPhone.substring(5, 8)}`;
-    }
-    return phone;
-  };
-
   // Replace the current useEffect for clientSearch:
   useEffect(() => {
     const searchClientsDebounced = async () => {
-      if (clientSearch.length >= 1 || modal) {
-        await loadClients(clientSearch, 1, 20);
+      if (clientSearch.length >= 1) {
+        await loadClients(clientSearch, 1, 500);
       } else {
         setFilteredClients([]);
       }
@@ -894,23 +886,22 @@ const BonLivraisonList = () => {
           page,
           limit,
           search: searchText || undefined,
+          searchPhone: phoneSearch || undefined,
           status: statusFilter || undefined,
           startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
           endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
         });
 
         let paginatedResult;
-        let depotsDataForAutoSelect: Depot[] = [];
         if (!skipSecondary) {
           const [resPaginated, resVendeurs, resDepots] = await Promise.all([
             paginatedPromise,
             fetchVendeurs(),
-            fetchDepots(),
+            depots.length === 0 ? fetchDepots() : Promise.resolve(depots),
           ]);
           paginatedResult = resPaginated;
           setVendeurs(resVendeurs);
-          setDepots(resDepots);
-          depotsDataForAutoSelect = resDepots;
+          if (depots.length === 0) setDepots(resDepots);
         } else {
           paginatedResult = await paginatedPromise;
         }
@@ -964,33 +955,34 @@ const BonLivraisonList = () => {
               });
           }
 
-          // Calculate article totals
-          let grandTotal = 0;
-          bon.articles.forEach((item: any) => {
-            const qty = Number(item.quantite) || 1;
-            const priceHT = Number(item.prix_unitaire) || 0;
-            const tvaRate = Number(item.tva ?? 0);
-            const priceTTC =
-              Number(item.prix_ttc) || priceHT * (1 + tvaRate / 100);
-            grandTotal += Math.round(qty * priceTTC * 1000) / 1000;
-          });
+          // Same pattern as FactureClient: also include payments from the linked
+          // bonCommandeClient so paying the commande is reflected on the BL
+          const bonCommandeRegularPaiements = (bon.bonCommandeClient?.paiements || [])
+            .filter((p: any) => p.modePaiement !== "Retention")
+            .reduce((sum: number, p: any) => sum + (Number(p.montant) || 0), 0);
 
-          // Apply global discount
-          const discount = Number(bon.remise) || 0;
-          let finalTotal = grandTotal;
-          if (bon.remiseType === "percentage") {
-            finalTotal = grandTotal * (1 - discount / 100);
-          } else {
-            finalTotal = Math.max(0, grandTotal - discount);
-          }
+          const bonCommandeRegularMethods = (bon.bonCommandeClient?.paymentMethods || [])
+            .filter((pm: any) => pm.method !== "retenue")
+            .reduce((sum: number, pm: any) => sum + (Number(pm.amount) || 0), 0);
 
-          // Add timbre fiscal if applicable
-          if (bon.timbreFiscal) {
-            finalTotal += 1.0;
-          }
+          // Include venteComptoire payments for display — not re-saved to DB
+          const venteComptoireRegularPaiements = (bon.venteComptoire?.paiements || [])
+            .filter((p: any) => p.modePaiement !== "Retention")
+            .reduce((sum: number, p: any) => sum + (Number(p.montant) || 0), 0);
+
+          const venteComptoireRegularMethods = (bon.venteComptoire?.paymentMethods || [])
+            .filter((pm: any) => pm.method !== "retenue")
+            .reduce((sum: number, pm: any) => sum + (Number(pm.amount) || 0), 0);
+
+          // Use stored totalTTCAfterRemise as the authoritative base total
+          // (same pattern as FactureClient — avoids recalculating from articles)
+          const hasRemise = bon.remise && Number(bon.remise) > 0;
+          const finalTotal = hasRemise
+            ? (Number(bon.totalTTCAfterRemise) || Number(bon.totalTTC) || 0)
+            : (Number(bon.totalTTC) || 0);
 
           // Authoritative sums
-          const authoritativeMontantPaye = regularPaiements + regularPaymentMethods;
+          const authoritativeMontantPaye = regularPaiements + regularPaymentMethods + bonCommandeRegularPaiements + bonCommandeRegularMethods + venteComptoireRegularPaiements + venteComptoireRegularMethods;
           const authoritativeMontantRetenue = retentionFromPaiements + retentionFromMethods;
 
           return {
@@ -1015,17 +1007,16 @@ const BonLivraisonList = () => {
         if (!skipSecondary) {
           setSecondaryLoading(true);
           try {
-            const [categoriesData] =
-              await Promise.all([
-                fetchCategories(),
-              ]);
-
-            setCategories(categoriesData);
+            if (categories.length === 0) {
+              const categoriesData = await fetchCategories();
+              setCategories(categoriesData);
+            }
 
             // Auto-select "magazin" depot
-            if (depotsDataForAutoSelect.length > 0 && !selectedDepot) {
-              const magazinDepot = depotsDataForAutoSelect.find(d =>
-                d.nom.toLowerCase().includes("magazin")
+            const currentDepots = depots;
+            if (currentDepots.length > 0 && !selectedDepot) {
+              const magazinDepot = currentDepots.find(d =>
+                d.nom.toLowerCase().includes("magasin") || d.nom.toLowerCase().includes("magazin")
               );
               if (magazinDepot) {
                 setSelectedDepot(magazinDepot);
@@ -1047,7 +1038,7 @@ const BonLivraisonList = () => {
         setLoading(false);
       }
     },
-    [searchText, startDate, endDate, pageSize, activeTab]
+    [searchText, phoneSearch, startDate, endDate, pageSize, activeTab]
   );
 
   // Combined fetch effect (Initial load + debounced filters)
@@ -1089,7 +1080,7 @@ const BonLivraisonList = () => {
   // Update fournisseur search effect
   useEffect(() => {
     const searchFournisseursDebounced = async () => {
-      if (fournisseurSearch.length >= 3) {
+      if (fournisseurSearch.length >= 1) {
         await loadFournisseurs(fournisseurSearch, 1, 20);
       } else {
         setFilteredFournisseurs([]);
@@ -1106,17 +1097,17 @@ const BonLivraisonList = () => {
       setModalLoading(true);
       try {
         const [depotsResult, categoriesResult] = await Promise.all([
-          fetchDepots(),
-          fetchCategories(),
+          depots.length === 0 ? fetchDepots() : Promise.resolve(depots),
+          categories.length === 0 ? fetchCategories() : Promise.resolve(categories)
         ]);
 
-        setDepots(depotsResult);
-        setCategories(categoriesResult);
+        if (depots.length === 0) setDepots(depotsResult);
+        if (categories.length === 0) setCategories(categoriesResult);
 
         // Auto-select "magazin" depot ONLY if not in edit mode and no depot is selected
         if (!isEdit && depotsResult.length > 0 && !selectedDepot) {
           const magazinDepot = depotsResult.find((d) =>
-            d.nom.toLowerCase().includes("magazin")
+            d.nom.toLowerCase().includes("magasin") || d.nom.toLowerCase().includes("magazin")
           );
           if (magazinDepot) {
             setSelectedDepot(magazinDepot);
@@ -1420,24 +1411,29 @@ const BonLivraisonList = () => {
 
 
 
-  // Add effect for subcategories
-  useEffect(() => {
-    if (newArticle.categorie_id) {
-      const categoryId = parseInt(newArticle.categorie_id);
-      const subs = categories.filter((cat) => cat.parent_id === categoryId);
-      setSubcategories(subs);
+  // Les deux listes suivent l'arborescence de la liste des catégories : la
+  // famille est une racine, la sous-famille n'importe laquelle de ses
+  // descendantes, indentée selon sa profondeur.
+  const familleOptions = useMemo(
+    () => buildRootCategoryOptions(categories),
+    [categories]
+  );
+  const sousFamilleOptions = useMemo(
+    () => buildSubcategoryOptions(categories, newArticle.categorie_id),
+    [categories, newArticle.categorie_id]
+  );
 
-      // Reset subcategory if parent category changes
-      if (
-        !subs.find((sub) => sub.id === parseInt(newArticle.sous_categorie_id))
-      ) {
-        setNewArticle((prev) => ({ ...prev, sous_categorie_id: "" }));
-      }
-    } else {
-      setSubcategories([]);
-      setNewArticle((prev) => ({ ...prev, sous_categorie_id: "" }));
+  // Une sous-famille qui ne vit plus sous la famille choisie n'a plus de sens.
+  // Tant que les catégories ne sont pas chargées on ne conclut rien.
+  useEffect(() => {
+    if (!categories.length || !newArticle.sous_categorie_id) return;
+    const stillThere = sousFamilleOptions.some(
+      (o) => String(o.id) === String(newArticle.sous_categorie_id)
+    );
+    if (!stillThere) {
+      setNewArticle((prev: any) => ({ ...prev, sous_categorie_id: "" }));
     }
-  }, [newArticle.categorie_id, categories]);
+  }, [sousFamilleOptions, categories.length, newArticle.sous_categorie_id]);
 
   const handleSubmit = async (values: any) => {
     if (discountPercentage > 10 && !isDiscountConfirmed) {
@@ -1508,18 +1504,21 @@ const BonLivraisonList = () => {
               amount: 0,
               numero: pm.numero || "",
               banque: pm.banque || "",
-              dateEcheance: pm.dateEcheance || "",
+              date: pm.date || moment().format("YYYY-MM-DD"),
+              dateEcheance: pm.dateEcheance || pm.date || moment().format("YYYY-MM-DD"),
               tauxRetention: pm.tauxRetention || 1,
             };
           }
 
-          return {
-            method: pm.method,
-            amount: amountValue,
-            numero: pm.numero || "",
-            banque: pm.banque || "",
-            dateEcheance: pm.dateEcheance || "",
-          };
+            return {
+              method: pm.method,
+              amount: amountValue,
+              numero: pm.numero || "",
+              banque: pm.banque || "",
+              date: pm.date || moment().format("YYYY-MM-DD"),
+              // Keep dateEcheance independent for traite
+              dateEcheance: pm.dateEcheance || "",
+            };
         });
 
       const livraisonData = {
@@ -1558,11 +1557,16 @@ const BonLivraisonList = () => {
         timbreFiscal: isCreatingFacture ? (timbreFiscal ?? false) : false,
         paymentMethods: isCreatingFacture ? [] : processedMethodesReglement,
         espaceNotes: isCreatingFacture ? "" : (espaceNotes || ""),
-        chaufeur: livraisonInfo.chauffeur || "",
         chauffeur: livraisonInfo.chauffeur || "",
         cin: livraisonInfo.cin || "",
         voiture: livraisonInfo.voiture || "",
         serie: livraisonInfo.serie || "",
+        livraisonInfo: {
+          voiture: livraisonInfo.voiture || "",
+          serie: livraisonInfo.serie || "",
+          chauffeur: livraisonInfo.chauffeur || "",
+          cin: livraisonInfo.cin || "",
+        },
         depot_id: selectedDepot?.id || null,
       };
 
@@ -2040,7 +2044,7 @@ const BonLivraisonList = () => {
       setRemiseType("fixed");
       setLockedPercentage(perc);
     } else {
-      setGlobalRemise(bon.remise || 0);
+      setGlobalRemise(Number(bon.remise) || 0);
       setRemiseType(bon.remiseType || "percentage");
       setLockedPercentage(null);
     }
@@ -2077,10 +2081,37 @@ const BonLivraisonList = () => {
         cell: (cell: any) => `${cell.getValue()?.raison_sociale || ""}`,
       },
       {
-        header: "Commande",
+        header: "Source",
         accessorKey: "bonCommandeClient",
         enableColumnFilter: false,
-        cell: (cell: any) => cell.getValue()?.numeroCommande || "N/A",
+        cell: (cell: any) => {
+          const row = cell.row.original;
+          if (row.bonCommandeClient?.numeroCommande) {
+            return (
+              <span>
+                <span className="badge bg-info-subtle text-info me-1" style={{fontSize:"0.7em"}}>BC</span>
+                {row.bonCommandeClient.numeroCommande}
+              </span>
+            );
+          }
+          if (row.venteComptoire?.numeroCommande) {
+            return (
+              <span>
+                <span className="badge bg-warning-subtle text-warning me-1" style={{fontSize:"0.7em"}}>VC</span>
+                {row.venteComptoire.numeroCommande}
+              </span>
+            );
+          }
+          if ((row as any).facture?.numeroFacture) {
+            return (
+              <span>
+                <span className="badge bg-primary-subtle text-primary me-1" style={{fontSize:"0.7em"}}>FAC</span>
+                {(row as any).facture.numeroFacture}
+              </span>
+            );
+          }
+          return <span className="text-muted">Vente Directe</span>;
+        },
       },
       {
         header: "Vendeur",
@@ -2092,6 +2123,7 @@ const BonLivraisonList = () => {
       {
         header: "Articles",
         accessorKey: "articles",
+        id: "articles_count",
         enableColumnFilter: false,
         cell: (cell: any) => (
           <Badge color="success" className="text-uppercase">
@@ -2102,6 +2134,7 @@ const BonLivraisonList = () => {
       {
         header: "Total TTC",
         accessorKey: "articles",
+        id: "total_ttc",
         enableColumnFilter: false,
         cell: (cell: any) => {
           const bon = cell.row.original;
@@ -2117,6 +2150,7 @@ const BonLivraisonList = () => {
       {
         header: "Total Après Remise",
         accessorKey: "articles",
+        id: "total_after_remise",
         enableColumnFilter: false,
         cell: (cell: any) => {
           const total = calculateEffectiveTotal(cell.row.original);
@@ -2202,7 +2236,7 @@ const BonLivraisonList = () => {
                         articleDetails: item.article,
                       }))
                     );
-                    setGlobalRemise(cellProps.row.original.remise || 0);
+                    setGlobalRemise(parseFloat(cellProps.row.original.remise) || 0);
                     setRemiseType(
                       cellProps.row.original.remiseType || "percentage"
                     );
@@ -2225,6 +2259,9 @@ const BonLivraisonList = () => {
                             numero: pm.numero || "",
                             banque: pm.banque || "",
                             dateEcheance: pm.dateEcheance || "",
+                            date: pm.date
+                              ? moment(pm.date).format("YYYY-MM-DD")
+                              : moment().format("YYYY-MM-DD"),
                             tauxRetention: pm.tauxRetention || 1,
                           })
                         )
@@ -2449,7 +2486,7 @@ const BonLivraisonList = () => {
 
                           // Apply auto-space formatting for phone numbers
                           if (value) {
-                            const formatted = formatPhoneInput(value);
+                            const formatted = formatPhoneSearch(value);
                             setPhoneSearch(formatted);
                           } else {
                             setPhoneSearch("");
@@ -2678,37 +2715,14 @@ const BonLivraisonList = () => {
                           <Label className="form-label fw-semibold">
                             Téléphone 1*
                           </Label>
-                          <div className="position-relative">
-                            <Input
-                              value={newClient.telephone1}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                // Auto-format phone number
-                                if (value) {
-                                  const formatted = formatPhoneInput(value);
-                                  setNewClient({
-                                    ...newClient,
-                                    telephone1: formatted,
-                                  });
-                                } else {
-                                  setNewClient({
-                                    ...newClient,
-                                    telephone1: value,
-                                  });
-                                }
-                              }}
-                              placeholder="22 222 222"
-                              className="form-control-lg pe-5"
-                            />
-                            {newClient.telephone1 && (
-                              <div className="position-absolute end-0 top-50 translate-middle-y me-3">
-                                <i className="ri-phone-line text-muted"></i>
-                              </div>
-                            )}
-                          </div>
-                          <small className="text-muted">
-                            Format automatique: XX XXX XXX
-                          </small>
+                          <PhoneInput
+                            value={newClient.telephone1}
+                            onChange={(telephone1) =>
+                              setNewClient({ ...newClient, telephone1 })
+                            }
+                            bsSize="lg"
+                          />
+                          <small className="text-muted">{PHONE_FORMAT_HINT}</small>
                         </div>
                       </Col>
                       <Col md={6}>
@@ -2716,37 +2730,14 @@ const BonLivraisonList = () => {
                           <Label className="form-label fw-semibold">
                             Téléphone 2
                           </Label>
-                          <div className="position-relative">
-                            <Input
-                              value={newClient.telephone2}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                // Auto-format phone number
-                                if (value) {
-                                  const formatted = formatPhoneInput(value);
-                                  setNewClient({
-                                    ...newClient,
-                                    telephone2: formatted,
-                                  });
-                                } else {
-                                  setNewClient({
-                                    ...newClient,
-                                    telephone2: value,
-                                  });
-                                }
-                              }}
-                              placeholder="22 222 222"
-                              className="form-control-lg pe-5"
-                            />
-                            {newClient.telephone2 && (
-                              <div className="position-absolute end-0 top-50 translate-middle-y me-3">
-                                <i className="ri-phone-line text-muted"></i>
-                              </div>
-                            )}
-                          </div>
-                          <small className="text-muted">
-                            Format automatique: XX XXX XXX
-                          </small>
+                          <PhoneInput
+                            value={newClient.telephone2}
+                            onChange={(telephone2) =>
+                              setNewClient({ ...newClient, telephone2 })
+                            }
+                            bsSize="lg"
+                          />
+                          <small className="text-muted">{PHONE_FORMAT_HINT}</small>
                         </div>
                       </Col>
                     </Row>
@@ -2919,13 +2910,11 @@ const BonLivraisonList = () => {
                                   <option value="">
                                     Sélectionner une famille principale
                                   </option>
-                                  {categories
-                                    .filter((c) => !c.parent_id)
-                                    .map((c) => (
-                                      <option key={c.id} value={c.id}>
-                                        {c.nom}
-                                      </option>
-                                    ))}
+                                  {familleOptions.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
+                                    </option>
+                                  ))}
                                 </Input>
                                 <small className="text-muted">
                                   Catégorie principale
@@ -2952,9 +2941,9 @@ const BonLivraisonList = () => {
                                   <option value="">
                                     Sélectionner une sous-famille
                                   </option>
-                                  {subcategories.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      {s.nom}
+                                  {sousFamilleOptions.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
                                     </option>
                                   ))}
                                 </Input>
@@ -3013,7 +3002,7 @@ const BonLivraisonList = () => {
                                     )}
 
                                     {/* Enhanced Fournisseur Dropdown Results */}
-                                    {!newArticle.fournisseur_id && fournisseurSearch.length >= 3 && (
+                                    {!newArticle.fournisseur_id && fournisseurSearch.length >= 1 && (
                                       <div
                                         className="search-results fournisseur-results mt-1"
                                         style={{
@@ -3443,12 +3432,26 @@ const BonLivraisonList = () => {
                                   </div>
                                   <div className="col-6">
                                     <p className="mb-2">
-                                      <span className="text-muted d-block">
-                                        Commande:
-                                      </span>
+                                      <span className="text-muted d-block">Source:</span>
                                       <strong>
-                                        {selectedBonLivraison.bonCommandeClient
-                                          ?.numeroCommande || "N/A"}
+                                        {selectedBonLivraison.bonCommandeClient?.numeroCommande ? (
+                                          <span>
+                                            <span className="badge bg-info-subtle text-info me-1">Bon Commande</span>
+                                            {selectedBonLivraison.bonCommandeClient.numeroCommande}
+                                          </span>
+                                        ) : selectedBonLivraison.venteComptoire?.numeroCommande ? (
+                                          <span>
+                                            <span className="badge bg-warning-subtle text-warning me-1">Vente Comptoire</span>
+                                            {selectedBonLivraison.venteComptoire.numeroCommande}
+                                          </span>
+                                        ) : (selectedBonLivraison as any).facture?.numeroFacture ? (
+                                          <span>
+                                            <span className="badge bg-primary-subtle text-primary me-1">Facture</span>
+                                            {(selectedBonLivraison as any).facture.numeroFacture}
+                                          </span>
+                                        ) : (
+                                          <span className="text-muted">Vente Directe</span>
+                                        )}
                                       </strong>
                                     </p>
                                   </div>
@@ -3684,7 +3687,7 @@ const BonLivraisonList = () => {
                                     const displayTotalTax = totalTaxAfterGlobalRemise;
                                     const displayFinalTotal = finalTotalValue;
 
-                                    return (
+                                    return (<>
                                       <Table className="table-sm table-borderless mb-0">
                                         <tbody>
                                           <tr className="real-time-update">
@@ -3774,7 +3777,33 @@ const BonLivraisonList = () => {
                                           </tr>
                                         </tbody>
                                       </Table>
-                                    );
+                                      {/* Paiements vente comptoire liée — lecture seule */}
+                                      {selectedBonLivraison.venteComptoire && (
+                                        ((selectedBonLivraison.venteComptoire.paiements?.filter((p: any) => p.modePaiement !== "Retention") || []).length > 0 ||
+                                         (selectedBonLivraison.venteComptoire.paymentMethods?.filter((pm: any) => pm.method !== "retenue") || []).length > 0) && (
+                                          <div className="mt-3 p-2 rounded border" style={{ backgroundColor: "#fff8e1", borderColor: "#ffe082" }}>
+                                            <small className="d-block mb-1 fw-semibold" style={{ color: "#f57c00" }}>
+                                              <i className="ri-store-line me-1"></i>
+                                              Paiements Vente Comptoire ({selectedBonLivraison.venteComptoire.numeroCommande}):
+                                            </small>
+                                            {selectedBonLivraison.venteComptoire.paiements
+                                              ?.filter((p: any) => p.modePaiement !== "Retention")
+                                              .map((p: any, i: number) => (
+                                                <div key={i} className="mb-1">
+                                                  <small className="text-muted">• {p.modePaiement} — {Number(p.montant).toFixed(3)} DT{p.date && ` (${moment(p.date).format("DD/MM/YYYY")})`}</small>
+                                                </div>
+                                              ))}
+                                            {selectedBonLivraison.venteComptoire.paymentMethods
+                                              ?.filter((pm: any) => pm.method !== "retenue")
+                                              .map((pm: any, i: number) => (
+                                                <div key={i} className="mb-1">
+                                                  <small className="text-muted">• {pm.method} — {Number(pm.amount).toFixed(3)} DT</small>
+                                                </div>
+                                              ))}
+                                          </div>
+                                        )
+                                      )}
+                                    </>);
                                   })()}
                                 </Col>
                               </Row>
@@ -3815,7 +3844,7 @@ const BonLivraisonList = () => {
                               articleDetails: item.article,
                             }))
                           );
-                          setGlobalRemise(selectedBonLivraison.remise || 0);
+                          setGlobalRemise(Number(selectedBonLivraison.remise) || 0);
                           setRemiseType(
                             (selectedBonLivraison.remiseType as
                               | "percentage"
@@ -3826,6 +3855,8 @@ const BonLivraisonList = () => {
                           setIsCreatingFacture(true);
                           setIsEdit(false);
                           setTimbreFiscal(false);
+                          // Propagate the BL's commande so bonCommandeClient_id is set on the facture
+                          setSelectedBonCommande(selectedBonLivraison.bonCommandeClient || null);
 
                           // Initialize payment methods from BL (JSON and table)
                           const combinedMethods: any[] = [];
@@ -4219,7 +4250,7 @@ const BonLivraisonList = () => {
 
                                         if (digitCount >= totalLength * 0.7) {
                                           // If 70% or more are digits
-                                          const formatted = formatPhoneInput(value);
+                                          const formatted = formatPhoneSearch(value);
                                           setClientSearch(formatted);
                                         } else {
                                           setClientSearch(value);
@@ -4267,7 +4298,7 @@ const BonLivraisonList = () => {
                                 {/* Enhanced Client Dropdown Results - ABSOLUTELY POSITIONED */}
                                 {!isCreatingFacture &&
                                   !selectedClient &&
-                                  clientSearch.length >= 3 && (
+                                  clientSearch.length >= 1 && (
                                     <div
                                       className="search-results client-results mt-1"
                                       style={{
@@ -5509,6 +5540,29 @@ const BonLivraisonList = () => {
                                   </div>
 
                                   <Row className="g-3">
+                                    {/* Date Paiement */}
+                                    <Col md={3}>
+                                      <Label className="form-label fw-semibold">
+                                        Date Paiement*
+                                      </Label>
+                                      <Input
+                                        type="date"
+                                        value={
+                                          methode.date ||
+                                          moment().format("YYYY-MM-DD")
+                                        }
+                                        onChange={(e) =>
+                                          updateMethodeReglement(
+                                            methode.id,
+                                            "date",
+                                            e.target.value
+                                          )
+                                        }
+                                        className="form-control"
+                                        required
+                                      />
+                                    </Col>
+
                                     {/* Type de méthode */}
                                     <Col md={3}>
                                       <Label className="form-label fw-semibold">
@@ -5689,8 +5743,7 @@ const BonLivraisonList = () => {
                                         <Input
                                           type="date"
                                           value={
-                                            methode.dateEcheance ||
-                                            moment().format("YYYY-MM-DD")
+                                            methode.dateEcheance || ""
                                           }
                                           onChange={(e) =>
                                             updateMethodeReglement(
@@ -5806,11 +5859,10 @@ const BonLivraisonList = () => {
               <strong className="text-success fs-5">
                 {(() => {
                   if (!selectedBonForPaiement) return "0,000";
-                  // Use the pre-computed resteAPayer from fetchData (authoritative)
-                  const reste = Math.max(
-                    0,
-                    getSafeNumber(selectedBonForPaiement.resteAPayer)
-                  );
+                  const finalTotal = calculateEffectiveTotal(selectedBonForPaiement);
+                  const paye = calculateTotalPaid(selectedBonForPaiement);
+                  const retentionAmount = getSafeNumber(selectedBonForPaiement.montantRetenue);
+                  const reste = Math.max(0, finalTotal - paye - retentionAmount);
                   return reste.toFixed(3).replace(".", ",");
                 })()}{" "}
                 DT
@@ -5825,11 +5877,11 @@ const BonLivraisonList = () => {
                 </div>
               )}
 
-              {getSafeNumber(selectedBonForPaiement?.montantPaye) > 0 && (
+              {calculateTotalPaid(selectedBonForPaiement) > 0 && (
                 <div className="mt-1">
                   <small className="text-success">
                     <i className="ri-information-line me-1"></i>
-                    TOTAL PAYÉ: {getSafeNumber(selectedBonForPaiement?.montantPaye).toFixed(3)} DT
+                    TOTAL PAYÉ: {calculateTotalPaid(selectedBonForPaiement).toFixed(3)} DT
                   </small>
                 </div>
               )}
@@ -5880,6 +5932,45 @@ const BonLivraisonList = () => {
                     </div>
                   ))}
               </div>
+            )}
+
+            {/* Paiements de la Vente Comptoire liée — lecture seule, non re-enregistrés */}
+            {selectedBonForPaiement?.venteComptoire && (
+              ((selectedBonForPaiement.venteComptoire.paiements?.filter((p: any) => p.modePaiement !== "Retention") || []).length > 0 ||
+               (selectedBonForPaiement.venteComptoire.paymentMethods?.filter((pm: any) => pm.method !== "retenue") || []).length > 0) && (
+                <div className="mb-3 p-2 rounded border" style={{ backgroundColor: "#fff8e1", borderColor: "#ffe082" }}>
+                  <small className="d-block mb-2 fw-semibold" style={{ color: "#f57c00" }}>
+                    <i className="ri-store-line me-1"></i>
+                    Paiements Vente Comptoire ({selectedBonForPaiement.venteComptoire.numeroCommande}) — non modifiables:
+                  </small>
+                  {selectedBonForPaiement.venteComptoire.paiements
+                    ?.filter((p: any) => p.modePaiement !== "Retention")
+                    .map((p: any, index: number) => (
+                      <div key={`vc-p-${index}`} className="mb-1">
+                        <span className="text-muted">• </span>
+                        <span>
+                          {p.modePaiement} de {Number(p.montant).toFixed(3)} DT
+                          {p.date && ` le ${moment(p.date).format("DD/MM/YYYY")}`}
+                          {p.numeroCheque && ` (Chèque N°${p.numeroCheque})`}
+                          {p.banque && ` - ${p.banque}`}
+                        </span>
+                      </div>
+                    ))}
+                  {selectedBonForPaiement.venteComptoire.paymentMethods
+                    ?.filter((pm: any) => pm.method !== "retenue")
+                    .map((pm: any, index: number) => (
+                      <div key={`vc-m-${index}`} className="mb-1">
+                        <span className="text-muted">• </span>
+                        <span>
+                          {pm.method} de {Number(pm.amount).toFixed(3)} DT
+                          {pm.banque && ` - ${pm.banque}`}
+                          {pm.numero && ` N°${pm.numero}`}
+                          {pm.dateEcheance && ` échéance ${moment(pm.dateEcheance).format("DD/MM/YYYY")}`}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              )
             )}
 
             <Row>
@@ -6098,7 +6189,7 @@ const BonLivraisonList = () => {
           }
 
           // Refresh clients list
-          loadClients(clientSearch, 1, 20);
+          loadClients(clientSearch, 1, 500);
         }}
       />
 

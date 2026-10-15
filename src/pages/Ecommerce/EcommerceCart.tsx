@@ -17,7 +17,7 @@ import {
 } from "reactstrap";
 
 const EcommerceCart = () => {
-  document.title = "Shopping Cart | Velzon - React Admin & Dashboard Template";
+  document.title = "Shopping Cart | Royal Lumiere";
 
   const [productList, setproductList] = useState(shoppingCart);
   const [charge, setCharge] = useState<any>(0);

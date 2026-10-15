@@ -150,9 +150,9 @@ useEffect(() => {
   // Update fournisseur search effect
   useEffect(() => {
     const searchFournisseursDebounced = async () => {
-      if (fournisseurSearch.length >= 3) {
+      if (fournisseurSearch.length >= 1) {
         // We can either filter local list or call API. 
-        // To be consistent with 3-char requirement:
+        // To be consistent with 1-char requirement:
         const filtered = fournisseurs.filter(
           (fournisseur) =>
             (fournisseur.raison_sociale?.toLowerCase() || "").includes(fournisseurSearch.toLowerCase())
@@ -1543,7 +1543,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                   )}
 
                   {/* Enhanced Fournisseur Dropdown Results */}
-                  {!selectedFournisseur && fournisseurSearch.length >= 3 && (
+                  {!selectedFournisseur && fournisseurSearch.length >= 1 && (
                     <div
                       className="search-results fournisseur-results mt-1"
                       style={{

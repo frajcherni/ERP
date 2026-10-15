@@ -5,7 +5,7 @@ import AllTransactions from './AllTransactions';
 import Widgets from './Widgets';
 
 const Transactions = () => {
-    document.title="Transactions | Velzon - React Admin & Dashboard Template";
+    document.title="Transactions | Royal Lumiere";
 
     return (
         <React.Fragment>

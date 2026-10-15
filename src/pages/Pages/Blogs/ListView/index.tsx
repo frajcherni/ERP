@@ -6,7 +6,7 @@ import MainList from './MainList'
 
 const BlogListView = () => {
 
-    document.title="List View | Velzon - React Admin & Dashboard Template";
+    document.title="List View | Royal Lumiere";
 
     return (
         <React.Fragment>

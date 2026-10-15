@@ -10,6 +10,7 @@ import {
 } from "@react-pdf/renderer";
 import moment from "moment";
 import { BonCommandeClient } from "../../../Components/Article/Interfaces";
+import { formatPhoneDisplay } from "../../../helpers/phone_helper";
 
 Font.register({
   family: "Open Sans",
@@ -651,14 +652,8 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
     return lines;
   };
 
-  const formatPhoneNumber = (phone: string | null | undefined): string => {
-    if (!phone) return "";
-    const cleaned = phone.replace(/\D/g, "");
-    if (cleaned.length === 8) {
-      return `${cleaned.substring(0, 2)} ${cleaned.substring(2, 5)} ${cleaned.substring(5, 8)}`;
-    }
-    return phone;
-  };
+  const formatPhoneNumber = (phone: string | null | undefined): string =>
+    formatPhoneDisplay(phone, "");
 
   const getMethodLabel = (method: string): string => {
     const labels: { [key: string]: string } = {
@@ -723,7 +718,7 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
     if (paiements.length === 0 && paymentMethods.length === 0) return null;
 
     const paymentLines: JSX.Element[] = [];
-    const regularDescs: JSX.Element[][] = [];
+    const regularPaymentsList: { dateValue: Date; elements: JSX.Element[] }[] = [];
     const retentionDescs: JSX.Element[][] = [];
     let hasRegularPayments = false;
 
@@ -754,7 +749,10 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
         }
         elements.push(<Text key="m1"> d&apos;un montant de </Text>);
         elements.push(<Text key="m2" style={styles.boldText}>{formatCurrency(Number(p.montant))} DT</Text>);
-        regularDescs.push(elements);
+        
+        const dateStr = p.date ? moment(p.date).format("YYYY-MM-DD") : "";
+        const dateValue = dateStr ? new Date(dateStr) : new Date(0);
+        regularPaymentsList.push({ dateValue, elements });
       }
     });
 
@@ -790,15 +788,24 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
         }
         elements.push(<Text key="m1"> d&apos;un montant de </Text>);
         elements.push(<Text key="m2" style={styles.boldText}>{formatCurrency(amount)} DT</Text>);
-        regularDescs.push(elements);
+        
+        const dateStr = pm.date ? moment(pm.date).format("YYYY-MM-DD")
+          : pm.datePaiement ? moment(pm.datePaiement).format("YYYY-MM-DD")
+            : pm.createdAt ? moment(pm.createdAt).format("YYYY-MM-DD")
+              : "";
+        const dateValue = dateStr ? new Date(dateStr) : new Date(0);
+        regularPaymentsList.push({ dateValue, elements });
       }
     });
 
-    regularDescs.forEach((desc, index) => {
+    // Sort regular payments chronologically ascending
+    regularPaymentsList.sort((a, b) => a.dateValue.getTime() - b.dateValue.getTime());
+
+    regularPaymentsList.forEach((item, index) => {
       paymentLines.push(
         <Text key={`regular-${index}`} style={styles.paymentLine}>
           <Text style={styles.boldText}>Acompte {index + 1}: </Text>
-          {desc}
+          {item.elements}
         </Text>
       );
     });
@@ -820,8 +827,8 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
 
   const renderSummarySection = (summaryBottom: number, amountBottom: number, floated: boolean = true) => {
     const retentionAmt = Number(bonCommande.montantRetenue) || 0;
-    const netAPayerWithRetention = Math.max(0, finalTotal - retentionAmt);
-    const resteAPayerWithRetention = Math.max(0, netAPayerWithRetention - acompteTotal);
+    // The retenue is not subtracted from the net à payer, only from what is left to pay
+    const resteAPayerWithRetention = Math.max(0, finalTotal - retentionAmt - acompteTotal);
 
     const areaStyle: any = floated
       ? [styles.summaryArea, { bottom: summaryBottom }]
@@ -875,7 +882,7 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
             </View>
             <View style={styles.netAPayerContainer}>
               <Text style={styles.netAPayerLabel}>NET À PAYER:</Text>
-              <Text style={styles.netAPayerValue}>{formatCurrency(netAPayerWithRetention)} DT</Text>
+              <Text style={styles.netAPayerValue}>{formatCurrency(netAPayer)} DT</Text>
             </View>
           </View>
         </View>
@@ -993,7 +1000,24 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
             <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 3 }}>
               <Text style={styles.sectionTitle}>CLIENT</Text>
             </View>
-            {bonCommande.client && (
+            {bonCommande.clientWebsite ? (
+              <>
+                {bonCommande.clientWebsite.nomPrenom &&
+                  wrapTextHelper(bonCommande.clientWebsite.nomPrenom, 45).map((line, idx) => (
+                    <Text key={`wnp-${idx}`} style={styles.clientLineItem}>{line}</Text>
+                  ))}
+                {[bonCommande.clientWebsite.adresse, bonCommande.clientWebsite.ville].filter(Boolean).join(" - ") &&
+                  wrapTextHelper([bonCommande.clientWebsite.adresse, bonCommande.clientWebsite.ville].filter(Boolean).join(" - "), 45).map((line, idx) => (
+                    <Text key={`wadr-${idx}`} style={styles.clientLineItem}>{line}</Text>
+                  ))}
+                {bonCommande.clientWebsite.telephone && (
+                  <Text style={styles.clientLineItem}>Tél: {formatPhoneNumber(bonCommande.clientWebsite.telephone)}</Text>
+                )}
+                {bonCommande.clientWebsite.email && (
+                  <Text style={styles.clientLineItem}>Email: {bonCommande.clientWebsite.email}</Text>
+                )}
+              </>
+            ) : bonCommande.client && (
               <>
                 {bonCommande.client.raison_sociale &&
                   wrapTextHelper(bonCommande.client.raison_sociale, 45).map((line, idx) => (
@@ -1002,8 +1026,8 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
                 {bonCommande.client.matricule_fiscal && (
                   <Text style={styles.clientLineItem}>MF: {bonCommande.client.matricule_fiscal}</Text>
                 )}
-                {bonCommande.client.adresse &&
-                  wrapTextHelper(bonCommande.client.adresse, 45).map((line, idx) => (
+                {[bonCommande.client.adresse, bonCommande.client.ville].filter(Boolean).join(" - ") &&
+                  wrapTextHelper([bonCommande.client.adresse, bonCommande.client.ville].filter(Boolean).join(" - "), 45).map((line, idx) => (
                     <Text key={`adr-${idx}`} style={styles.clientLineItem}>{line}</Text>
                   ))}
                 {bonCommande.client.telephone1 && (
@@ -1011,6 +1035,9 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
                 )}
                 {bonCommande.client.telephone2 && (
                   <Text style={styles.clientLineItem}>Tél: {formatPhoneNumber(bonCommande.client.telephone2)}</Text>
+                )}
+                {bonCommande.client.email && (
+                  <Text style={styles.clientLineItem}>Email: {bonCommande.client.email}</Text>
                 )}
               </>
             )}

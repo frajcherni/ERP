@@ -67,6 +67,10 @@ import {
   BonCommandeClient,
   PaiementClient,
 } from "../../../Components/Article/Interfaces";
+import {
+  buildRootCategoryOptions,
+  buildSubcategoryOptions,
+} from "../../../Components/Article/CategoryTree";
 
 import { fetchDepots } from "../Stock/DepotServices";
 import { Depot } from "../../../Components/Article/Interfaces";
@@ -89,6 +93,8 @@ import { useProfile } from "Components/Hooks/UserHooks";
 import logo from "../../../assets/images/imglogo.png";
 import "./InvoiceModal.css";
 import EditClientModal from "./EditClientModal";
+import PhoneInput from "../../../Components/Common/PhoneInput";
+import { formatPhoneDisplay, formatPhoneSearch, PHONE_FORMAT_HINT } from "../../../helpers/phone_helper";
 import "./ArticleTableStyles.css"; // Import unified table styles
 import DiscountAlertModal from "../../../Components/Common/DiscountAlertModal";
 import {
@@ -147,7 +153,6 @@ const BonCommandeClientList = () => {
 
   // Add ref for article search input
   const articleSearchRef = useRef<HTMLInputElement>(null);
-  const [phoneSearch, setPhoneSearch] = useState("");
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -410,7 +415,6 @@ const BonCommandeClientList = () => {
   });
 
   const [categories, setCategories] = useState<Categorie[]>([]);
-  const [subcategories, setSubcategories] = useState<Categorie[]>([]);
 
   // Add near your other state declarations
   const [barcodeInput, setBarcodeInput] = useState("");
@@ -434,6 +438,10 @@ const BonCommandeClientList = () => {
   >([]);
   const [remiseType, setRemiseType] = useState<"percentage" | "fixed">("fixed");
   const [globalRemise, setGlobalRemise] = useState<number>(0);
+  // String view of the global remise so the field is fully editable
+  // (deletable to empty, supports "." / "," decimals) while globalRemise
+  // stays the numeric source of truth used by all calculations.
+  const [globalRemiseInput, setGlobalRemiseInput] = useState<string>("");
   const [isCreatingLivraison, setIsCreatingLivraison] = useState(false);
 
   const [pdfModal, setPdfModal] = useState(false);
@@ -459,7 +467,9 @@ const BonCommandeClientList = () => {
       .filter((pm: any) => pm.method !== "retenue")
       .reduce((sum: number, pm: any) => sum + getSafeNumber(pm.amount), 0);
 
-    const additionalPaymentsSum = getSafeNumber(bon.montantPaye);
+    const paiementsSum = (bon.paiements || [])
+      .filter((p: any) => p.modePaiement !== "Retention")
+      .reduce((sum: number, p: any) => sum + getSafeNumber(p.montant), 0);
 
     const customRound = (num: number): number => {
       if (isNaN(num) || !isFinite(num)) return 0;
@@ -468,8 +478,7 @@ const BonCommandeClientList = () => {
       return Math.round(result * 1000) / 1000;
     };
 
-    // Use Math.max to avoid double counting if the backend already includes the paymentMethods in montantPaye
-    return customRound(Math.max(paymentMethodsSum, additionalPaymentsSum));
+    return customRound(paymentMethodsSum + paiementsSum);
   };
 
   // Company info for PDF
@@ -489,13 +498,10 @@ const BonCommandeClientList = () => {
   );
 
   const handleMontantChangePaiement = (e: any) => {
-    let value = e.target.value;
-    if (value === "" || /^[0-9]*[,.]?[0-9]*$/.test(value)) {
-      value = value.replace(".", ",");
-      const commaCount = (value.match(/,/g) || []).length;
-      if (commaCount <= 1) {
-        paiementValidation.setFieldValue("montant", value);
-      }
+    const normalized = e.target.value.replace(/\./g, ",");
+    const parts = normalized.split(",");
+    if (parts.length <= 2 && parts.every((p: string) => /^[0-9]*$/.test(p))) {
+      paiementValidation.setFieldValue("montant", normalized);
     }
   };
 
@@ -516,41 +522,6 @@ const BonCommandeClientList = () => {
     { value: 19, label: "19%" },
     { value: 21, label: "21%" },
   ];
-
-  // Phone formatting function
-  const formatPhoneInput = (value: string): string => {
-    // Remove all non-digit characters
-    const cleaned = value.replace(/\D/g, "");
-
-    // Limit to 8 digits (Tunisian phone number length)
-    const limited = cleaned.slice(0, 8);
-
-    // Format as XX XXX XXX
-    if (limited.length <= 2) {
-      return limited;
-    } else if (limited.length <= 5) {
-      return `${limited.substring(0, 2)} ${limited.substring(2)}`;
-    } else {
-      return `${limited.substring(0, 2)} ${limited.substring(
-        2,
-        5
-      )} ${limited.substring(5, 8)}`;
-    }
-  };
-
-  // Display formatting function
-  const formatPhoneDisplay = (phone: string | null | undefined): string => {
-    if (!phone) return "N/A";
-
-    const cleanPhone = phone.replace(/\D/g, "");
-    if (cleanPhone.length === 8) {
-      return `${cleanPhone.substring(0, 2)} ${cleanPhone.substring(
-        2,
-        5
-      )} ${cleanPhone.substring(5, 8)}`;
-    }
-    return phone;
-  };
 
   const openPaiementModal = async (bonCommande: BonCommandeClient) => {
     setSelectedBonForPaiement(bonCommande);
@@ -664,7 +635,7 @@ const BonCommandeClientList = () => {
       const paiementData = {
         bonCommandeClient_id: selectedBonForPaiement.id,
         client_id: selectedBonForPaiement.client_id,
-        montant: paiementAmount, // Always save what user entered
+        montant: paiementAmount,
         modePaiement: values.modePaiement,
         numeroPaiement: values.numeroPaiement,
         date: values.date,
@@ -747,8 +718,8 @@ const BonCommandeClientList = () => {
             const retentionAmount = getSafeNumber(
               selectedBonForPaiement.montantRetenue
             );
-            const montantPaye = getSafeNumber(
-              selectedBonForPaiement.montantPaye
+            const montantPaye = calculateTotalPaid(
+              selectedBonForPaiement
             );
             const amountAfterRetention = baseTotal - retentionAmount;
             const availableAmount = Math.max(
@@ -786,11 +757,11 @@ const BonCommandeClientList = () => {
   // Add this effect to set the montant when the payment modal opens
   useEffect(() => {
     if (paiementModal && selectedBonForPaiement) {
-      const totalNet = getSafeNumber(selectedBonForPaiement.totalTTC);
+      const totalNet = calculateEffectiveTotal(selectedBonForPaiement);
       const retentionAmount = getSafeNumber(
         selectedBonForPaiement.montantRetenue
       );
-      const montantPaye = getSafeNumber(selectedBonForPaiement.montantPaye);
+      const montantPaye = calculateTotalPaid(selectedBonForPaiement);
 
       const amountAfterRetention = totalNet - retentionAmount;
       const initialMontant = Math.max(0, amountAfterRetention - montantPaye)
@@ -862,7 +833,7 @@ const BonCommandeClientList = () => {
   // Update article search to use the new function
   useEffect(() => {
     const searchArticlesDebounced = async () => {
-      if (articleSearch.length >= 3 || modal) {
+      if (articleSearch.length >= 1 || modal) {
         await loadArticles(articleSearch, 1, 20);
       } else {
         setFilteredArticles([]);
@@ -871,13 +842,13 @@ const BonCommandeClientList = () => {
 
     const timer = setTimeout(searchArticlesDebounced, 300);
     return () => clearTimeout(timer);
-  }, [articleSearch, modal]);
+  }, [articleSearch]);
 
   // Update client search to use the new function
   useEffect(() => {
     const searchClientsDebounced = async () => {
-      if (clientSearch.length >= 1 || modal) {
-        await loadClients(clientSearch, 1, 20);
+      if (clientSearch.length >= 1) {
+        await loadClients(clientSearch, 1, 500);
       } else {
         setFilteredClients([]);
       }
@@ -885,16 +856,17 @@ const BonCommandeClientList = () => {
 
     const timer = setTimeout(searchClientsDebounced, 300);
     return () => clearTimeout(timer);
-  }, [clientSearch, modal]);
+  }, [clientSearch]);
 
 
   const statusForTab: Record<string, string> = {
     "1": "", // All
-    "2": "Brouillon",
-    "3": "Confirme",
-    "4": "Partiellement Livre",
-    "5": "Livre",
-    "6": "Annule",
+    "2": "En Attente",
+    "3": "Brouillon",
+    "4": "Confirme",
+    "5": "Partiellement Livre",
+    "6": "Livre",
+    "7": "Annule",
   };
 
   const fetchData = useCallback(
@@ -910,6 +882,7 @@ const BonCommandeClientList = () => {
           page,
           limit: limit,
           search: searchText || undefined,
+          searchPhone: searchPhone || undefined,
           status: statusParam || undefined,
           startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
           endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
@@ -919,11 +892,11 @@ const BonCommandeClientList = () => {
           const [resPaginated, resVendeurs, resDepots] = await Promise.all([
             paginatedPromise,
             fetchVendeurs(),
-            fetchDepots(),
+            depots.length === 0 ? fetchDepots() : Promise.resolve(depots),
           ]);
           paginatedResult = resPaginated;
           setVendeurs(resVendeurs);
-          setDepots(resDepots);
+          if (depots.length === 0) setDepots(resDepots);
         } else {
           paginatedResult = await paginatedPromise;
         }
@@ -947,7 +920,7 @@ const BonCommandeClientList = () => {
         setLoading(false);
       }
     },
-    [searchText, startDate, endDate, activeTab, pageSize]
+    [searchText, searchPhone, startDate, endDate, activeTab, pageSize]
   );
 
   const isFirstRender = useRef(true);
@@ -971,30 +944,27 @@ const BonCommandeClientList = () => {
       active = false;
       clearTimeout(timer);
     };
-  }, [searchText, startDate, endDate, activeTab, pageSize]);
+  }, [searchText, searchPhone, startDate, endDate, activeTab, pageSize]);
 
   // Load articles only when needed (modal opens or search)
   const loadArticles = async (query = "", page = 1, limit = 15) => {
-    if (modal || articleSearch) {
-      setArticlesLoading(true);
-      try {
-        const result = await searchArticles({ query, page, limit });
-        if (query === "" && page === 1) {
-          setArticles(result.articles || []);
-        }
-        setFilteredArticles(result.articles || []);
-      } catch (err) {
-        console.error("Failed to load articles:", err);
-      } finally {
-        setArticlesLoading(false);
+    setArticlesLoading(true);
+    try {
+      const result = await searchArticles({ query, page, limit });
+      if (query === "" && page === 1) {
+        setArticles(result.articles || []);
       }
+      setFilteredArticles(result.articles || []);
+    } catch (err) {
+      console.error("Failed to load articles:", err);
+    } finally {
+      setArticlesLoading(false);
     }
   };
 
   // Load clients only when needed
   const loadClients = async (query = "", page = 1, limit = 15) => {
-    if (modal || clientSearch) {
-      setClientsLoading(true);
+    setClientsLoading(true);
       try {
         const result = await searchClients({ query, page, limit });
         if (query === "" && page === 1) {
@@ -1007,13 +977,11 @@ const BonCommandeClientList = () => {
       } finally {
         setClientsLoading(false);
       }
-    }
   };
 
   // Load fournisseurs only when needed
   const loadFournisseurs = async (query = "", page = 1, limit = 15) => {
-    if (modal || fournisseurSearch) {
-      setFournisseursLoading(true);
+    setFournisseursLoading(true);
       try {
         const result = await searchFournisseurs({ query, page, limit });
         setFilteredFournisseurs(result.fournisseurs || []);
@@ -1022,13 +990,12 @@ const BonCommandeClientList = () => {
       } finally {
         setFournisseursLoading(false);
       }
-    }
   };
 
   // Update fournisseur search effect
   useEffect(() => {
     const searchFournisseursDebounced = async () => {
-      if (fournisseurSearch.length >= 3) {
+      if (fournisseurSearch.length >= 1) {
         await loadFournisseurs(fournisseurSearch, 1, 20);
       } else {
         setFilteredFournisseurs([]);
@@ -1044,19 +1011,18 @@ const BonCommandeClientList = () => {
     if (modal) {
       setModalLoading(true);
       try {
-        // Load only what's needed for the modal
         const [depotsResult, categoriesResult] = await Promise.all([
-          fetchDepots(),
-          fetchCategories(),
+          depots.length === 0 ? fetchDepots() : Promise.resolve(depots),
+          categories.length === 0 ? fetchCategories() : Promise.resolve(categories)
         ]);
 
-        setDepots(depotsResult);
-        setCategories(categoriesResult);
+        if (depots.length === 0) setDepots(depotsResult);
+        if (categories.length === 0) setCategories(categoriesResult);
 
         // Auto-select "magazin" depot if not already selected
         if (depotsResult.length > 0 && !selectedDepot) {
           const magazinDepot = depotsResult.find(d =>
-            d.nom.toLowerCase().includes("magazin")
+            d.nom.toLowerCase().includes("magasin") || d.nom.toLowerCase().includes("magazin")
           );
           if (magazinDepot) {
             setSelectedDepot(magazinDepot);
@@ -1075,14 +1041,16 @@ const BonCommandeClientList = () => {
     let result = [...bonsCommande];
 
     if (activeTab === "2") {
-      result = result.filter((bon) => bon.status === "Brouillon");
+      result = result.filter((bon) => bon.status === "En Attente");
     } else if (activeTab === "3") {
-      result = result.filter((bon) => bon.status === "Confirme");
+      result = result.filter((bon) => bon.status === "Brouillon");
     } else if (activeTab === "4") {
-      result = result.filter((bon) => bon.status === "Livre");
+      result = result.filter((bon) => bon.status === "Confirme");
     } else if (activeTab === "5") {
       result = result.filter((bon) => bon.status === "Partiellement Livre");
     } else if (activeTab === "6") {
+      result = result.filter((bon) => bon.status === "Livre");
+    } else if (activeTab === "7") {
       result = result.filter((bon) => bon.status === "Annule");
     }
 
@@ -1282,24 +1250,29 @@ const BonCommandeClientList = () => {
   // Add effect for auto-calculation in article modal
 
 
-  // Add effect for subcategories
-  useEffect(() => {
-    if (newArticle.categorie_id) {
-      const categoryId = parseInt(newArticle.categorie_id);
-      const subs = categories.filter((cat) => cat.parent_id === categoryId);
-      setSubcategories(subs);
+  // Les deux listes suivent l'arborescence de la liste des catégories : la
+  // famille est une racine, la sous-famille n'importe laquelle de ses
+  // descendantes, indentée selon sa profondeur.
+  const familleOptions = useMemo(
+    () => buildRootCategoryOptions(categories),
+    [categories]
+  );
+  const sousFamilleOptions = useMemo(
+    () => buildSubcategoryOptions(categories, newArticle.categorie_id),
+    [categories, newArticle.categorie_id]
+  );
 
-      // Reset subcategory if parent category changes
-      if (
-        !subs.find((sub) => sub.id === parseInt(newArticle.sous_categorie_id))
-      ) {
-        setNewArticle((prev) => ({ ...prev, sous_categorie_id: "" }));
-      }
-    } else {
-      setSubcategories([]);
-      setNewArticle((prev) => ({ ...prev, sous_categorie_id: "" }));
+  // Une sous-famille qui ne vit plus sous la famille choisie n'a plus de sens.
+  // Tant que les catégories ne sont pas chargées on ne conclut rien.
+  useEffect(() => {
+    if (!categories.length || !newArticle.sous_categorie_id) return;
+    const stillThere = sousFamilleOptions.some(
+      (o) => String(o.id) === String(newArticle.sous_categorie_id)
+    );
+    if (!stillThere) {
+      setNewArticle((prev: any) => ({ ...prev, sous_categorie_id: "" }));
     }
-  }, [newArticle.categorie_id, categories]);
+  }, [sousFamilleOptions, categories.length, newArticle.sous_categorie_id]);
 
 
   const {
@@ -1363,6 +1336,21 @@ const BonCommandeClientList = () => {
     }
   }, [grandTotal, remiseType, lockedPercentage, globalRemise]);
 
+  // Keep the string display in sync when globalRemise is changed from
+  // somewhere other than the input (proportional engine, modal open/reset).
+  // The guard prevents clobbering a value the user is mid-typing (e.g. "1000,").
+  useEffect(() => {
+    const currentParsed =
+      globalRemiseInput === ""
+        ? 0
+        : parseFloat(globalRemiseInput.replace(",", ".")) || 0;
+    if (Math.abs(currentParsed - globalRemise) > 0.0001) {
+      setGlobalRemiseInput(
+        globalRemise === 0 ? "" : String(globalRemise).replace(".", ",")
+      );
+    }
+  }, [globalRemise]);
+
   const handleDelete = async () => {
     if (!bonCommande) return;
 
@@ -1401,19 +1389,13 @@ const BonCommandeClientList = () => {
     setMethodesReglement((prev) =>
       prev.map((pm) => {
         if (pm.id === id) {
-          if (field === "amount") {
-            // Handle amount validation and formatting
-            if (typeof value === "string") {
-              // Allow empty string or valid numeric format
-              if (value === "" || /^[0-9]*[,.]?[0-9]*$/.test(value)) {
-                const formattedValue = value.replace(".", ",");
-                const commaCount = (formattedValue.match(/,/g) || []).length;
-                if (commaCount <= 1) {
-                  return { ...pm, [field]: formattedValue };
-                }
-              }
-              return pm; // Invalid format, don't update
+          if (field === "amount" && typeof value === "string") {
+            const normalized = value.replace(/\./g, ",");
+            const parts = normalized.split(",");
+            if (parts.length <= 2 && parts.every((p: string) => /^[0-9]*$/.test(p))) {
+              return { ...pm, [field]: normalized };
             }
+            return pm;
           }
           return { ...pm, [field]: value };
         }
@@ -1534,7 +1516,7 @@ const BonCommandeClientList = () => {
         setRemiseType("fixed");
         setLockedPercentage(perc);
       } else {
-        setGlobalRemise(bonCommande.remise || 0);
+        setGlobalRemise(Number(bonCommande.remise) || 0);
         setRemiseType(bonCommande.remiseType || "percentage");
         setLockedPercentage(null);
       }
@@ -1681,8 +1663,10 @@ const BonCommandeClientList = () => {
         exoneration: exoneration,
         conditionPaiement: "30 jours",
 
-        // NEW FIELD: This is what you need to send
-        boncommandeclientid: Number(bonCommande.id), // <-- THIS IS CRITICAL
+        // Link the facture to its source commande client.
+        // Must match the field name used everywhere else (Interfaces, BL, paiements),
+        // otherwise the backend can't associate it and the Source column shows nothing.
+        bonCommandeClient_id: Number(bonCommande.id), // <-- THIS IS CRITICAL
         depot_id: selectedDepot?.id, // <-- ADD THIS
 
         // Send payment methods
@@ -1694,8 +1678,8 @@ const BonCommandeClientList = () => {
       };
 
       console.log("Sending to createFacture:", {
-        boncommandeclientid: factureData.boncommandeclientid,
-        type: typeof factureData.boncommandeclientid,
+        bonCommandeClient_id: factureData.bonCommandeClient_id,
+        type: typeof factureData.bonCommandeClient_id,
         bonCommandeId: bonCommande.id,
         bonCommandeExists: !!bonCommande,
       });
@@ -1740,24 +1724,27 @@ const BonCommandeClientList = () => {
             return sum + amountValue;
           }, 0);
 
-          // Check if total payments exceed the final total (BEFORE retention)
-          if (totalPaymentAmount > netAPayer) {
+          // The retenue is settled by the client's certificate, so real payments
+          // can only cover the net à payer minus the retenue
+          const montantAEncaisser = netAPayer - retentionMontant;
+
+          if (totalPaymentAmount > montantAEncaisser) {
             toast.error(
               `Le total des règlements (${totalPaymentAmount.toFixed(
                 3
-              )} DT) dépasse le montant net à payer (${netAPayer.toFixed(3)} DT)`
+              )} DT) dépasse le montant net à payer${retentionMontant > 0 ? " après retenue à la source" : ""} (${montantAEncaisser.toFixed(3)} DT)`
             );
             return;
           }
 
-          // Check if any individual payment method exceeds the final total
+          // Check if any individual payment method exceeds the amount to collect
           const hasIndividualExceed = nonRetentionPayments.some((pm) => {
             if (!pm.amount || pm.amount === "") return false;
             const amountValue =
               typeof pm.amount === "string"
                 ? parseFloat(pm.amount.replace(",", ".")) || 0
                 : Number(pm.amount) || 0;
-            return amountValue > netAPayer;
+            return amountValue > montantAEncaisser;
           });
 
           if (hasIndividualExceed) {
@@ -1885,19 +1872,20 @@ const BonCommandeClientList = () => {
               date: pm.date || moment().format("YYYY-MM-DD"),
               numero: pm.numero || "",
               banque: pm.banque || "",
-              dateEcheance: pm.dateEcheance || "",
+              dateEcheance: pm.dateEcheance || pm.date || moment().format("YYYY-MM-DD"),
               tauxRetention: pm.tauxRetention || 1,
             };
           }
 
-          return {
-            method: pm.method,
-            amount: amountValue,
-            date: pm.date || moment().format("YYYY-MM-DD"),
-            numero: pm.numero || "",
-            banque: pm.banque || "",
-            dateEcheance: pm.dateEcheance || "",
-          };
+            return {
+              method: pm.method,
+              amount: amountValue,
+              date: pm.date || moment().format("YYYY-MM-DD"),
+              numero: pm.numero || "",
+              banque: pm.banque || "",
+              // Keep dateEcheance independent for traite
+              dateEcheance: pm.dateEcheance || "",
+            };
         });
 
       if (isCreatingLivraison) {
@@ -1912,7 +1900,7 @@ const BonCommandeClientList = () => {
           dateLivraison: values.dateLivraison,
           client_id: selectedClient?.id ?? null,
           vendeur_id: values.vendeur_id,
-          status: values.status,
+          status: values.status as any,
           notes: values.notes,
           taxMode,
           remise: globalRemise,
@@ -2439,16 +2427,22 @@ const BonCommandeClientList = () => {
     status,
   }: {
     status?:
+    | "En Attente"
     | "Brouillon"
     | "Confirme"
     | "Livre"
     | "Annule"
     | "Partiellement Livre";
   }) => {
-    const statusConfig = {
-      Brouillon: {
+    const statusConfig: Record<string, { bgClass: string; textClass: string; icon: string }> = {
+      "En Attente": {
         bgClass: "bg-warning",
         textClass: "text-warning",
+        icon: "ri-time-line",
+      },
+      Brouillon: {
+        bgClass: "bg-secondary",
+        textClass: "text-secondary",
         icon: "ri-draft-line",
       },
       Confirme: {
@@ -2516,7 +2510,7 @@ const BonCommandeClientList = () => {
                           setStartDate(null);
                           setEndDate(null);
                           setSearchText("");
-                          setPhoneSearch("");
+                          setSearchPhone("");
                         }}
                       >
                         <i className="ri-close-line align-bottom me-1"></i>{" "}
@@ -2552,8 +2546,27 @@ const BonCommandeClientList = () => {
 
                 <NavItem>
                   <NavLink
+                    className={classnames({ active: activeTab === "2" })}
+                    onClick={() => setActiveTab("2")}
+                  >
+                    <i className="ri-time-line me-1 align-bottom"></i> En Attente
+                  </NavLink>
+                </NavItem>
+
+                <NavItem>
+                  <NavLink
                     className={classnames({ active: activeTab === "3" })}
                     onClick={() => setActiveTab("3")}
+                  >
+                    <i className="ri-draft-line me-1 align-bottom"></i>{" "}
+                    Brouillon
+                  </NavLink>
+                </NavItem>
+
+                <NavItem>
+                  <NavLink
+                    className={classnames({ active: activeTab === "4" })}
+                    onClick={() => setActiveTab("4")}
                   >
                     <i className="ri-checkbox-circle-line me-1 align-bottom"></i>{" "}
                     Confirmé
@@ -2561,8 +2574,8 @@ const BonCommandeClientList = () => {
                 </NavItem>
                 <NavItem>
                   <NavLink
-                    className={classnames({ active: activeTab === "4" })}
-                    onClick={() => setActiveTab("4")}
+                    className={classnames({ active: activeTab === "6" })}
+                    onClick={() => setActiveTab("6")}
                   >
                     <i className="ri-truck-line me-1 align-bottom"></i> Livré
                   </NavLink>
@@ -2578,8 +2591,8 @@ const BonCommandeClientList = () => {
                 </NavItem>
                 <NavItem>
                   <NavLink
-                    className={classnames({ active: activeTab === "6" })}
-                    onClick={() => setActiveTab("6")}
+                    className={classnames({ active: activeTab === "7" })}
+                    onClick={() => setActiveTab("7")}
                   >
                     <i className="ri-close-circle-line me-1 align-bottom"></i>{" "}
                     Annulé
@@ -2612,7 +2625,7 @@ const BonCommandeClientList = () => {
                           const value = e.target.value;
                           // Apply auto-space formatting for phone numbers
                           if (value) {
-                            const formatted = formatPhoneInput(value);
+                            const formatted = formatPhoneSearch(value);
                             setSearchPhone(formatted);
                           } else {
                             setSearchPhone("");
@@ -2695,12 +2708,19 @@ const BonCommandeClientList = () => {
                             return `${bonCommande.client.raison_sociale}`;
                           }
 
-                          // Website client
+                          // Website client: the blue globe marks, at a
+                          // glance, an order that came in from the shop.
                           if (bonCommande.clientWebsite) {
                             return (
                               <div>
                                 {bonCommande.clientWebsite.nomPrenom}
-                                <span className="badge bg-info ms-1">Web</span>
+                                <span
+                                  className="badge bg-primary ms-1"
+                                  title="Commande passée depuis le site web"
+                                >
+                                  <i className="ri-global-line align-bottom me-1"></i>
+                                  Web
+                                </span>
                               </div>
                             );
                           }
@@ -2731,10 +2751,8 @@ const BonCommandeClientList = () => {
                         accessorKey: "totalTTC",
                         enableColumnFilter: false,
                         cell: (cell: any) => {
-                          const bon = cell.row.original;
                           const total = Number(cell.getValue()) || 0;
-                          const retenue = getSafeNumber(bon.montantRetenue);
-                          return `${Math.max(0, total - retenue).toFixed(3)} DT`;
+                          return `${total.toFixed(3)} DT`;
                         },
                       },
                       {
@@ -2742,10 +2760,8 @@ const BonCommandeClientList = () => {
                         accessorKey: "totalTTCAfterRemise",
                         enableColumnFilter: false,
                         cell: (cell: any) => {
-                          const bon = cell.row.original;
                           const total = Number(cell.getValue()) || 0;
-                          const retenue = getSafeNumber(bon.montantRetenue);
-                          return `${Math.max(0, total - retenue).toFixed(3)} DT`;
+                          return `${total.toFixed(3)} DT`;
                         },
                       },
                       {
@@ -2864,7 +2880,7 @@ const BonCommandeClientList = () => {
                                       cellProps.row.original.client || null
                                     );
                                     setGlobalRemise(
-                                      cellProps.row.original.remise || 0
+                                      parseFloat(cellProps.row.original.remise) || 0
                                     );
                                     // Dans le bouton d'édition, ajouter :
                                     // In the edit button onClick handler:
@@ -2887,6 +2903,10 @@ const BonCommandeClientList = () => {
                                             banque: pm.banque || "",
                                             dateEcheance:
                                               pm.dateEcheance || "",
+                                            date: pm.date
+                                              ? moment(pm.date).format("YYYY-MM-DD")
+                                              : moment().format("YYYY-MM-DD"),
+                                            tauxRetention: pm.tauxRetention || 1,
                                           })
                                         )
                                         : [] // Empty array if no saved payments - will show only the button
@@ -3154,7 +3174,7 @@ const BonCommandeClientList = () => {
                                         const digitCount = (value.match(/\d/g) || []).length;
                                         const totalLength = value.length;
                                         if (digitCount >= totalLength * 0.7) {
-                                          const formatted = formatPhoneInput(value);
+                                          const formatted = formatPhoneSearch(value);
                                           setClientSearch(formatted);
                                         } else {
                                           setClientSearch(value);
@@ -3196,7 +3216,7 @@ const BonCommandeClientList = () => {
                                   )}
                                 </div>
                                 {/* Enhanced Client Dropdown Results - ABSOLUTELY POSITIONED */}
-                                {!selectedClient && clientSearch.length >= 3 && (
+                                {!selectedClient && clientSearch.length >= 1 && (
                                   <div
                                     className="search-results client-results mt-1"
                                     style={{
@@ -3909,31 +3929,20 @@ const BonCommandeClientList = () => {
                                                   )
                                               }
                                               onChange={(e) => {
-                                                let value = e.target.value;
-                                                if (
-                                                  value === "" ||
-                                                  /^[0-9]*[,.]?[0-9]*$/.test(
-                                                    value
-                                                  )
-                                                ) {
-                                                  value = value.replace(
-                                                    ".",
-                                                    ","
-                                                  );
-                                                  const commaCount = (
-                                                    value.match(/,/g) || []
-                                                  ).length;
-                                                  if (commaCount <= 1) {
-                                                    setEditingHT((prev) => ({
-                                                      ...prev,
-                                                      [item.article_id]: value,
-                                                    }));
-                                                    const parsed =
-                                                      parseNumericInput(value);
-                                                    if (
-                                                      !isNaN(parsed) &&
-                                                      parsed >= 0
-                                                    ) {
+                                                let value = e.target.value.replace(/\./g, ",");
+                                                const ci = value.indexOf(",");
+                                                if (ci !== -1) {
+                                                  value = value.slice(0, ci + 1) + value.slice(ci + 1).replace(/,/g, "");
+                                                }
+                                                if (value.startsWith(",")) value = "";
+                                                if (value === "" || /^[0-9]*,?[0-9]*$/.test(value)) {
+                                                  setEditingHT((prev) => ({
+                                                    ...prev,
+                                                    [item.article_id]: value,
+                                                  }));
+                                                  if (value !== "" && !value.endsWith(",")) {
+                                                    const parsed = parseNumericInput(value);
+                                                    if (!isNaN(parsed) && parsed >= 0) {
                                                       handleArticleChange(
                                                         item.article_id,
                                                         "prixUnitaire",
@@ -3971,31 +3980,20 @@ const BonCommandeClientList = () => {
                                                   )
                                               }
                                               onChange={(e) => {
-                                                let value = e.target.value;
-                                                if (
-                                                  value === "" ||
-                                                  /^[0-9]*[,.]?[0-9]*$/.test(
-                                                    value
-                                                  )
-                                                ) {
-                                                  value = value.replace(
-                                                    ".",
-                                                    ","
-                                                  );
-                                                  const commaCount = (
-                                                    value.match(/,/g) || []
-                                                  ).length;
-                                                  if (commaCount <= 1) {
-                                                    setEditingTTC((prev) => ({
-                                                      ...prev,
-                                                      [item.article_id]: value,
-                                                    }));
-                                                    const parsed =
-                                                      parseNumericInput(value);
-                                                    if (
-                                                      !isNaN(parsed) &&
-                                                      parsed >= 0
-                                                    ) {
+                                                let value = e.target.value.replace(/\./g, ",");
+                                                const ci = value.indexOf(",");
+                                                if (ci !== -1) {
+                                                  value = value.slice(0, ci + 1) + value.slice(ci + 1).replace(/,/g, "");
+                                                }
+                                                if (value.startsWith(",")) value = "";
+                                                if (value === "" || /^[0-9]*,?[0-9]*$/.test(value)) {
+                                                  setEditingTTC((prev) => ({
+                                                    ...prev,
+                                                    [item.article_id]: value,
+                                                  }));
+                                                  if (value !== "" && !value.endsWith(",")) {
+                                                    const parsed = parseNumericInput(value);
+                                                    if (!isNaN(parsed) && parsed >= 0) {
                                                       handleArticleChange(
                                                         item.article_id,
                                                         "prixTTC",
@@ -4164,23 +4162,37 @@ const BonCommandeClientList = () => {
                                             {remiseType === "percentage" ? "Pourcentage" : "Montant (DT)"}
                                           </Label>
                                           <Input
-                                            type="number"
-                                            min="0"
-                                            step={remiseType === "percentage" ? "1" : "0.001"}
-                                            value={globalRemise}
-                                            // REPLACE with (remove the lockedPercentage setter entirely from manual input):
-                                            // Both modal onChange handlers become simply:
+                                            type="text"
+                                            inputMode="decimal"
+                                            value={globalRemiseInput}
+                                            // String field: fully deletable (empty instead of 0)
+                                            // and accepts "." or "," as the decimal separator.
                                             onChange={(e) => {
-                                              const value = e.target.value;
-                                              const numValue = parseFloat(value);
-                                              if (value === "" || isNaN(numValue)) {
+                                              const raw = e.target.value;
+                                              if (raw === "") {
+                                                setGlobalRemiseInput("");
                                                 setGlobalRemise(0);
                                                 setLockedPercentage(null);
-                                              } else {
-                                                setGlobalRemise(numValue);
-                                                // Only set lockedPercentage for fixed type when items change (handled by the useEffect)
-                                                // Never set it here — engine derives it internally
-                                                if (remiseType !== "fixed") setLockedPercentage(null);
+                                                return;
+                                              }
+                                              const normalized = raw.replace(/\./g, ",");
+                                              const parts = normalized.split(",");
+                                              // Reject anything that isn't digits with at most one separator
+                                              if (
+                                                parts.length <= 2 &&
+                                                parts.every((p: string) => /^[0-9]*$/.test(p))
+                                              ) {
+                                                setGlobalRemiseInput(normalized);
+                                                const numValue = parseFloat(normalized.replace(",", "."));
+                                                if (isNaN(numValue)) {
+                                                  setGlobalRemise(0);
+                                                  setLockedPercentage(null);
+                                                } else {
+                                                  setGlobalRemise(numValue);
+                                                  // Only set lockedPercentage for fixed type when items change (handled by the useEffect)
+                                                  // Never set it here — engine derives it internally
+                                                  if (remiseType !== "fixed") setLockedPercentage(null);
+                                                }
                                               }
                                             }}
                                             placeholder={
@@ -4240,7 +4252,7 @@ const BonCommandeClientList = () => {
                                           <tr className="real-time-update">
                                             <th className="text-end text-muted fs-6">Retenue à la source:</th>
                                             <td className="text-end text-info fw-bold fs-6">
-                                              - {retentionMontant.toFixed(3)} DT
+                                              {retentionMontant.toFixed(3)} DT
                                             </td>
                                           </tr>
                                         )}
@@ -4951,7 +4963,8 @@ const BonCommandeClientList = () => {
                                       .reduce((sum: number, pm: any) => sum + (Number(pm.amount) || 0), 0);
 
                                     const totalPaye = Number(selectedBonCommande.montantPaye || 0);
-                                    const resteAPayerValue = Math.max(0, netAPayerValue - totalPaye);
+                                    // The retenue is not subtracted from the net à payer, only from what is left to pay
+                                    const resteAPayerValue = Math.max(0, netAPayerValue - retentionMontantValue - totalPaye);
 
                                     // Determine which values to display
                                     const displayNetHT = netHTValue;
@@ -4996,6 +5009,12 @@ const BonCommandeClientList = () => {
                                               </td>
                                             </tr>
                                           )}
+                                          <tr className="final-total real-time-update border-top">
+                                            <th className="text-end fs-5">NET À PAYER:</th>
+                                            <td className="text-end fw-bold fs-5 text-primary">
+                                              {netAPayerValue.toFixed(3)} DT
+                                            </td>
+                                          </tr>
                                           {retentionMontantValue > 0 && (
                                             <tr className="real-time-update">
                                               <th className="text-end text-muted fs-6">Retenue à la source:</th>
@@ -5004,12 +5023,6 @@ const BonCommandeClientList = () => {
                                               </td>
                                             </tr>
                                           )}
-                                          <tr className="final-total real-time-update border-top">
-                                            <th className="text-end fs-5">NET À PAYER:</th>
-                                            <td className="text-end fw-bold fs-5 text-primary">
-                                              {netAPayerValue.toFixed(3)} DT
-                                            </td>
-                                          </tr>
                                           {acompteTotal > 0 && (
                                             <tr className="real-time-update">
                                               <th className="text-end text-muted fs-6">Acompte:</th>
@@ -5111,7 +5124,7 @@ const BonCommandeClientList = () => {
                             setRemiseType("fixed");
                             setLockedPercentage(perc);
                           } else {
-                            setGlobalRemise(selectedBonCommande.remise || 0);
+                            setGlobalRemise(Number(selectedBonCommande.remise) || 0);
                             setRemiseType(selectedBonCommande.remiseType || "percentage");
                             setLockedPercentage(null);
                           }
@@ -5336,37 +5349,14 @@ const BonCommandeClientList = () => {
                           <Label className="form-label fw-semibold">
                             Téléphone 1*
                           </Label>
-                          <div className="position-relative">
-                            <Input
-                              value={newClient.telephone1}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                // Auto-format phone number
-                                if (value) {
-                                  const formatted = formatPhoneInput(value);
-                                  setNewClient({
-                                    ...newClient,
-                                    telephone1: formatted,
-                                  });
-                                } else {
-                                  setNewClient({
-                                    ...newClient,
-                                    telephone1: value,
-                                  });
-                                }
-                              }}
-                              placeholder="22 222 222"
-                              className="form-control-lg pe-5"
-                            />
-                            {newClient.telephone1 && (
-                              <div className="position-absolute end-0 top-50 translate-middle-y me-3">
-                                <i className="ri-phone-line text-muted"></i>
-                              </div>
-                            )}
-                          </div>
-                          <small className="text-muted">
-                            Format automatique: XX XXX XXX
-                          </small>
+                          <PhoneInput
+                            value={newClient.telephone1}
+                            onChange={(telephone1) =>
+                              setNewClient({ ...newClient, telephone1 })
+                            }
+                            bsSize="lg"
+                          />
+                          <small className="text-muted">{PHONE_FORMAT_HINT}</small>
                         </div>
                       </Col>
                       <Col md={6}>
@@ -5374,37 +5364,14 @@ const BonCommandeClientList = () => {
                           <Label className="form-label fw-semibold">
                             Téléphone 2
                           </Label>
-                          <div className="position-relative">
-                            <Input
-                              value={newClient.telephone2}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                // Auto-format phone number
-                                if (value) {
-                                  const formatted = formatPhoneInput(value);
-                                  setNewClient({
-                                    ...newClient,
-                                    telephone2: formatted,
-                                  });
-                                } else {
-                                  setNewClient({
-                                    ...newClient,
-                                    telephone2: value,
-                                  });
-                                }
-                              }}
-                              placeholder="22 222 222"
-                              className="form-control-lg pe-5"
-                            />
-                            {newClient.telephone2 && (
-                              <div className="position-absolute end-0 top-50 translate-middle-y me-3">
-                                <i className="ri-phone-line text-muted"></i>
-                              </div>
-                            )}
-                          </div>
-                          <small className="text-muted">
-                            Format automatique: XX XXX XXX
-                          </small>
+                          <PhoneInput
+                            value={newClient.telephone2}
+                            onChange={(telephone2) =>
+                              setNewClient({ ...newClient, telephone2 })
+                            }
+                            bsSize="lg"
+                          />
+                          <small className="text-muted">{PHONE_FORMAT_HINT}</small>
                         </div>
                       </Col>
                     </Row>
@@ -5574,13 +5541,11 @@ const BonCommandeClientList = () => {
                                   <option value="">
                                     Sélectionner une famille principale
                                   </option>
-                                  {categories
-                                    .filter((c) => !c.parent_id)
-                                    .map((c) => (
-                                      <option key={c.id} value={c.id}>
-                                        {c.nom}
-                                      </option>
-                                    ))}
+                                  {familleOptions.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
+                                    </option>
+                                  ))}
                                 </Input>
                                 <small className="text-muted">
                                   Catégorie principale
@@ -5607,9 +5572,9 @@ const BonCommandeClientList = () => {
                                   <option value="">
                                     Sélectionner une sous-famille
                                   </option>
-                                  {subcategories.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      {s.nom}
+                                  {sousFamilleOptions.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
                                     </option>
                                   ))}
                                 </Input>
@@ -5668,7 +5633,7 @@ const BonCommandeClientList = () => {
                                     )}
 
                                     {/* Enhanced Fournisseur Dropdown Results */}
-                                    {!newArticle.fournisseur_id && fournisseurSearch.length >= 3 && (
+                                    {!newArticle.fournisseur_id && fournisseurSearch.length >= 1 && (
                                       <div
                                         className="search-results fournisseur-results mt-1"
                                         style={{
@@ -6260,7 +6225,7 @@ const BonCommandeClientList = () => {
                                         const digitCount = (value.match(/\d/g) || []).length;
                                         const totalLength = value.length;
                                         if (digitCount >= totalLength * 0.7) {
-                                          const formatted = formatPhoneInput(value);
+                                          const formatted = formatPhoneSearch(value);
                                           setClientSearch(formatted);
                                         } else {
                                           setClientSearch(value);
@@ -6308,7 +6273,7 @@ const BonCommandeClientList = () => {
                                 {/* Dropdown Results - same enhanced style as Devis */}
                                 {!isCreatingLivraison &&
                                   !selectedClient &&
-                                  clientSearch.length >= 3 && (
+                                  clientSearch.length >= 1 && (
                                     <div
                                       className="search-results client-results mt-1"
                                       style={{
@@ -7328,31 +7293,20 @@ const BonCommandeClientList = () => {
                                                   )
                                               }
                                               onChange={(e) => {
-                                                let value = e.target.value;
-                                                if (
-                                                  value === "" ||
-                                                  /^[0-9]*[,.]?[0-9]*$/.test(
-                                                    value
-                                                  )
-                                                ) {
-                                                  value = value.replace(
-                                                    ".",
-                                                    ","
-                                                  );
-                                                  const commaCount = (
-                                                    value.match(/,/g) || []
-                                                  ).length;
-                                                  if (commaCount <= 1) {
-                                                    setEditingHT((prev) => ({
-                                                      ...prev,
-                                                      [item.article_id]: value,
-                                                    }));
-                                                    const parsed =
-                                                      parseNumericInput(value);
-                                                    if (
-                                                      !isNaN(parsed) &&
-                                                      parsed >= 0
-                                                    ) {
+                                                let value = e.target.value.replace(/\./g, ",");
+                                                const ci = value.indexOf(",");
+                                                if (ci !== -1) {
+                                                  value = value.slice(0, ci + 1) + value.slice(ci + 1).replace(/,/g, "");
+                                                }
+                                                if (value.startsWith(",")) value = "";
+                                                if (value === "" || /^[0-9]*,?[0-9]*$/.test(value)) {
+                                                  setEditingHT((prev) => ({
+                                                    ...prev,
+                                                    [item.article_id]: value,
+                                                  }));
+                                                  if (value !== "" && !value.endsWith(",")) {
+                                                    const parsed = parseNumericInput(value);
+                                                    if (!isNaN(parsed) && parsed >= 0) {
                                                       handleArticleChange(
                                                         item.article_id,
                                                         "prixUnitaire",
@@ -7377,31 +7331,20 @@ const BonCommandeClientList = () => {
                                                   )
                                               }
                                               onChange={(e) => {
-                                                let value = e.target.value;
-                                                if (
-                                                  value === "" ||
-                                                  /^[0-9]*[,.]?[0-9]*$/.test(
-                                                    value
-                                                  )
-                                                ) {
-                                                  value = value.replace(
-                                                    ".",
-                                                    ","
-                                                  );
-                                                  const commaCount = (
-                                                    value.match(/,/g) || []
-                                                  ).length;
-                                                  if (commaCount <= 1) {
-                                                    setEditingTTC((prev) => ({
-                                                      ...prev,
-                                                      [item.article_id]: value,
-                                                    }));
-                                                    const parsed =
-                                                      parseNumericInput(value);
-                                                    if (
-                                                      !isNaN(parsed) &&
-                                                      parsed >= 0
-                                                    ) {
+                                                let value = e.target.value.replace(/\./g, ",");
+                                                const ci = value.indexOf(",");
+                                                if (ci !== -1) {
+                                                  value = value.slice(0, ci + 1) + value.slice(ci + 1).replace(/,/g, "");
+                                                }
+                                                if (value.startsWith(",")) value = "";
+                                                if (value === "" || /^[0-9]*,?[0-9]*$/.test(value)) {
+                                                  setEditingTTC((prev) => ({
+                                                    ...prev,
+                                                    [item.article_id]: value,
+                                                  }));
+                                                  if (value !== "" && !value.endsWith(",")) {
+                                                    const parsed = parseNumericInput(value);
+                                                    if (!isNaN(parsed) && parsed >= 0) {
                                                       handleArticleChange(
                                                         item.article_id,
                                                         "prixTTC",
@@ -7640,7 +7583,7 @@ const BonCommandeClientList = () => {
                                               Retenue à la source:
                                             </th>
                                             <td className="text-end text-info fw-bold fs-6">
-                                              - {retentionMontant.toFixed(3)} DT
+                                              {retentionMontant.toFixed(3)} DT
                                             </td>
                                           </tr>
                                         )}
@@ -7924,7 +7867,7 @@ const BonCommandeClientList = () => {
                                         />
                                       </Col>
                                     )}
-
+                                    
                                     {methode.method === "traite" && (
                                       <Col md={3}>
                                         <Label className="form-label fw-semibold">
@@ -7933,8 +7876,7 @@ const BonCommandeClientList = () => {
                                         <Input
                                           type="date"
                                           value={
-                                            methode.dateEcheance ||
-                                            moment().format("YYYY-MM-DD")
+                                            methode.dateEcheance || ""
                                           }
                                           onChange={(e) =>
                                             updateMethodeReglement(
@@ -7948,6 +7890,7 @@ const BonCommandeClientList = () => {
                                         />
                                       </Col>
                                     )}
+
                                   </Row>
                                 </div>
                               ))}
@@ -8038,7 +7981,7 @@ const BonCommandeClientList = () => {
           }
 
           // Refresh clients list
-          loadClients(clientSearch, 1, 20);
+          loadClients(clientSearch, 1, 500);
         }}
       />
 

@@ -9,7 +9,7 @@ import progileBg from '../../../../assets/images/profile-bg.jpg';
 import avatar1 from '../../../../assets/images/users/avatar-1.jpg';
 
 const Settings = () => {
-    document.title="Profile Settings | Velzon - React Admin & Dashboard Template";
+    document.title="Profile Settings | Royal Lumiere";
 
     const [activeTab, setActiveTab] = useState<any>("1");
 

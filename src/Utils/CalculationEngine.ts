@@ -206,7 +206,8 @@ export const calculateDocumentTotals = (
     finalTTC = netHTAfter;
   }
 
-  // STEP 4: Retention (WITHHOLDING TAX)
+  // STEP 4: Retention (WITHHOLDING TAX) — informational only, it is NOT deducted
+  // from the net à payer. Callers computing what is left to collect subtract it themselves.
   let retentionVal = 0;
   const pmSource = doc.paymentMethods || doc.methodesReglement || [];
   if (pmSource && Array.isArray(pmSource)) {
@@ -222,8 +223,8 @@ export const calculateDocumentTotals = (
     timbreVal = 1.0;
   }
 
-  // STEP 6: Net à Payer
-  const netAPayer = finalTTC + timbreVal - retentionVal;
+  // STEP 6: Net à Payer (retenue à la source is not subtracted)
+  const netAPayer = finalTTC + timbreVal;
 
   return {
     sousTotalHT: sousTotalHTAcc,

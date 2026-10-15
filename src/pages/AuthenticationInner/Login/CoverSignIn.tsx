@@ -7,7 +7,7 @@ import AuthSlider from '../authCarousel';
 import * as Yup from "yup";
 import { useFormik } from "formik";
 const CoverSignIn = () => {
-    document.title="Cover SignIn  | Velzon - React Admin & Dashboard Template";
+    document.title="Cover SignIn  | Royal Lumiere";
 
     const [passwordShow, setPasswordShow] = useState<boolean>(false);
 

@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Modal, ModalHeader, ModalBody, ModalFooter, Button, Form, FormGroup, Label, Input, Row, Col } from 'reactstrap';
 import { createArticle } from '../../../Components/Article/ArticleServices';
 import { toast } from 'react-toastify';
+import {
+  buildRootCategoryOptions,
+  buildSubcategoryOptions,
+} from '../../../Components/Article/CategoryTree';
 
 interface CreateArticleModalProps {
   isOpen: boolean;
@@ -35,8 +39,20 @@ const CreateArticleModal: React.FC<CreateArticleModalProps> = ({
     remise: 0
   });
 
-  const [subCategories, setSubCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Les deux listes suivent l'arborescence de la liste des catégories : la
+  // catégorie est une racine, la sous-catégorie n'importe laquelle de ses
+  // descendantes, indentée selon sa profondeur.
+  const categoryOptions = useMemo(
+    () => buildRootCategoryOptions(categories),
+    [categories]
+  );
+  const subCategoryOptions = useMemo(
+    () => buildSubcategoryOptions(categories, formData.categorie_id),
+    [categories, formData.categorie_id]
+  );
+
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -56,9 +72,8 @@ const CreateArticleModal: React.FC<CreateArticleModalProps> = ({
           : value
       };
 
+      // Changer de famille invalide la sous-famille choisie sous l'ancienne.
       if (name === 'categorie_id') {
-        const filtered = categories.filter(c => c.parent_id === parseInt(value));
-        setSubCategories(filtered);
         updated.sous_categorie_id = '';
       }
 
@@ -70,15 +85,17 @@ const CreateArticleModal: React.FC<CreateArticleModalProps> = ({
         updated.pua_ttc = parseFloat((updated.pua_ht * fodecMultiplier * (1 + tvaRate)).toFixed(3));
       }
       if (name === 'puv_ht' || name === 'tva' || name === 'taux_fodec') {
-        updated.puv_ttc = parseFloat((updated.puv_ht * fodecMultiplier * (1 + tvaRate)).toFixed(3));
+        // FODEC applies to achat only, never to vente
+        updated.puv_ttc = parseFloat((updated.puv_ht * (1 + tvaRate)).toFixed(3));
       }
-      
+
       // Calculate reverse if TTC is changed directly
       if (name === 'pua_ttc') {
         updated.pua_ht = parseFloat((updated.pua_ttc / (fodecMultiplier * (1 + tvaRate))).toFixed(3));
       }
       if (name === 'puv_ttc') {
-        updated.puv_ht = parseFloat((updated.puv_ttc / (fodecMultiplier * (1 + tvaRate))).toFixed(3));
+        // FODEC applies to achat only, never to vente
+        updated.puv_ht = parseFloat((updated.puv_ttc / (1 + tvaRate)).toFixed(3));
       }
 
       return updated;
@@ -144,8 +161,8 @@ const CreateArticleModal: React.FC<CreateArticleModalProps> = ({
                 <Label>Catégorie</Label>
                 <Input type="select" name="categorie_id" value={formData.categorie_id} onChange={handleChange}>
                   <option value="">Sélectionnez une catégorie</option>
-                  {categories.filter(c => !c.parent_id).map(c => (
-                    <option key={c.id} value={c.id}>{c.nom}</option>
+                  {categoryOptions.map(o => (
+                    <option key={o.id} value={o.id}>{o.label}</option>
                   ))}
                 </Input>
               </FormGroup>
@@ -155,8 +172,8 @@ const CreateArticleModal: React.FC<CreateArticleModalProps> = ({
                 <Label>Sous-Catégorie</Label>
                 <Input type="select" name="sous_categorie_id" value={formData.sous_categorie_id} onChange={handleChange}>
                   <option value="">Sélectionnez une sous-catégorie</option>
-                  {subCategories.map(c => (
-                    <option key={c.id} value={c.id}>{c.nom}</option>
+                  {subCategoryOptions.map(o => (
+                    <option key={o.id} value={o.id}>{o.label}</option>
                   ))}
                 </Input>
               </FormGroup>

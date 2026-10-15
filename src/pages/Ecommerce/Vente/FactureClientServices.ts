@@ -27,8 +27,8 @@ export const fetchFacturesClientPaginated = async (params: {
 } = {}): Promise<PaginatedFacturesResponse> => {
     try {
         const queryParams = new URLSearchParams();
-        if (params.page) queryParams.set('page', String(params.page));
-        if (params.limit) queryParams.set('limit', String(params.limit));
+        if (params.page != null) queryParams.set('page', String(params.page));
+        if (params.limit != null) queryParams.set('limit', String(params.limit));
         if (params.search) queryParams.set('search', params.search);
         if (params.searchPhone) queryParams.set('searchPhone', params.searchPhone);
         if (params.status) queryParams.set('status', params.status);

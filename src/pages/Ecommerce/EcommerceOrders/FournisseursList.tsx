@@ -35,7 +35,7 @@ import moment from "moment";
 
 // Services
 import {
-  fetchFournisseurs,
+  searchFournisseurs,
   createFournisseur,
   updateFournisseur,
   deleteFournisseur
@@ -46,7 +46,6 @@ import { Fournisseur } from "../../../Components/Article/Interfaces";
 const FournisseursList = () => {
   const [modal, setModal] = useState(false);
   const [fournisseurs, setFournisseurs] = useState<Fournisseur[]>([]);
-  const [filteredFournisseurs, setFilteredFournisseurs] = useState<Fournisseur[]>([]);
   const [fournisseur, setFournisseur] = useState<Fournisseur | null>(null);
   const [isEdit, setIsEdit] = useState(false);
   const [deleteModal, setDeleteModal] = useState(false);
@@ -57,71 +56,56 @@ const FournisseursList = () => {
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [isExportCSV, setIsExportCSV] = useState(false);
   const [searchText, setSearchText] = useState("");
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
 
-  // Fetch all data
-  const fetchData = useCallback(async () => {
+  // Fetch paginated and filtered data
+  const fetchData = useCallback(async (page = 1, limit = pageSize) => {
     try {
       setLoading(true);
-      const fournisseursData = await fetchFournisseurs();
       
-      const formattedFournisseurs = fournisseursData.map((f: any) => ({
+      const statusMap: { [key: string]: string } = {
+        "1": "Tous",
+        "2": "Actif",
+        "3": "Inactif"
+      };
+
+      const result = await searchFournisseurs({
+        query: searchText,
+        page: page,
+        limit: limit,
+        status: statusMap[activeTab],
+        startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
+        endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined
+      });
+      
+      const formattedFournisseurs = result.fournisseurs.map((f: any) => ({
         ...f,
         createdAt: f.createdAt || new Date().toISOString()
       }));
       
       setFournisseurs(formattedFournisseurs);
-      setFilteredFournisseurs(formattedFournisseurs);
+      setTotalPages(result.totalPages);
+      setTotalCount(result.totalCount);
+      setCurrentPage(result.page);
       setLoading(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Échec du chargement des fournisseurs");
       setLoading(false);
     }
-  }, []);
+  }, [searchText, activeTab, startDate, endDate, pageSize]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    const delayDebounceFn = setTimeout(() => {
+      fetchData(1);
+    }, 500);
 
-  // Filter fournisseurs
-  useEffect(() => {
-    let result = [...fournisseurs];
-    
-    // Filter by status if needed
-    if (activeTab === "2") {
-      result = result.filter(f => f.status === "Actif");
-    } else if (activeTab === "3") {
-      result = result.filter(f => f.status === "Inactif");
-    }
-    
-    // Filter by date range
-    if (startDate && endDate) {
-      const start = moment(startDate).startOf('day');
-      const end = moment(endDate).endOf('day');
-      
-      result = result.filter(f => {
-        const fDate = moment(f.createdAt);
-        return fDate.isBetween(start, end, null, '[]');
-      });
-    }
-    
-    // Filter by search text
-    if (searchText) {
-      const searchLower = searchText.toLowerCase();
-      result = result.filter(f => 
-        f.raison_sociale.toLowerCase().includes(searchLower) ||
-        f.designation?.toLowerCase().includes(searchLower) ||
-        f.matricule_fiscal?.toLowerCase().includes(searchLower) ||
-        f.register_commerce?.toLowerCase().includes(searchLower) ||
-        f.adresse?.toLowerCase().includes(searchLower) ||
-        f.ville?.toLowerCase().includes(searchLower) ||
-        f.telephone1?.toLowerCase().includes(searchLower) ||
-        f.telephone2?.toLowerCase().includes(searchLower) ||
-        f.email?.toLowerCase().includes(searchLower)
-      );
-    }
-    
-    setFilteredFournisseurs(result);
-  }, [activeTab, startDate, endDate, searchText, fournisseurs]);
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchText, activeTab, startDate, endDate, fetchData]);
 
   // Delete fournisseur
   const handleDelete = async () => {
@@ -130,7 +114,7 @@ const FournisseursList = () => {
     try {
       await deleteFournisseur(fournisseur.id);
       setDeleteModal(false);
-      fetchData();
+      fetchData(currentPage);
       toast.success("Fournisseur supprimé avec succès");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Échec de la suppression");
@@ -148,7 +132,7 @@ const FournisseursList = () => {
         toast.success("Fournisseur ajouté avec succès");
       }
       setModal(false);
-      fetchData();
+      fetchData(currentPage);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Échec de l'opération");
     }
@@ -221,7 +205,7 @@ const FournisseursList = () => {
         enableColumnFilter: false,
       },
       {
-        header: "Code Barre",
+        header: "abréviation",
         accessorKey: "code_barre_fournisseur",
         enableColumnFilter: false,
       },
@@ -437,9 +421,17 @@ const FournisseursList = () => {
                   ) : (
                     <TableContainer
                       columns={columns}
-                      data={filteredFournisseurs}
+                      data={fournisseurs}
                       isGlobalFilter={false}
-                      customPageSize={10}
+                      isPagination={true}
+                      totalDataCount={totalCount}
+                      currentPage={currentPage - 1}
+                      onPageChange={(page) => fetchData(page + 1)}
+                      onPageSizeChange={(size) => {
+                        setPageSize(size);
+                        fetchData(1, size);
+                      }}
+                      customPageSize={pageSize}
                       divClass="table-responsive table-card mb-1 mt-0"
                       tableClass="align-middle table-nowrap"
                       theadClass="table-light text-muted text-uppercase"
@@ -594,10 +586,10 @@ const FournisseursList = () => {
                       <Row>
                         <Col md={12}>
                           <div className="mb-3">
-                            <Label className="form-label">Code Barre Fournisseur</Label>
+                            <Label className="form-label">abréviation Fournisseur</Label>
                             <Input
                               name="code_barre_fournisseur"
-                              placeholder="Entrer le code barre fournisseur"
+                              placeholder="abréviation fournisseur"
                               onChange={validation.handleChange}
                               onBlur={validation.handleBlur}
                               value={validation.values.code_barre_fournisseur}

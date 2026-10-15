@@ -250,3 +250,24 @@ export const ADD_CANDIDATE_GRID = "/add/category-grid";
 
 export const GET_CATEGORY_LIST = "/category-list";
 export const ADD_CATEGORY_LIST = "/add/category-list";
+
+// --- IMAGE HELPERS ---
+const API_BASE = process.env.REACT_APP_API_BASE;
+const SERVER_BASE = API_BASE ? API_BASE.replace(/\/api\/?$/, "") : "";
+
+/**
+ * Convert a relative image path returned by the backend into a full URL.
+ * Backend returns: "uploads/articles/article-xxx.jpg"
+ */
+export const getImageUrl = (relativePath: string | null | undefined): string => {
+  if (!relativePath) return "";
+  
+  // Aggressively strip any domain/subdomain if the backend sent a full URL or absolute path
+  // This turns "https://shop.royallumiere.tn/uploads/x.jpg" into "uploads/x.jpg"
+  const cleanPath = relativePath.replace(/^.*uploads\//i, "uploads/");
+  
+  const clean = cleanPath.replace(/^\/+/, "");
+  return `${SERVER_BASE}/${clean}`;
+};
+
+

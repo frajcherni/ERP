@@ -8,6 +8,7 @@ import Flatpickr from "react-flatpickr";
 import moment from "moment";
 import TrésoreriePDF from './TrésoreriePDF ';
 import UnifiedDashboard from '../Ecommerce/Vente/JournalVente';
+import JournalSortieDashboard from '../Ecommerce/Vente/JournalSortie';
 
 const API_BASE = process.env.REACT_APP_API_BASE;
 
@@ -17,6 +18,7 @@ interface PaymentMethod {
   numero?: string;
   banque?: string;
   dateEcheance?: string;
+  date?: string;
   tauxRetention?: number;
 }
 
@@ -370,7 +372,7 @@ const Trésorerie: React.FC = () => {
         { label: "Chèques", value: bcPayments.cheque, color: "primary", icon: "ri-bank-card-line" },
         { label: "Virements", value: bcPayments.virement, color: "info", icon: "ri-exchange-dollar-line" },
         { label: "Traites", value: bcPayments.traite, color: "warning", icon: "ri-file-text-line" },
-        { label: "Cartes Bancaire TPE", value: bcPayments.carte, color: "info", icon: "ri-bank-card-2-line" },
+        { label: "Cartes Bancaire TPE", value: bcPayments.carte + (bcPayments as any).tpe, color: "info", icon: "ri-bank-card-2-line" },
         { label: "Retenue", value: bcPayments.retenue, color: "danger", icon: "ri-refund-line" }
       ]
     },
@@ -382,7 +384,7 @@ const Trésorerie: React.FC = () => {
         { label: "Chèques", value: facturePayments.cheque, color: "primary", icon: "ri-bank-card-line" },
         { label: "Virements", value: facturePayments.virement, color: "info", icon: "ri-exchange-dollar-line" },
         { label: "Traites", value: facturePayments.traite, color: "warning", icon: "ri-file-text-line" },
-        { label: "Cartes Bancaire TPE", value: facturePayments.carte, color: "info", icon: "ri-bank-card-2-line" },
+        { label: "Cartes Bancaire TPE", value: facturePayments.carte + (facturePayments as any).tpe, color: "info", icon: "ri-bank-card-2-line" },
         { label: "Retenue", value: facturePayments.retenue, color: "danger", icon: "ri-refund-line" }
       ]
     },
@@ -394,7 +396,7 @@ const Trésorerie: React.FC = () => {
         { label: "Chèques", value: ventePayments.cheque, color: "primary", icon: "ri-bank-card-line" },
         { label: "Virements", value: ventePayments.virement, color: "info", icon: "ri-exchange-dollar-line" },
         { label: "Traites", value: ventePayments.traite, color: "warning", icon: "ri-file-text-line" },
-        { label: "Cartes Bancaire TPE", value: ventePayments.carte, color: "info", icon: "ri-bank-card-2-line" },
+        { label: "Cartes Bancaire TPE", value: ventePayments.carte + (ventePayments as any).tpe, color: "info", icon: "ri-bank-card-2-line" },
         { label: "Retenue", value: ventePayments.retenue, color: "danger", icon: "ri-refund-line" }
       ]
     },
@@ -406,7 +408,7 @@ const Trésorerie: React.FC = () => {
         { label: "Chèques", value: blPayments.cheque, color: "primary", icon: "ri-bank-card-line" },
         { label: "Virements", value: blPayments.virement, color: "info", icon: "ri-exchange-dollar-line" },
         { label: "Traites", value: blPayments.traite, color: "warning", icon: "ri-file-text-line" },
-        { label: "Cartes Bancaire TPE", value: blPayments.carte, color: "info", icon: "ri-bank-card-2-line" },
+        { label: "Cartes Bancaire TPE", value: blPayments.carte + (blPayments as any).tpe, color: "info", icon: "ri-bank-card-2-line" },
         { label: "Retenue", value: blPayments.retenue, color: "danger", icon: "ri-refund-line" }
       ]
     }
@@ -423,7 +425,7 @@ const Trésorerie: React.FC = () => {
 
       transaction.paymentMethods.forEach((pm: PaymentMethod) => {
         // Use payment date if exists, else transaction date
-        const date = pm.dateEcheance ? moment(pm.dateEcheance).format('YYYY-MM-DD') : moment(transaction.date).format('YYYY-MM-DD');
+        const date = pm.date ? moment(pm.date).format('YYYY-MM-DD') : moment(transaction.date).format('YYYY-MM-DD');
         
         if (!paymentsByDate.has(date)) {
           paymentsByDate.set(date, { regular: [], retention: [] });
@@ -543,8 +545,11 @@ const Trésorerie: React.FC = () => {
 
         {activeTab === 'overview' ? (
           <>
-            {/* Payment Methods by Source */}
+            {/* Journal ventes (gestion documents) */}
             <UnifiedDashboard hideHeader={true} />
+
+            {/* Journal sorties stock — sous le journal vente */}
+            <JournalSortieDashboard hideHeader={true} />
 
             {/*     <Row className="mb-3">
               {paymentMethodsBySource.map((source, index) => (

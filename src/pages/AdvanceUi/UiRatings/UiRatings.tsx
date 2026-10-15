@@ -13,7 +13,7 @@ const UiRatings = () => {
     const [customize, setcustomize] = useState<any>("");
     const [reset, setreset] = useState<any>("");
     
-    document.title="Ratings | Velzon - React Admin & Dashboard Template";
+    document.title="Ratings | Royal Lumiere";
 
     return (
         <React.Fragment>

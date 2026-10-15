@@ -103,7 +103,7 @@ const PaymentList = () => {
   }, []);
 
   useEffect(() => {
-    if (fournisseurSearch.length >= 3) {
+    if (fournisseurSearch.length >= 1) {
       const filtered = fournisseurs.filter(fournisseur =>
         fournisseur.raison_sociale.toLowerCase().includes(fournisseurSearch.toLowerCase())
       );
@@ -600,7 +600,7 @@ const PaymentList = () => {
                                 }}
                                 readOnly={!!selectedFournisseur}
                               />
-                              {!selectedFournisseur && fournisseurSearch.length >= 3 && (
+                              {!selectedFournisseur && fournisseurSearch.length >= 1 && (
                                 <div className="search-results mt-2">
                                   {filteredFournisseurs.length > 0 ? (
                                     <ul className="list-group">

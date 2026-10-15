@@ -11,7 +11,7 @@ import { useFormik } from "formik";
 import logoLight from "../../../assets/images/logo-light.png";
 
 const BasicSignIn = () => {
-    document.title="Basic SignIn | Velzon - React Admin & Dashboard Template";
+    document.title="Basic SignIn | Royal Lumiere";
 
     const [passwordShow, setPasswordShow] = useState<boolean>(false);
 

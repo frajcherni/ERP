@@ -26,7 +26,7 @@ import BreadCrumb from "../../../Components/Common/BreadCrumb";
 // register lottie and define custom element
 
 const FormWizard = () => {
-  document.title="Wizard | Velzon - React Admin & Dashboard Template";
+  document.title="Wizard | Royal Lumiere";
 
   const [activeTab, setactiveTab] = useState<number>(1);
   const [activeArrowTab, setactiveArrowTab] = useState(4);

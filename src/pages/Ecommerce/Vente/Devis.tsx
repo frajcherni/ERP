@@ -51,6 +51,8 @@ import {
   deleteDevis,
   createBonCommandeClientBasedOnDevis,
   fetchNextCommandeNumber,
+  CreateVenteComptoire,
+  fetchNextVenteComptoireNumber,
 } from "../../../Components/CommandeClient/CommandeClientServices";
 import {
   fetchArticles,
@@ -73,6 +75,10 @@ import {
   Categorie,
   Depot,
 } from "../../../Components/Article/Interfaces";
+import {
+  buildRootCategoryOptions,
+  buildSubcategoryOptions,
+} from "../../../Components/Article/CategoryTree";
 import classnames from "classnames";
 import { PDFDownloadLink } from "@react-pdf/renderer";
 import DevisPDFModal from "./DevisPDFModal"; // Import the modal
@@ -82,6 +88,8 @@ import "./ArticleTableStyles.css"; // Import unified table styles
 import { useProfile } from "Components/Hooks/UserHooks";
 import { fetchDepots } from "../Stock/DepotServices";
 import EditClientModal from "./EditClientModal";
+import PhoneInput from "../../../Components/Common/PhoneInput";
+import { formatPhoneDisplay, formatPhoneSearch } from "../../../helpers/phone_helper";
 import DiscountAlertModal from "../../../Components/Common/DiscountAlertModal";
 
 const Devis = () => {
@@ -465,7 +473,29 @@ const Devis = () => {
 
   // Add categories and fournisseurs states if not already present
   const [categories, setCategories] = useState<Categorie[]>([]);
-  const [subcategories, setSubcategories] = useState<Categorie[]>([]);
+  // Les deux listes suivent l'arborescence de la liste des catégories : la
+  // famille est une racine, la sous-famille n'importe laquelle de ses
+  // descendantes, indentée selon sa profondeur.
+  const familleOptions = useMemo(
+    () => buildRootCategoryOptions(categories),
+    [categories]
+  );
+  const sousFamilleOptions = useMemo(
+    () => buildSubcategoryOptions(categories, newArticle.categorie_id),
+    [categories, newArticle.categorie_id]
+  );
+
+  // Une sous-famille qui ne vit plus sous la famille choisie n'a plus de sens.
+  // Tant que les catégories ne sont pas chargées on ne conclut rien.
+  useEffect(() => {
+    if (!categories.length || !newArticle.sous_categorie_id) return;
+    const stillThere = sousFamilleOptions.some(
+      (o) => String(o.id) === String(newArticle.sous_categorie_id)
+    );
+    if (!stillThere) {
+      setNewArticle((prev: any) => ({ ...prev, sous_categorie_id: "" }));
+    }
+  }, [sousFamilleOptions, categories.length, newArticle.sous_categorie_id]);
   // Add ref for article search input
   // Phone formatting function
 
@@ -573,8 +603,9 @@ const Devis = () => {
       });
 
       // Refresh articles list pour récupérer le code-barres généré
-      const articlesData = await fetchArticles();
-      setArticles(articlesData);
+      // Refresh articles list using search
+      const result = await searchArticles({ query: "", page: 1, limit: 10 });
+      setArticles(result.articles || []);
     } catch (err) {
       toast.error("Erreur création article");
     }
@@ -589,7 +620,9 @@ const Devis = () => {
   const [globalRemise, setGlobalRemise] = useState<number>(0);
   const [lockedPercentage, setLockedPercentage] = useState<number | null>(null);
   const [isCreatingCommande, setIsCreatingCommande] = useState(false);
+  const [isCreatingVenteComptoire, setIsCreatingVenteComptoire] = useState(false);
   const [nextNumeroCommande, setNextNumeroCommande] = useState("");
+  const [nextNumeroVenteComptoire, setNextNumeroVenteComptoire] = useState("");
   const [editingTTC, setEditingTTC] = useState<{ [key: number]: string }>({});
   const [editingHT, setEditingHT] = useState<{ [key: number]: string }>({});
   const tvaOptions = [
@@ -644,7 +677,7 @@ const Devis = () => {
     try {
       const numero = await fetchNextCommandeNumber();
       setNextNumeroCommande(numero);
-    } catch (err) {
+    } catch (error) {
       toast.error("Échec de la récupération du numéro de commande");
       setNextNumeroCommande(
         generateNextNumber(bonsCommande, moment().format("YYYY"), "bonCommande")
@@ -652,49 +685,25 @@ const Devis = () => {
     }
   }, [bonsCommande]);
 
-
-  const formatPhoneInput = (value: string): string => {
-    // Remove all non-digit characters
-    const cleaned = value.replace(/\D/g, "");
-
-    // Limit to 8 digits (Tunisian phone number length)
-    const limited = cleaned.slice(0, 8);
-
-    // Format as XX XXX XXX
-    if (limited.length <= 2) {
-      return limited;
-    } else if (limited.length <= 5) {
-      return `${limited.substring(0, 2)} ${limited.substring(2)}`;
-    } else {
-      return `${limited.substring(0, 2)} ${limited.substring(
-        2,
-        5
-      )} ${limited.substring(5, 8)}`;
+  const fetchNextVenteComptoireNumberFromAPI = useCallback(async () => {
+    try {
+      const numero = await fetchNextVenteComptoireNumber();
+      setNextNumeroVenteComptoire(numero);
+    } catch (error) {
+      toast.error("Échec de la récupération du numéro de vente comptoire");
     }
-  };
+  }, []);
 
-
-
-  // Display formatting function
-  const formatPhoneDisplay = (phone: string | null | undefined): string => {
-    if (!phone) return "N/A";
-
-    const cleanPhone = phone.replace(/\D/g, "");
-    if (cleanPhone.length === 8) {
-      return `${cleanPhone.substring(0, 2)} ${cleanPhone.substring(
-        2,
-        5
-      )} ${cleanPhone.substring(5, 8)}`;
-    }
-    return phone;
-  };
 
 
   useEffect(() => {
     if (modal && !isEdit && isCreatingCommande) {
       fetchNextCommandeNumberFromAPI();
     }
-  }, [modal, isEdit, isCreatingCommande, fetchNextCommandeNumberFromAPI]);
+    if (modal && !isEdit && isCreatingVenteComptoire) {
+      fetchNextVenteComptoireNumberFromAPI();
+    }
+  }, [modal, isEdit, isCreatingCommande, isCreatingVenteComptoire, fetchNextCommandeNumberFromAPI, fetchNextVenteComptoireNumberFromAPI]);
 
 
 
@@ -718,23 +727,22 @@ const Devis = () => {
           page,
           limit,
           search: searchText || undefined,
+          searchPhone: phoneSearch || undefined,
           status: statusFilter || undefined,
           startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
           endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
         });
 
         let paginatedResult;
-        let depotsDataForAutoSelect: Depot[] = [];
         if (!skipSecondary) {
           const [resPaginated, resVendeurs, resDepots] = await Promise.all([
             paginatedPromise,
             fetchVendeurs(),
-            fetchDepots(),
+            depots.length === 0 ? fetchDepots() : Promise.resolve(depots),
           ]);
           paginatedResult = resPaginated;
           setVendeurs(resVendeurs);
-          setDepots(resDepots);
-          depotsDataForAutoSelect = resDepots;
+          if (depots.length === 0) setDepots(resDepots);
         } else {
           paginatedResult = await paginatedPromise;
         }
@@ -751,21 +759,9 @@ const Devis = () => {
         if (!skipSecondary) {
           setSecondaryLoading(true);
           try {
-            const [categoriesData] =
-              await Promise.all([
-                fetchCategories(),
-              ]);
-
-            setCategories(categoriesData);
-
-            // Auto-select "magazin" depot
-            if (depotsDataForAutoSelect.length > 0 && !selectedDepot) {
-              const magazinDepot = depotsDataForAutoSelect.find(d =>
-                d.nom.toLowerCase().includes("magazin")
-              );
-              if (magazinDepot) {
-                setSelectedDepot(magazinDepot);
-              }
+            if (categories.length === 0) {
+              const categoriesData = await fetchCategories();
+              setCategories(categoriesData);
             }
           } catch (secondaryErr) {
             console.error("Secondary data loading failed:", secondaryErr);
@@ -783,7 +779,7 @@ const Devis = () => {
         setLoading(false);
       }
     },
-    [searchText, startDate, endDate, pageSize, activeTab]
+    [searchText, phoneSearch, startDate, endDate, pageSize, activeTab]
   );
 
   // Combined fetch effect (Initial load + debounced filters)
@@ -845,7 +841,6 @@ const Devis = () => {
 
   // Load fournisseurs only when needed
   const loadFournisseurs = async (query = "", page = 1, limit = 15) => {
-    if (modal || fournisseurSearch) {
       setFournisseursLoading(true);
       try {
         const result = await searchFournisseurs({ query, page, limit });
@@ -855,13 +850,12 @@ const Devis = () => {
       } finally {
         setFournisseursLoading(false);
       }
-    }
   };
 
   // Update fournisseur search effect
   useEffect(() => {
     const searchFournisseursDebounced = async () => {
-      if (fournisseurSearch.length >= 3) {
+      if (fournisseurSearch.length >= 1) {
         await loadFournisseurs(fournisseurSearch, 1, 20);
       } else {
         setFilteredFournisseurs([]);
@@ -877,25 +871,23 @@ const Devis = () => {
     if (modal) {
       setModalLoading(true);
       try {
-        // Load only what's needed for the modal
         const [depotsResult, categoriesResult] = await Promise.all([
-          fetchDepots(),
-          fetchCategories(),
+          depots.length === 0 ? fetchDepots() : Promise.resolve(depots),
+          categories.length === 0 ? fetchCategories() : Promise.resolve(categories)
         ]);
 
-        setDepots(depotsResult);
-        setCategories(categoriesResult);
+        if (depots.length === 0) setDepots(depotsResult);
+        if (categories.length === 0) setCategories(categoriesResult);
 
         // Auto-select "magazin" depot if not already selected
         if (depotsResult.length > 0 && !selectedDepot) {
           const magazinDepot = depotsResult.find(d =>
-            d.nom.toLowerCase().includes("magazin")
+            d.nom.toLowerCase().includes("magasin") || d.nom.toLowerCase().includes("magazin")
           );
           if (magazinDepot) {
             setSelectedDepot(magazinDepot);
           }
         }
-
 
       } catch (err) {
         console.error("Modal data loading failed:", err);
@@ -908,7 +900,7 @@ const Devis = () => {
   // Update article search to use the new function
   useEffect(() => {
     const searchArticlesDebounced = async () => {
-      if (articleSearch.length >= 3 || modal) {
+      if (articleSearch.length >= 1) {
         await loadArticles(articleSearch, 1, 20);
       } else {
         setFilteredArticles([]);
@@ -917,13 +909,13 @@ const Devis = () => {
 
     const timer = setTimeout(searchArticlesDebounced, 300);
     return () => clearTimeout(timer);
-  }, [articleSearch, modal]);
+  }, [articleSearch]);
 
   // Update client search to use the new function
   useEffect(() => {
     const searchClientsDebounced = async () => {
-      if (clientSearch.length >= 1 || modal) {
-        await loadClients(clientSearch, 1, 20);
+      if (clientSearch.length >= 1) {
+        await loadClients(clientSearch, 1, 500);
       } else {
         setFilteredClients([]);
       }
@@ -931,7 +923,7 @@ const Devis = () => {
 
     const timer = setTimeout(searchClientsDebounced, 300);
     return () => clearTimeout(timer);
-  }, [clientSearch, modal]);
+  }, [clientSearch]);
 
   // Load modal data when modal opens
   useEffect(() => {
@@ -1119,6 +1111,47 @@ const Devis = () => {
 
         await createBonCommandeClientBasedOnDevis(commandeData);
         toast.success("Bon de commande créé avec succès");
+      } else if (isCreatingVenteComptoire) {
+        const venteData = {
+          numeroCommande: values.numeroCommande,
+          dateCommande: values.dateCommande,
+          dateLivBonCommande: values.dateCommande, // Same as dateCommande for Vente Comptoire
+          client_id: selectedClient!.id,
+          vendeur_id: values.vendeur_id,
+          depot_id: selectedDepot?.id || 1,
+          status: "Confirme" as "Confirme",
+          notes: values.notes,
+          taxMode: taxMode,
+          remise: globalRemise,
+          remiseType: remiseType,
+          totalHT: netHT,
+          totalTVA: totalTax,
+          totalTTC: grandTotal,
+          totalTTCAfterRemise: finalTotal,
+          totalAfterRemise: finalTotal,
+          modeReglement: "especes" as "especes",
+          devis_id: bonCommande?.id, // ✅ LINK TO ORIGIN DEVIS
+          hasRetenue: false,
+          montantRetenue: 0,
+          montantPaye: 0,
+          resteAPayer: finalTotal,
+          hasPayments: false,
+          paymentMethods: [],
+          totalPaymentAmount: 0,
+          articles: selectedArticles.map((item) => ({
+            article_id: item.article_id,
+            quantite: item.quantite === "" ? 0 : Number(item.quantite),
+            quantiteLivree: item.quantite === "" ? 0 : Number(item.quantite),
+            prix_unitaire: item.prixUnitaire,
+            prix_ttc: item.prixTTC,
+            tva: item.tva ?? undefined,
+            remise: item.remise ?? undefined,
+            designation: item.designation,
+          })),
+        };
+
+        await CreateVenteComptoire(venteData as any);
+        toast.success("Vente comptoire créée avec succès");
       }
       else {
         const bonCommandeData = {
@@ -1163,7 +1196,9 @@ const Devis = () => {
         ? bonCommande?.numeroCommande || ""
         : isCreatingCommande
           ? nextNumeroCommande
-          : generateNextNumber(bonsCommande, moment().format("YYYY"), "devis"),
+          : isCreatingVenteComptoire
+            ? nextNumeroVenteComptoire
+            : generateNextNumber(bonsCommande, moment().format("YYYY"), "devis"),
       client_id: bonCommande?.client?.id ?? "",
       vendeur_id: bonCommande?.vendeur?.id ?? "",
       dateCommande: bonCommande?.dateCommande
@@ -1283,7 +1318,7 @@ const Devis = () => {
 
                       }))
                     );
-                    setGlobalRemise(cellProps.row.original.remise || 0);
+                    setGlobalRemise(parseFloat(cellProps.row.original.remise) || 0);
                     setRemiseType(
                       cellProps.row.original.remiseType || "percentage"
                     );
@@ -1695,16 +1730,22 @@ const Devis = () => {
     status,
   }: {
     status?:
+    | "En Attente"
     | "Brouillon"
     | "Confirme"
     | "Livre"
     | "Annule"
     | "Partiellement Livre";
   }) => {
-    const statusConfig = {
-      Brouillon: {
+    const statusConfig: Record<string, { bgClass: string; textClass: string; icon: string }> = {
+      "En Attente": {
         bgClass: "bg-warning",
         textClass: "text-warning",
+        icon: "ri-time-line",
+      },
+      Brouillon: {
+        bgClass: "bg-secondary",
+        textClass: "text-secondary",
         icon: "ri-draft-line",
       },
       Confirme: {
@@ -1872,7 +1913,7 @@ const Devis = () => {
                           const value = e.target.value;
                           // Apply auto-space formatting for phone numbers
                           if (value) {
-                            const formatted = formatPhoneInput(value);
+                            const formatted = formatPhoneSearch(value);
                             setPhoneSearch(formatted);
                           } else {
                             setPhoneSearch("");
@@ -2079,7 +2120,7 @@ const Devis = () => {
 
                                         if (digitCount >= totalLength * 0.7) {
                                           // If 70% or more are digits
-                                          const formatted = formatPhoneInput(value);
+                                          const formatted = formatPhoneSearch(value);
                                           setClientSearch(formatted);
                                         } else {
                                           setClientSearch(value);
@@ -2128,7 +2169,7 @@ const Devis = () => {
                                 {/* Enhanced Client Dropdown Results - ABSOLUTELY POSITIONED */}
                                 {!isCreatingCommande &&
                                   !selectedClient &&
-                                  clientSearch.length >= 3 && (
+                                  clientSearch.length >= 1 && (
                                     <div
                                       className="search-results client-results mt-1"
                                       style={{
@@ -3358,26 +3399,12 @@ const Devis = () => {
                           <Label className="form-label fw-semibold">
                             Téléphone 1
                           </Label>
-                          <Input
+                          <PhoneInput
                             value={newClient.telephone1}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              // Apply auto-space formatting
-                              if (value) {
-                                const formatted = formatPhoneInput(value);
-                                setNewClient({
-                                  ...newClient,
-                                  telephone1: formatted,
-                                });
-                              } else {
-                                setNewClient({
-                                  ...newClient,
-                                  telephone1: value,
-                                });
-                              }
-                            }}
-                            placeholder="22 222 222"
-                            className="form-control-lg"
+                            onChange={(telephone1) =>
+                              setNewClient({ ...newClient, telephone1 })
+                            }
+                            bsSize="lg"
                           />
                         </div>
                       </Col>
@@ -3386,26 +3413,12 @@ const Devis = () => {
                           <Label className="form-label fw-semibold">
                             Téléphone 2
                           </Label>
-                          <Input
+                          <PhoneInput
                             value={newClient.telephone2}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              // Apply auto-space formatting
-                              if (value) {
-                                const formatted = formatPhoneInput(value);
-                                setNewClient({
-                                  ...newClient,
-                                  telephone2: formatted,
-                                });
-                              } else {
-                                setNewClient({
-                                  ...newClient,
-                                  telephone2: value,
-                                });
-                              }
-                            }}
-                            placeholder="22 222 222"
-                            className="form-control-lg"
+                            onChange={(telephone2) =>
+                              setNewClient({ ...newClient, telephone2 })
+                            }
+                            bsSize="lg"
                           />
                         </div>
                       </Col>
@@ -3535,13 +3548,11 @@ const Devis = () => {
                                   className="form-control-lg"
                                 >
                                   <option value="">Sélectionner une famille principale</option>
-                                  {categories
-                                    .filter((c) => !c.parent_id)
-                                    .map((c) => (
-                                      <option key={c.id} value={c.id}>
-                                        {c.nom}
-                                      </option>
-                                    ))}
+                                  {familleOptions.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
+                                    </option>
+                                  ))}
                                 </Input>
                                 <small className="text-muted">Catégorie principale</small>
                               </div>
@@ -3562,9 +3573,9 @@ const Devis = () => {
                                   className="form-control-lg"
                                 >
                                   <option value="">Sélectionner une sous-famille</option>
-                                  {subcategories.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      {s.nom}
+                                  {sousFamilleOptions.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
                                     </option>
                                   ))}
                                 </Input>
@@ -3619,7 +3630,7 @@ const Devis = () => {
                                     )}
 
                                     {/* Enhanced Fournisseur Dropdown Results */}
-                                    {!newArticle.fournisseur_id && fournisseurSearch.length >= 3 && (
+                                    {!newArticle.fournisseur_id && fournisseurSearch.length >= 1 && (
                                       <div
                                         className="search-results fournisseur-results mt-1"
                                         style={{
@@ -4367,6 +4378,67 @@ const Devis = () => {
                   <ModalFooter className="border-0 pt-4">
                     <Button
                       color="success"
+                      onClick={() => {
+                        if (selectedBonCommande) {
+                          setDetailModal(false);
+                          setSelectedClient(selectedBonCommande.client || null);
+                          setSelectedArticles(
+                            selectedBonCommande.articles.map((item: any) => ({
+                              article_id: item.article.id,
+                              quantite: item.quantite,
+                              articleDetails: item.article,
+                              prixUnitaire:
+                                typeof item.prixUnitaire === "string"
+                                  ? parseFloat(item.prixUnitaire)
+                                  : item.prixUnitaire,
+                              prixTTC:
+                                Number(item.prix_ttc) ||
+                                Number(item.article?.puv_ttc) ||
+                                (typeof item.prixUnitaire === "string"
+                                  ? parseFloat(item.prixUnitaire)
+                                  : item.prixUnitaire) *
+                                (1 + (item.tva || 0) / 100),
+                              tva:
+                                item.tva != null
+                                  ? typeof item.tva === "string"
+                                    ? parseFloat(item.tva)
+                                    : item.tva
+                                  : null,
+                              remise:
+                                item.remise != null
+                                  ? typeof item.remise === "string"
+                                    ? parseFloat(item.remise)
+                                    : item.remise
+                                  : null,
+                              designation: item.designation || item.article?.designation || "",
+                            }))
+                          );
+                          setGlobalRemise(Number(selectedBonCommande.remise) || 0);
+                          setRemiseType(selectedBonCommande.remiseType || "percentage");
+                          setShowRemise((selectedBonCommande.remise || 0) > 0);
+                          setIsCreatingCommande(false);
+                          setIsCreatingVenteComptoire(true);
+                          setBonCommande(selectedBonCommande); // ✅ SET THIS SO handleSubmit CAN USE IT
+                          setIsEdit(false);
+                          validation.setValues({
+                            ...validation.values,
+                            numeroCommande: nextNumeroVenteComptoire,
+                            client_id: selectedBonCommande.client?.id ?? "",
+                            vendeur_id: selectedBonCommande.vendeur?.id ?? "",
+                            dateCommande: moment().format("YYYY-MM-DD"),
+                            status: "Confirme",
+                            notes: selectedBonCommande.notes ?? "",
+                          });
+                          setModal(true);
+                        }
+                      }}
+                      className="btn-invoice btn-invoice-success me-2"
+                    >
+                      <i className="ri-shopping-cart-2-line me-2"></i> Créer Vente
+                      Comptoire
+                    </Button>
+                    <Button
+                      color="success"
                       size="md"
                       onClick={() => {
                         if (selectedBonCommande) {
@@ -4423,12 +4495,13 @@ const Devis = () => {
                             setRemiseType("fixed");
                             setLockedPercentage(perc);
                           } else {
-                            setGlobalRemise(selectedBonCommande.remise || 0);
+                            setGlobalRemise(Number(selectedBonCommande.remise) || 0);
                             setRemiseType(selectedBonCommande.remiseType || "percentage");
                             setLockedPercentage(null);
                           }
                           setShowRemise((selectedBonCommande.remise || 0) > 0);
                           setIsCreatingCommande(true);
+                          setIsCreatingVenteComptoire(false);
                           setIsEdit(false);
                           validation.setValues({
                             ...validation.values,
@@ -4487,7 +4560,7 @@ const Devis = () => {
           }
 
           // Refresh clients list
-          loadClients(clientSearch, 1, 20);
+          loadClients(clientSearch, 1, 500);
         }}
       />
 

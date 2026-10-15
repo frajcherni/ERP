@@ -68,6 +68,13 @@ import CategoriesList from "pages/Ecommerce/EcommerceOrders/CategoriesList";
 import ClientsList from "pages/Ecommerce/EcommerceOrders/ClientList";
 import WebsiteCategories from "pages/Ecommerce/EcommerceOrders/WebsiteCategories";
 import WebsiteCarousel from "pages/Ecommerce/EcommerceOrders/WebsiteCarousel";
+import WebsitePromos from "pages/Ecommerce/EcommerceOrders/WebsitePromos";
+import WebsiteOffers from "pages/Ecommerce/EcommerceOrders/WebsiteOffers";
+import WebsiteBrands from "pages/Ecommerce/EcommerceOrders/WebsiteBrands";
+import WebsiteFeatures from "pages/Ecommerce/EcommerceOrders/WebsiteFeatures";
+import WebsiteTestimonials from "pages/Ecommerce/EcommerceOrders/WebsiteTestimonials";
+import WebsiteAnnouncements from "pages/Ecommerce/EcommerceOrders/WebsiteAnnouncements";
+import WebsiteLogo from "pages/Ecommerce/EcommerceOrders/WebsiteLogo";
 import BonsCommandeList from "pages/Ecommerce/Achat/BonCommande";
 import BonReceptionList from "../pages/Ecommerce/Achat/BonReceptionList";
 import BonCommandeClientList from "../pages/Ecommerce/Vente/CommandeClientList";
@@ -150,6 +157,14 @@ const authProtectedRoutes = [
   { path: "/categories", component: <CategoriesList /> },
   { path: "/website-categories", component: <WebsiteCategories /> },
   { path: "/website-carousel", component: <WebsiteCarousel /> },
+  { path: "/website-promos", component: <WebsitePromos /> },
+  { path: "/website-offers", component: <WebsiteOffers /> },
+  { path: "/website-brands", component: <WebsiteBrands /> },
+  { path: "/website-features", component: <WebsiteFeatures /> },
+  { path: "/website-testimonials", component: <WebsiteTestimonials /> },
+  { path: "/website-announcements", component: <WebsiteAnnouncements /> },
+  { path: "/website-logo", component: <WebsiteLogo /> },
+  { path: "/website-settings", component: <WebsiteLogo /> },
 
   //Projects
   { path: "/apps-projects-list", component: <ProjectList /> },

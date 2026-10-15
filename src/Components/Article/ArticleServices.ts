@@ -7,7 +7,10 @@ import {
 } from "./Interfaces";
 
 
+export { getImageUrl } from "../../helpers/url_helper";
+
 const API_BASE = process.env.REACT_APP_API_BASE;
+
 
 
 // Add to your ArticleServices.ts
@@ -65,6 +68,7 @@ export const updateArticleWebsiteSettings = async (articleId: number, settings: 
 
 export const searchArticles = async (params: {
   query?: string;
+  reference?: string;
   page?: number;
   limit?: number;
   depot_id?: number;
@@ -73,6 +77,10 @@ export const searchArticles = async (params: {
   endDate?: string;
   sortBy?: string;
   sortOrder?: 'ASC' | 'DESC';
+  onWebsite?: boolean;
+  isOffre?: boolean;
+  isTopSeller?: boolean;
+  isNewArrival?: boolean;
 }): Promise<{ 
   articles: Article[]; 
   total: number; 
@@ -89,6 +97,7 @@ export const searchArticles = async (params: {
       },
       body: JSON.stringify({
         q: params.query || '',
+        reference: params.reference?.trim() || '',
         page: params.page || 1,
         limit: params.limit || 50,
         depot_id: params.depot_id,
@@ -96,7 +105,11 @@ export const searchArticles = async (params: {
         startDate: params.startDate,
         endDate: params.endDate,
         sortBy: params.sortBy,
-        sortOrder: params.sortOrder
+        sortOrder: params.sortOrder,
+        onWebsite: params.onWebsite,
+        isOffre: params.isOffre,
+        isTopSeller: params.isTopSeller,
+        isNewArrival: params.isNewArrival
       })
     });
     
@@ -121,6 +134,8 @@ export const searchClients = async (params: {
   page?: number;
   limit?: number;
   status?: string;
+  startDate?: string;
+  endDate?: string;
 }): Promise<{ 
   clients: Client[]; 
   total: number; 
@@ -140,7 +155,9 @@ export const searchClients = async (params: {
         q: params.query || '',
         page: params.page || 1,
         limit: params.limit || 20,
-        status: params.status || 'Actif'
+        status: params.status || 'Actif',
+        startDate: params.startDate,
+        endDate: params.endDate
       })
     });
     
@@ -196,6 +213,12 @@ export const fetchArticles = async (showOnlyActive = true): Promise<Article[]> =
   }
   
   return articles; // returns all articles
+};
+
+export const fetchArticleById = async (id: number): Promise<Article> => {
+  const response = await fetch(`${API_BASE}/articles/${id}`);
+  if (!response.ok) throw new Error("Failed to fetch article");
+  return response.json();
 };
 
 export const createArticle = async (articleData: any, imageFile?: File): Promise<Article> => {
@@ -402,6 +425,9 @@ export const searchFournisseurs = async (params: {
   query?: string;
   page?: number;
   limit?: number;
+  status?: string;
+  startDate?: string;
+  endDate?: string;
 }): Promise<{ 
   fournisseurs: Fournisseur[]; 
   totalCount: number; 
@@ -412,8 +438,11 @@ export const searchFournisseurs = async (params: {
   try {
     const queryParams = new URLSearchParams();
     if (params.query) queryParams.append("query", params.query);
-    if (params.page) queryParams.append("page", params.page.toString());
+    if (params.page != null) queryParams.append("page", params.page.toString());
     if (params.limit) queryParams.append("limit", params.limit.toString());
+    if (params.status) queryParams.append("status", params.status);
+    if (params.startDate) queryParams.append("startDate", params.startDate);
+    if (params.endDate) queryParams.append("endDate", params.endDate);
 
     const response = await fetch(`${API_BASE}/fournisseurs/search?${queryParams.toString()}`);
     

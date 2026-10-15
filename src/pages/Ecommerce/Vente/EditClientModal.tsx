@@ -16,6 +16,7 @@ import { useFormik } from "formik";
 import * as Yup from "yup";
 import { updateClient } from "../../../Components/Article/ArticleServices";
 import { toast } from "react-toastify";
+import PhoneInput from "../../../Components/Common/PhoneInput";
 import {
   Client,
 } from "../../../Components/Article/Interfaces";
@@ -33,14 +34,6 @@ const EditClientModal: React.FC<EditClientModalProps> = ({
   onClientUpdated,
 }) => {
   const [loading, setLoading] = useState(false);
-
-  // Phone formatting function
-  const formatPhoneInput = (value: string): string => {
-    const cleaned = value.replace(/\D/g, "").slice(0, 8);
-    if (cleaned.length <= 2) return cleaned;
-    if (cleaned.length <= 5) return `${cleaned.substring(0, 2)} ${cleaned.substring(2)}`;
-    return `${cleaned.substring(0, 2)} ${cleaned.substring(2, 5)} ${cleaned.substring(5, 8)}`;
-  };
 
   const validationSchema = Yup.object().shape({
     raison_sociale: Yup.string().required("La raison sociale est requise"),
@@ -98,12 +91,6 @@ const EditClientModal: React.FC<EditClientModalProps> = ({
     },
   });
 
-  // Handle phone input formatting
-  const handlePhoneChange = (field: "telephone1" | "telephone2", value: string) => {
-    const formatted = formatPhoneInput(value);
-    formik.setFieldValue(field, formatted);
-  };
-
   if (!client) return null;
 
   return (
@@ -157,12 +144,11 @@ const EditClientModal: React.FC<EditClientModalProps> = ({
             <Col md={6}>
               <div className="mb-3">
                 <Label className="form-label fw-semibold">Téléphone 1</Label>
-                <Input
+                <PhoneInput
                   name="telephone1"
                   value={formik.values.telephone1}
-                  onChange={(e) => handlePhoneChange("telephone1", e.target.value)}
-                  className="form-control-lg"
-                  placeholder="22 222 222"
+                  onChange={(value) => formik.setFieldValue("telephone1", value)}
+                  bsSize="lg"
                 />
               </div>
             </Col>
@@ -170,12 +156,11 @@ const EditClientModal: React.FC<EditClientModalProps> = ({
             <Col md={6}>
               <div className="mb-3">
                 <Label className="form-label fw-semibold">Téléphone 2</Label>
-                <Input
+                <PhoneInput
                   name="telephone2"
                   value={formik.values.telephone2}
-                  onChange={(e) => handlePhoneChange("telephone2", e.target.value)}
-                  className="form-control-lg"
-                  placeholder="22 222 222"
+                  onChange={(value) => formik.setFieldValue("telephone2", value)}
+                  bsSize="lg"
                 />
               </div>
             </Col>

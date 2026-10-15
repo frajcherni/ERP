@@ -595,8 +595,8 @@ const FactureVentePDF: React.FC<FactureVentePDFProps> = ({
                 {bonCommande.client.matricule_fiscal && (
                   <Text style={styles.clientLineItem}>MF: {bonCommande.client.matricule_fiscal}</Text>
                 )}
-                {bonCommande.client.adresse &&
-                  wrapText(bonCommande.client.adresse, 35).map((line, idx) => (
+                {[bonCommande.client.adresse, bonCommande.client.ville].filter(Boolean).join(" - ") &&
+                  wrapText([bonCommande.client.adresse, bonCommande.client.ville].filter(Boolean).join(" - "), 35).map((line, idx) => (
                     <Text key={`adr-${idx}`} style={styles.clientLineItem}>{line}</Text>
                   ))}
                 {bonCommande.client.telephone1 && (

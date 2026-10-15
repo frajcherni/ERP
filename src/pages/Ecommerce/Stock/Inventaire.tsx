@@ -39,9 +39,10 @@ import Flatpickr from "react-flatpickr";
 import * as Yup from "yup";
 import { useFormik } from "formik";
 
-import { fetchInventaires, fetchNextInventaireNumber, createInventaire, updateInventaire, deleteInventaire, fetchDepots, Inventaire } from "./InventaireServices";
+import { fetchInventaires, fetchInventairesPaginated, fetchNextInventaireNumber, createInventaire, updateInventaire, deleteInventaire, fetchDepots, Inventaire } from "./InventaireServices";
 import { searchArticles, fetchArticles } from "../../../Components/Article/ArticleServices";
 import { Article } from "../../../Components/Article/Interfaces";
+import InventairePdfModal from "./InventairePdfModal";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n: any, d = 3) => `${(parseFloat(n) || 0).toFixed(d)} DT`;
@@ -76,11 +77,17 @@ const InventairePage: React.FC = () => {
     const [searchText, setSearchText] = useState("");
     const [startDate, setStartDate] = useState<Date | null>(null);
     const [endDate, setEndDate] = useState<Date | null>(null);
+    
+    // ── Pagination state ──────────────────────────────────────────────────────
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [totalItems, setTotalItems] = useState(0);
 
     // ── Modals ────────────────────────────────────────────────────────────────
     const [formModal, setFormModal] = useState(false);
     const [detailModal, setDetailModal] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false);
+    const [pdfModal, setPdfModal] = useState(false);
     const [allArticles, setAllArticles] = useState<Article[]>([]);
     const [loadingArticles, setLoadingArticles] = useState(false);
 
@@ -101,7 +108,9 @@ const InventairePage: React.FC = () => {
                 setLoadingArticles(false);
             }
         };
-        load();
+        // Defer loading to avoid blocking initial UI render
+        const timer = setTimeout(load, 500);
+        return () => clearTimeout(timer);
     }, []);
 
     // ── Edit / selected ───────────────────────────────────────────────────────
@@ -118,15 +127,16 @@ const InventairePage: React.FC = () => {
     const loadInventaires = useCallback(async () => {
         try {
             setLoading(true);
-            const data = await fetchInventaires();
-            setInventaires(data);
-            setFiltered(data);
+            const result = await fetchInventairesPaginated(currentPage, pageSize);
+            setInventaires(result.data);
+            setTotalItems(result.total);
+            setFiltered(result.data);
         } catch (err: any) {
             setError(err.toString());
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [currentPage, pageSize]);
 
     useEffect(() => { loadInventaires(); }, [loadInventaires]);
 
@@ -331,6 +341,7 @@ const InventairePage: React.FC = () => {
                 setFormModal(false);
                 validation.resetForm();
                 setLines([]);
+                setCurrentPage(1);
                 loadInventaires();
             } catch (err: any) {
                 toast.error(String(err));
@@ -403,6 +414,7 @@ const InventairePage: React.FC = () => {
             await deleteInventaire(selected.id);
             toast.success("Inventaire supprimé ✓");
             setDeleteModal(false);
+            setCurrentPage(1);
             loadInventaires();
         } catch (err: any) {
             toast.error(String(err));
@@ -411,12 +423,33 @@ const InventairePage: React.FC = () => {
 
     // ─── Stats ────────────────────────────────────────────────────────────────
     const stats = useMemo(() => ({
-        total: filtered.length,
+        total: totalItems,
         totalHT: filtered.reduce((s, inv) => s + (parseFloat(String(inv.total_ht)) || 0), 0),
         totalTTC: filtered.reduce((s, inv) => s + (parseFloat(String(inv.total_ttc)) || 0), 0),
         termine: filtered.filter((inv) => inv.status === "Terminé").length,
         enCours: filtered.filter((inv) => inv.status === "En cours").length,
-    }), [filtered]);
+    }), [filtered, totalItems]);
+
+    // ─── Consigné/Non-Consigné breakdown for selected inventory ───────────────
+    const consigneStats = useMemo(() => {
+        if (!selected || !selected.items) {
+            return { consigneHT: 0, consigneTTC: 0, nonConsigneHT: 0, nonConsigneTTC: 0 };
+        }
+        let cHT = 0, cTTC = 0, ncHT = 0, ncTTC = 0;
+        selected.items.forEach((item) => {
+            const isConsigne = (item.article as any)?.type === "Consigné";
+            const ht = Number(item.total_ht) || 0;
+            const ttc = Number(item.total_ttc) || 0;
+            if (isConsigne) {
+                cHT += ht;
+                cTTC += ttc;
+            } else {
+                ncHT += ht;
+                ncTTC += ttc;
+            }
+        });
+        return { consigneHT: cHT, consigneTTC: cTTC, nonConsigneHT: ncHT, nonConsigneTTC: ncTTC };
+    }, [selected]);
 
     // ─── Table columns ────────────────────────────────────────────────────────
     const columns = useMemo(() => [
@@ -599,8 +632,39 @@ const InventairePage: React.FC = () => {
                                         </Button>
                                     </Col>
                                 </Row>
+
+                                {/* Pagination Info */}
+                                <Row className="mb-3 align-items-center">
+                                    <Col md={6}>
+                                        <small className="text-muted">
+                                            <i className="ri-file-list-line me-1" />
+                                            Total: <strong>{totalItems}</strong> inventaires | 
+                                            Page: <strong>{currentPage}</strong> sur <strong>{Math.ceil(totalItems / pageSize)}</strong> | 
+                                            Affichage: <strong>{((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, totalItems)}</strong>
+                                        </small>
+                                    </Col>
+                                    <Col md={6} className="d-flex justify-content-end gap-2">
+                                        <Button
+                                            color="light"
+                                            size="sm"
+                                            disabled={currentPage === 1 || loading}
+                                            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                        >
+                                            <i className="ri-arrow-left-line me-1" />Précédent
+                                        </Button>
+                                        <Button
+                                            color="light"
+                                            size="sm"
+                                            disabled={currentPage >= Math.ceil(totalItems / pageSize) || loading}
+                                            onClick={() => setCurrentPage(prev => prev + 1)}
+                                        >
+                                            Suivant<i className="ri-arrow-right-line ms-1" />
+                                        </Button>
+                                    </Col>
+                                </Row>
+
                                 {loading ? <Loader /> : error ? <Alert color="danger">{error}</Alert> :
-                                    filtered.length === 0 ? (
+                                    inventaires.length === 0 ? (
                                         <div className="text-center py-5">
                                             <i className="ri-clipboard-line display-1 text-muted" />
                                             <h5 className="text-muted mt-3">Aucun inventaire trouvé</h5>
@@ -609,9 +673,9 @@ const InventairePage: React.FC = () => {
                                     ) : (
                                         <TableContainer
                                             columns={columns}
-                                            data={filtered}
+                                            data={inventaires}
                                             isGlobalFilter={false}
-                                            customPageSize={10}
+                                            customPageSize={pageSize}
                                             divClass="table-responsive table-card mb-1 mt-0"
                                             tableClass="align-middle table-nowrap"
                                             theadClass="table-light text-muted text-uppercase"
@@ -1047,6 +1111,25 @@ const InventairePage: React.FC = () => {
 
                             <Row className="mt-4 g-2">
                                 {[
+                                    { label: "Consigné HT", value: fmt(consigneStats.consigneHT), color: "info", icon: "ri-store-2-line" },
+                                    { label: "Consigné TTC", value: fmt(consigneStats.consigneTTC), color: "info", icon: "ri-money-dollar-circle-line" },
+                                    { label: "Non Consigné HT", value: fmt(consigneStats.nonConsigneHT), color: "secondary", icon: "ri-archive-line" },
+                                    { label: "Non Consigné TTC", value: fmt(consigneStats.nonConsigneTTC), color: "secondary", icon: "ri-money-dollar-circle-line" },
+                                ].map((s, i) => (
+                                    <Col key={i} md={3}>
+                                        <Card className={`border-${s.color} bg-${s.color} bg-opacity-10 mb-0`}>
+                                            <CardBody className="py-2 text-center">
+                                                <i className={`${s.icon} me-1 text-${s.color}`} />
+                                                <span className="text-muted small">{s.label}</span>
+                                                <div className={`fw-bold fs-6 text-${s.color}`}>{s.value}</div>
+                                            </CardBody>
+                                        </Card>
+                                    </Col>
+                                ))}
+                            </Row>
+
+                            <Row className="mt-3 g-2">
+                                {[
                                     { label: "Total HT", value: fmt(selected.total_ht), color: "primary", icon: "ri-price-tag-3-line" },
                                     { label: "Total TVA", value: fmt(selected.total_tva), color: "warning", icon: "ri-percent-line" },
                                     { label: "Total TTC", value: fmt(selected.total_ttc), color: "success", icon: "ri-money-dollar-circle-line" },
@@ -1070,6 +1153,9 @@ const InventairePage: React.FC = () => {
                                     <i className="ri-edit-line me-1" />Modifié le {moment(selected.updated_at).format("DD/MM/YYYY HH:mm")}
                                 </div>
                                 <div className="d-flex gap-2">
+                                    <Button color="danger" size="sm" onClick={() => setPdfModal(true)}>
+                                        <i className="ri-file-pdf-line me-1" />Exporter PDF
+                                    </Button>
                                     <Button color="primary" size="sm" onClick={() => { setDetailModal(false); openEdit(selected); }}>
                                         <i className="ri-pencil-line me-1" />Modifier
                                     </Button>
@@ -1080,6 +1166,13 @@ const InventairePage: React.FC = () => {
                     )}
                 </ModalBody>
             </Modal>
+
+            {/* PDF Modal */}
+            <InventairePdfModal
+                isOpen={pdfModal}
+                toggle={() => setPdfModal(false)}
+                inventaire={selected}
+            />
         </div>
     );
 };

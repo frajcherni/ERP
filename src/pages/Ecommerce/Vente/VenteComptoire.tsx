@@ -45,6 +45,10 @@ import moment from "moment";
 import Flatpickr from "react-flatpickr";
 import { fetchDepots } from "../Stock/DepotServices";
 import { Depot } from "../../../Components/Article/Interfaces";
+import {
+  buildRootCategoryOptions,
+  buildSubcategoryOptions,
+} from "../../../Components/Article/CategoryTree";
 
 import {
   createFacture,
@@ -58,6 +62,10 @@ import {
   deleteventecomptoire,
   fetchNextVenteComptoireNumber,
 } from "../../../Components/CommandeClient/CommandeClientServices";
+import {
+  createBonLivraison,
+  fetchNextLivraisonNumberAPI,
+} from "../../../Components/CommandeClient/BonLivraisonServices";
 import {
   fetchVendeurs,
   fetchFournisseurs,
@@ -76,6 +84,8 @@ import {
   Fournisseur,
 } from "../../../Components/Article/Interfaces";
 import EditClientModal from "./EditClientModal";
+import PhoneInput from "../../../Components/Common/PhoneInput";
+import { formatPhoneDisplay, formatPhoneSearch } from "../../../helpers/phone_helper";
 
 import classnames from "classnames";
 import VenteComptoirePDFModal from "./VenteComptoirePDFModal";
@@ -147,6 +157,8 @@ const VenteComptoire = () => {
   const [selectedDepot, setSelectedDepot] = useState<Depot | null>(null);
   const [isCreatingFacture, setIsCreatingFacture] = useState(false);
   const [nextFactureNumber, setNextFactureNumber] = useState("");
+  const [isCreatingBonLivraison, setIsCreatingBonLivraison] = useState(false);
+  const [nextNumeroBonLivraison, setNextNumeroBonLivraison] = useState("");
   const [timbreFiscal, setTimbreFiscal] = useState<boolean>(true);
 
   const [exoneration, setExoneration] = useState<string>("");
@@ -162,6 +174,7 @@ const VenteComptoire = () => {
   const [totalPages, setTotalPages] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const isFirstRender = useRef(true);
+  const hasLoadedSecondary = useRef(false);
 
   // === FONCTIONS DE CALCUL TVA/FODEC TUNISIEN ===
   const parseNumber = (value: string | number): number => {
@@ -329,12 +342,14 @@ const VenteComptoire = () => {
       numero?: string;
       banque?: string;
       dateEcheance?: string;
+      date?: string;
     }>
   >([
     {
       id: "1",
       method: "especes",
       amount: 0,
+      date: moment().format("YYYY-MM-DD"),
     },
   ]);
 
@@ -368,7 +383,6 @@ const VenteComptoire = () => {
   const [filteredFournisseurs, setFilteredFournisseurs] = useState<Fournisseur[]>([]);
   const [fournisseurSearch, setFournisseurSearch] = useState("");
   const [fournisseursLoading, setFournisseursLoading] = useState(false);
-  const [subcategories, setSubcategories] = useState<Categorie[]>([]);
   // Add near your other state declarations
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [dropdownRef, setDropdownRef] = useState<HTMLDivElement | null>(null);
@@ -480,60 +494,6 @@ const VenteComptoire = () => {
     setEditClientModal(true);
   };
 
-  // Enhanced phone formatting function
-  const formatPhoneInput = (value: string): string => {
-    // Remove all non-digit characters
-    const cleaned = value.replace(/\D/g, "");
-
-    // Limit to 8 digits (Tunisian phone number length)
-    const limited = cleaned.slice(0, 8);
-
-    // Format as XX XXX XXX
-    if (limited.length <= 2) {
-      return limited;
-    } else if (limited.length <= 5) {
-      return `${limited.substring(0, 2)} ${limited.substring(2)}`;
-    } else {
-      return `${limited.substring(0, 2)} ${limited.substring(
-        2,
-        5
-      )} ${limited.substring(5, 8)}`;
-    }
-  };
-
-  // Enhanced phone detection function
-  const isPhoneNumberInput = (value: string): boolean => {
-    // Remove spaces for counting
-    const cleanValue = value.replace(/\s/g, "");
-
-    // If empty, not a phone number
-    if (!cleanValue) return false;
-
-    // Count digits
-    const digitCount = (cleanValue.match(/\d/g) || []).length;
-    const totalLength = cleanValue.length;
-
-    // More lenient detection: if mostly digits OR if it's exactly 8 digits with spaces
-    const isMostlyDigits = digitCount >= totalLength * 0.7;
-    const isEightDigitsWithSpaces = cleanValue.length === 8 && digitCount === 8;
-    const hasEightDigitsTotal = digitCount === 8;
-
-    return isMostlyDigits || isEightDigitsWithSpaces || hasEightDigitsTotal;
-  };
-
-  // Display formatting function
-  const formatPhoneDisplay = (phone: string | null | undefined): string => {
-    if (!phone) return "N/A";
-
-    const cleanPhone = phone.replace(/\D/g, "");
-    if (cleanPhone.length === 8) {
-      return `${cleanPhone.substring(0, 2)} ${cleanPhone.substring(
-        2,
-        5
-      )} ${cleanPhone.substring(5, 8)}`;
-    }
-    return phone;
-  };
   // Function to normalize name for searching (remove accents, etc.)
   const normalizeName = (name: string): string => {
     return name
@@ -558,12 +518,14 @@ const VenteComptoire = () => {
 
   // Add new payment method
   const addPaymentMethod = () => {
+    const newId = Date.now().toString();
     setPaymentMethods((prev) => [
       ...prev,
       {
-        id: Date.now().toString(),
+        id: newId,
         method: "especes",
         amount: 0,
+        date: moment().format("YYYY-MM-DD"),
       },
     ]);
   };
@@ -652,24 +614,29 @@ const VenteComptoire = () => {
   };
   // Add this effect for auto-calculation
 
-  // Add this effect for subcategories
-  useEffect(() => {
-    if (newArticle.categorie_id) {
-      const categoryId = parseInt(newArticle.categorie_id);
-      const subs = categories.filter((cat) => cat.parent_id === categoryId);
-      setSubcategories(subs);
+  // Les deux listes suivent l'arborescence de la liste des catégories : la
+  // famille est une racine, la sous-famille n'importe laquelle de ses
+  // descendantes, indentée selon sa profondeur.
+  const familleOptions = useMemo(
+    () => buildRootCategoryOptions(categories),
+    [categories]
+  );
+  const sousFamilleOptions = useMemo(
+    () => buildSubcategoryOptions(categories, newArticle.categorie_id),
+    [categories, newArticle.categorie_id]
+  );
 
-      // Reset subcategory if parent category changes
-      if (
-        !subs.find((sub) => sub.id === parseInt(newArticle.sous_categorie_id))
-      ) {
-        setNewArticle((prev) => ({ ...prev, sous_categorie_id: "" }));
-      }
-    } else {
-      setSubcategories([]);
-      setNewArticle((prev) => ({ ...prev, sous_categorie_id: "" }));
+  // Une sous-famille qui ne vit plus sous la famille choisie n'a plus de sens.
+  // Tant que les catégories ne sont pas chargées on ne conclut rien.
+  useEffect(() => {
+    if (!categories.length || !newArticle.sous_categorie_id) return;
+    const stillThere = sousFamilleOptions.some(
+      (o) => String(o.id) === String(newArticle.sous_categorie_id)
+    );
+    if (!stillThere) {
+      setNewArticle((prev: any) => ({ ...prev, sous_categorie_id: "" }));
     }
-  }, [newArticle.categorie_id, categories]);
+  }, [sousFamilleOptions, categories.length, newArticle.sous_categorie_id]);
 
   const handleDirectPrint = async (
     bonCommande: BonCommandeClient,
@@ -758,10 +725,10 @@ const VenteComptoire = () => {
   }, [bonsCommande.length]);
 
   useEffect(() => {
-    if (modal && !isEdit) {
+    if (modal && !isEdit && !nextNumeroCommande && !isCreatingFacture && !isCreatingBonLivraison) {
       fetchNextNumber();
     }
-  }, [modal, isEdit, fetchNextNumber]);
+  }, [modal, isEdit, fetchNextNumber, nextNumeroCommande, isCreatingFacture, isCreatingBonLivraison]);
 
   // Enhanced client search functionality
   // Client search functionality - same as Devis
@@ -779,19 +746,36 @@ const VenteComptoire = () => {
           page,
           limit: limit,
           search: searchText || undefined,
+          searchPhone: phoneSearch || undefined,
           startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
           endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
         });
 
         if (!skipSecondary) {
-          const [resPaginated, resVendeurs, resDepots] = await Promise.all([
+          const promises = [
             paginatedPromise,
-            fetchVendeurs(),
-            fetchDepots(),
-          ]);
-          paginatedResult = resPaginated;
-          setVendeurs(resVendeurs);
-          setDepots(resDepots);
+            vendeurs.length === 0 ? fetchVendeurs() : Promise.resolve(vendeurs),
+            depots.length === 0 ? fetchDepots() : Promise.resolve(depots),
+            categories.length === 0 ? fetchCategories() : Promise.resolve(categories),
+          ];
+          
+          const [resPaginated, resVendeurs, resDepots, resCategories] = await Promise.all(promises);
+          
+          paginatedResult = resPaginated as any;
+          if (vendeurs.length === 0) setVendeurs(resVendeurs as Vendeur[]);
+          if (depots.length === 0) setDepots(resDepots as Depot[]);
+          if (categories.length === 0) setCategories(resCategories as Categorie[]);
+
+          // Auto-select "magazin" depot
+          const currentDepots = depots.length > 0 ? depots : (resDepots as Depot[]);
+          if (currentDepots.length > 0 && !selectedDepot) {
+            const magazinDepot = currentDepots.find(d =>
+              d.nom.toLowerCase().includes("magasin") || d.nom.toLowerCase().includes("magazin")
+            );
+            if (magazinDepot) {
+              setSelectedDepot(magazinDepot);
+            }
+          }
         } else {
           paginatedResult = await paginatedPromise;
         }
@@ -803,39 +787,6 @@ const VenteComptoire = () => {
         setCurrentPage(paginatedResult.pagination.page);
         setPageSize(limit);
 
-        if (!skipSecondary) {
-          setSecondaryLoading(true);
-          try {
-            const [categoriesData, articlesResult, clientsResult, fournisseursData] =
-              await Promise.all([
-                fetchCategories(),
-                searchArticles({ query: "", page: 1, limit: 10 }),
-                searchClients({ query: "", page: 1, limit: 10 }),
-                fetchFournisseurs(),
-              ]);
-
-            setCategories(categoriesData);
-            setArticles(articlesResult.articles || []);
-            setFilteredClients(clientsResult.clients || []);
-            setFournisseurs(fournisseursData);
-
-            // Auto-select "magazin" depot
-            const depotsData = (await fetchDepots());
-            if (depotsData.length > 0 && !selectedDepot) {
-              const magazinDepot = depotsData.find(d =>
-                d.nom.toLowerCase().includes("magazin")
-              );
-              if (magazinDepot) {
-                setSelectedDepot(magazinDepot);
-              }
-            }
-          } catch (secondaryErr) {
-            console.error("Secondary data loading failed:", secondaryErr);
-          } finally {
-            setSecondaryLoading(false);
-          }
-        }
-
         setLoading(false);
         setError(null);
       } catch (err) {
@@ -845,7 +796,7 @@ const VenteComptoire = () => {
         setLoading(false);
       }
     },
-    [searchText, startDate, endDate, pageSize]
+    [searchText, phoneSearch, startDate, endDate, pageSize]
   );
 
   // Load articles only when needed (modal opens or search)
@@ -908,7 +859,7 @@ const VenteComptoire = () => {
   // Update fournisseur search effect
   useEffect(() => {
     const searchFournisseursDebounced = async () => {
-      if (fournisseurSearch.length >= 3) {
+      if (fournisseurSearch.length >= 1) {
         await loadFournisseurs(fournisseurSearch, 1, 20);
       } else {
         setFilteredFournisseurs([]);
@@ -925,28 +876,25 @@ const VenteComptoire = () => {
       setModalLoading(true);
       try {
         // Load only what's needed for the modal
-        const [depotsResult, categoriesResult, fournisseursResult] = await Promise.all([
-          fetchDepots(),
-          fetchCategories(),
-          fetchFournisseurs(),
-        ]);
+        // Load categories and depots if not already loaded
+        if (categories.length === 0 || depots.length === 0) {
+          const [categoriesResult, depotsResult] = await Promise.all([
+            categories.length === 0 ? fetchCategories() : Promise.resolve(categories),
+            depots.length === 0 ? fetchDepots() : Promise.resolve(depots)
+          ]);
+          
+          if (categories.length === 0) setCategories(categoriesResult);
+          if (depots.length === 0) setDepots(depotsResult);
 
-        setDepots(depotsResult);
-        setCategories(categoriesResult);
-        setFournisseurs(fournisseursResult || []);
-
-        // Auto-select "magazin" depot if not already selected
-        if (depotsResult.length > 0 && !selectedDepot) {
-          const magazinDepot = depotsResult.find((d) =>
-            d.nom.toLowerCase().includes("magazin")
-          );
-          if (magazinDepot) {
-            setSelectedDepot(magazinDepot);
+          if (depotsResult.length > 0 && !selectedDepot) {
+            const magazinDepot = (depotsResult as Depot[]).find((d) =>
+              d.nom.toLowerCase().includes("magasin") || d.nom.toLowerCase().includes("magazin")
+            );
+            if (magazinDepot) {
+              setSelectedDepot(magazinDepot);
+            }
           }
         }
-
-        // Load initial articles and clients for modal
-        await Promise.all([loadArticles("", 1, 15), loadClients("", 1, 15)]);
       } catch (err) {
         console.error("Modal data loading failed:", err);
       } finally {
@@ -956,9 +904,7 @@ const VenteComptoire = () => {
   };
 
   // Initial load - load everything
-  useEffect(() => {
-    fetchData(1, pageSize, false);
-  }, [fetchData, pageSize]);
+
 
   // Load modal data when modal opens
   useEffect(() => {
@@ -977,7 +923,7 @@ const VenteComptoire = () => {
   // Update article search to use the new function
   useEffect(() => {
     const searchArticlesDebounced = async () => {
-      if (articleSearch.length >= 3 || modal) {
+      if (articleSearch.length >= 1) {
         await loadArticles(articleSearch, 1, 20);
       } else {
         setFilteredArticles([]);
@@ -986,13 +932,13 @@ const VenteComptoire = () => {
 
     const timer = setTimeout(searchArticlesDebounced, 300);
     return () => clearTimeout(timer);
-  }, [articleSearch, modal]);
+  }, [articleSearch]);
 
   // Update client search to use the new function
   useEffect(() => {
     const searchClientsDebounced = async () => {
-      if (clientSearch.length >= 1 || modal) {
-        await loadClients(clientSearch, 1, 20);
+      if (clientSearch.length >= 1) {
+        await loadClients(clientSearch, 1, 500);
       } else {
         setFilteredClients([]);
       }
@@ -1000,25 +946,29 @@ const VenteComptoire = () => {
 
     const timer = setTimeout(searchClientsDebounced, 300);
     return () => clearTimeout(timer);
-  }, [clientSearch, modal]);
+  }, [clientSearch]);
 
-  // Initial load
-  useEffect(() => {
-    fetchData(1, pageSize, false);
-  }, []); // eslint-disable-line
 
-  // Re-fetch whenever filters change (debounced)
+
+  // Combined fetch effect (Initial load + debounced filters)
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    setCurrentPage(1);
+    let active = true;
+
     const timer = setTimeout(() => {
-      fetchData(1, pageSize, true);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [searchText, startDate, endDate]);
+      if (active) {
+        const skipSecondary = hasLoadedSecondary.current;
+        fetchData(1, pageSize, skipSecondary);
+        if (!skipSecondary) hasLoadedSecondary.current = true;
+      }
+    }, isFirstRender.current ? 0 : 400);
+
+    isFirstRender.current = false;
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [searchText, phoneSearch, startDate, endDate, pageSize]);
 
   const openDetailModal = (bonCommande: BonCommandeClient) => {
     setSelectedBonCommande(bonCommande);
@@ -1175,24 +1125,25 @@ const VenteComptoire = () => {
       if (vente.paymentMethods && vente.paymentMethods.length > 0) {
         setPaymentMethods(
           vente.paymentMethods.map((pm: any, index: number) => ({
-            id: pm.id || `facture-${index}`,
-            method: pm.method,
+            id: pm.id || `pm_${index}_${Date.now()}`,
+            method: pm.method || "especes",
             amount: Number(pm.amount) || 0,
             numero: pm.numero || "",
             banque: pm.banque || "",
             dateEcheance: pm.dateEcheance || "",
+            date: pm.date ? moment(pm.date).format("YYYY-MM-DD") : moment().format("YYYY-MM-DD"),
           }))
         );
       } else {
-        // Fallback to the vente's payment information
         setPaymentMethods([
           {
-            id: "1",
+            id: `pm_0_${Date.now()}`,
             method: vente.modeReglement || "especes",
-            amount: Number(vente.totalAfterRemise) || finalTotal,
+            amount: finalTotal,
             numero: vente.numeroReglement || "",
-            banque: vente.banqueCheque || "",
-            dateEcheance: vente.dateEcheance || "",
+            banque: "",
+            dateEcheance: "",
+            date: moment().format("YYYY-MM-DD"),
           },
         ]);
       }
@@ -1213,12 +1164,87 @@ const VenteComptoire = () => {
     }
   };
 
+  const prepareBonLivraisonCreation = async (vente: BonCommandeClient) => {
+    try {
+      setModalLoading(true);
+      const nextNumero = await fetchNextLivraisonNumberAPI();
+      setNextNumeroBonLivraison(nextNumero);
+
+      setBonCommande(vente);
+      setSelectedClient(vente.client || null);
+      setSelectedArticles(
+        vente.articles.map((item: any) => ({
+          article_id: item.article?.id || 0,
+          quantite: item.quantite,
+          prixUnitaire:
+            typeof item.prixUnitaire === "string"
+              ? parseFloat(item.prixUnitaire)
+              : item.prixUnitaire,
+          prixTTC:
+            Number(item.prix_ttc) ||
+            Number(item.article?.puv_ttc) ||
+            (typeof item.prixUnitaire === "string"
+              ? parseFloat(item.prixUnitaire)
+              : item.prixUnitaire) *
+            (1 + (item.tva || 0) / 100),
+          tva:
+            item.tva != null
+              ? typeof item.tva === "string"
+                ? parseFloat(item.tva)
+                : item.tva
+              : null,
+          remise:
+            item.remise != null
+              ? typeof item.remise === "string"
+                ? parseFloat(item.remise)
+                : item.remise
+              : null,
+          designation: item.designation || item.article?.designation || "",
+          articleDetails: item.article,
+        }))
+      );
+      setGlobalRemise(Number(vente.remise) || 0);
+      setRemiseType(vente.remiseType || "percentage");
+      setLockedPercentage(vente.lockedPercentage || null);
+      setShowRemise((vente.remise || 0) > 0);
+
+      setIsCreatingBonLivraison(true);
+      setIsEdit(false);
+      setIsCreatingFacture(false);
+
+      // ✅ INITIALIZE FORM VALUES DIRECTLY HERE
+      setTimeout(() => {
+        validation.setValues({
+          numeroCommande: nextNumero, // THE BL NUMBER
+          dateCommande: moment().format("YYYY-MM-DD"),
+          client_id: vente.client?.id ?? "",
+          vendeur_id: vente.vendeur?.id ?? "",
+          depot_id: vente.depot_id ?? "",
+          notes: vente.notes ?? "",
+          modeReglement: vente.modeReglement || "especes",
+          numeroReglement: vente.numeroReglement || "",
+          dateEcheance: vente.dateEcheance ? moment(vente.dateEcheance).format("YYYY-MM-DD") : moment().format("YYYY-MM-DD"),
+          banqueCheque: vente.banqueCheque || "",
+          espaceNotes: vente.espaceNotes || "",
+        });
+      }, 0);
+
+      setDetailModal(false);
+      setModal(true);
+      setModalLoading(false);
+    } catch (err) {
+      setModalLoading(false);
+      console.error("Error preparing BL:", err);
+      toast.error("Échec de la préparation du bon de livraison");
+    }
+  };
+
   useEffect(() => {
-    if (modal && !isEdit && !isCreatingFacture) {
+    if (modal && !isEdit && !isCreatingFacture && !isCreatingBonLivraison) {
       setRemiseType("fixed");
       setGlobalRemise(0);
     }
-  }, [modal, isEdit, isCreatingFacture]);
+  }, [modal, isEdit, isCreatingFacture, isCreatingBonLivraison]);
   // Fonction pour soumettre la facture
   const handleFactureSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); // PREVENT DEFAULT FORM SUBMISSION
@@ -1316,16 +1342,67 @@ const VenteComptoire = () => {
         await handleFactureSubmit(values);
         return;
       }
+
+      if (isCreatingBonLivraison) {
+        // Payments belong to the VenteComptoire — do NOT copy them onto the BL.
+        // The BL reads them from the linked venteComptoire (display only).
+        const blData = {
+          numeroLivraison: values.numeroCommande,
+          dateLivraison: values.dateCommande,
+          vente_comptoire_id: bonCommande?.id,
+          client_id: selectedClient?.id,
+          vendeur_id: values.vendeur_id,
+          depot_id: selectedDepot?.id,
+          articles: selectedArticles.map((item) => ({
+            article_id: item.article_id,
+            quantite: item.quantite === "" ? 0 : Number(item.quantite),
+            prix_unitaire: item.prixUnitaire,
+            prix_ttc: item.prixTTC,
+            tva: item.tva,
+            remise: item.remise,
+            designation: item.designation,
+          })),
+          taxMode,
+          remise: globalRemise,
+          remiseType,
+          totalHT: netHT,
+          totalTVA: totalTax,
+          totalTTC: grandTotal,
+          totalTTCAfterRemise: finalTotal,
+          paymentMethods: [],
+          totalPaymentAmount: 0,
+          espaceNotes,
+          skipStockUpdate: true,
+        };
+
+        await createBonLivraison(blData as any);
+        toast.success("Bon de livraison créé avec succès");
+        toggleModal();
+        fetchData(currentPage, pageSize, true);
+        return;
+      }
       // For single payment method, auto-set amount to finalTotal
       const processedPaymentMethods = paymentMethods.map((pm) => {
+        let updatedPm = { ...pm };
         if (paymentMethods.length === 1) {
-          return { ...pm, amount: finalTotal };
+          updatedPm.amount = finalTotal;
         }
-        return pm;
+        // Always set dateEcheance to date for traite if not provided, but prioritize existing
+        if (pm.method === "traite") {
+          updatedPm.dateEcheance = pm.dateEcheance || pm.date || moment().format("YYYY-MM-DD");
+        }
+        return updatedPm;
       });
 
       const processedTotalPaymentAmount =
         paymentMethods.length === 1 ? finalTotal : totalPaymentAmount;
+
+      // With several payments each montant is typed by hand: an empty one would be
+      // saved as a 0 DT règlement (e.g. "Carte Bancaire TPE" without montant)
+      if (paymentMethods.length > 1 && paymentMethods.some((pm) => !(Number(pm.amount) > 0))) {
+        toast.error("Chaque paiement doit avoir un montant supérieur à 0");
+        return;
+      }
 
       // Validate payment total only for multiple payments
       if (paymentMethods.length > 1 && !isPaymentTotalValid) {
@@ -1438,6 +1515,7 @@ const VenteComptoire = () => {
       setRemiseType("fixed");
       setShowRemise(false);
       setIsCreatingFacture(false);
+      setIsCreatingBonLivraison(false);
       setTimbreFiscal(true);
       setPhoneSearch(""); // Add this line
 
@@ -1447,9 +1525,10 @@ const VenteComptoire = () => {
       // Reset payment states
       setPaymentMethods([
         {
-          id: "1",
+          id: `pm_0_${Date.now()}`,
           method: "especes",
           amount: 0,
+          date: moment().format("YYYY-MM-DD"),
         },
       ]);
       validation.resetForm();
@@ -1801,6 +1880,12 @@ const VenteComptoire = () => {
         cell: (cell: any) => moment(cell.getValue()).format("DD MMM YYYY"),
       },
       {
+        header: "Source",
+        accessorKey: "devis",
+        enableColumnFilter: false,
+        cell: (cell: any) => cell.getValue()?.numeroCommande || "Vente Directe",
+      },
+      {
         header: "Client",
         accessorKey: "client",
         enableColumnFilter: false,
@@ -1816,6 +1901,7 @@ const VenteComptoire = () => {
       {
         header: "Articles",
         accessorKey: "articles",
+        id: "articles_count",
         enableColumnFilter: false,
         cell: (cell: any) => (
           <Badge color="success" className="text-uppercase">
@@ -1827,6 +1913,7 @@ const VenteComptoire = () => {
       {
         header: "Total TTC",
         accessorKey: "articles",
+        id: "total_ttc",
         enableColumnFilter: false,
         cell: (cell: any) => {
           const total = cell.getValue().reduce((sum: number, item: any) => {
@@ -1849,6 +1936,7 @@ const VenteComptoire = () => {
       {
         header: "Total Après Remise",
         accessorKey: "articles",
+        id: "total_after_remise",
         enableColumnFilter: false,
         cell: (cell: any) => {
           const total = cell.getValue().reduce((sum: number, item: any) => {
@@ -1942,44 +2030,40 @@ const VenteComptoire = () => {
                       bonCommande.locked_percentage ||
                       null
                     );
-                    setGlobalRemise(bonCommande.remise || 0);
+                    setGlobalRemise(parseFloat(bonCommande.remise) || 0);
                     setRemiseType(bonCommande.remiseType || "percentage");
                     setShowRemise(
                       !!bonCommande.remise && bonCommande.remise > 0
                     );
                     setIsEdit(true);
                     setModal(true);
-                    // In your edit button click handler, add:
-                    // In your edit button click handler, replace the payment method initialization:
-                    // In your edit button click handler:
-                    // In your edit button click handler:
                     setPaymentMethods(
                       (bonCommande as any)?.paymentMethods &&
                         (bonCommande as any).paymentMethods.length > 0
                         ? (bonCommande as any).paymentMethods.map(
                           (pm: any, index: number) => ({
-                            id: pm.id || `edit-${index}`,
-                            method: pm.method,
+                            id: pm.id || `pm_${index}_${Date.now()}`,
+                            method: pm.method || "especes",
                             amount: Number(pm.amount) || 0,
                             numero: pm.numero || "",
                             banque: pm.banque || "",
                             dateEcheance: pm.dateEcheance || "",
+                            date: pm.date ? moment(pm.date).format("YYYY-MM-DD") : moment().format("YYYY-MM-DD"),
                           })
                         )
                         : [
                           {
-                            id: "1",
+                            id: `pm_0_${Date.now()}`,
                             method:
                               (bonCommande as any)?.modeReglement ||
                               "especes",
-                            amount:
-                              Number(bonCommande?.totalAfterRemise) ||
-                              finalTotal,
+                            amount: grandTotal,
                             numero:
                               (bonCommande as any)?.numeroReglement || "",
                             banque: (bonCommande as any)?.banqueCheque || "",
                             dateEcheance:
                               (bonCommande as any)?.dateEcheance || "",
+                            date: moment().format("YYYY-MM-DD"),
                           },
                         ]
                     );
@@ -2118,7 +2202,7 @@ const VenteComptoire = () => {
 
                           // Apply auto-space formatting for phone numbers
                           if (value) {
-                            const formatted = formatPhoneInput(value);
+                            const formatted = formatPhoneSearch(value);
                             setPhoneSearch(formatted);
                           } else {
                             setPhoneSearch("");
@@ -2350,6 +2434,18 @@ const VenteComptoire = () => {
                                       </strong>
                                     </p>
                                   </div>
+                                  {selectedBonCommande.devis && (
+                                    <div className="col-6">
+                                      <p className="mb-2">
+                                        <span className="text-muted d-block">
+                                          Source Devis:
+                                        </span>
+                                        <strong>
+                                          {selectedBonCommande.devis.numeroCommande}
+                                        </strong>
+                                      </p>
+                                    </div>
+                                  )}
                                 </div>
                               </CardBody>
                             </Card>
@@ -2533,7 +2629,8 @@ const VenteComptoire = () => {
                                       <div className="col-md-6"><strong>Montant:</strong> {Number(payment.amount || 0).toFixed(3)} DT</div>
                                       {payment.numero && <div className="col-md-6"><strong>Numéro:</strong> {payment.numero}</div>}
                                       {payment.banque && <div className="col-md-6"><strong>Banque:</strong> {payment.banque}</div>}
-                                      {payment.dateEcheance && <div className="col-md-6"><strong>Date Échéance:</strong> {moment(payment.dateEcheance).format("DD/MM/YYYY")}</div>}
+                                      {payment.date && <div className="col-md-6"><strong>Date:</strong> {moment(payment.date).format("DD/MM/YYYY")}</div>}
+                                      {payment.method === "traite" && payment.dateEcheance && <div className="col-md-6"><strong>Date Échéance:</strong> {moment(payment.dateEcheance).format("DD/MM/YYYY")}</div>}
                                     </div>
                                   </div>
                                 ))}
@@ -2645,13 +2742,44 @@ const VenteComptoire = () => {
                               setRemiseType("fixed");
                               setLockedPercentage(perc);
                             } else {
-                              setGlobalRemise(selectedBonCommande.remise || 0);
+                              setGlobalRemise(Number(selectedBonCommande.remise) || 0);
                               setRemiseType(selectedBonCommande.remiseType || "percentage");
                               setLockedPercentage(null);
                             }
                             setShowRemise(
                               (selectedBonCommande.remise || 0) > 0
                             );
+                            
+                            setPaymentMethods(
+                              selectedBonCommande.paymentMethods &&
+                                selectedBonCommande.paymentMethods.length > 0
+                                ? selectedBonCommande.paymentMethods.map(
+                                  (pm: any, index: number) => ({
+                                    id: pm.id || `pm_${index}_${Date.now()}`,
+                                    method: pm.method || "especes",
+                                    amount: Number(pm.amount) || 0,
+                                    numero: pm.numero || "",
+                                    banque: pm.banque || "",
+                                    dateEcheance: pm.dateEcheance || "",
+                                    date: pm.date ? moment(pm.date).format("YYYY-MM-DD") : moment().format("YYYY-MM-DD"),
+                                  })
+                                )
+                                : [
+                                  {
+                                    id: `pm_0_${Date.now()}`,
+                                    method:
+                                      selectedBonCommande.modeReglement ||
+                                      "especes",
+                                    amount: bcTotalTTC,
+                                    numero:
+                                      selectedBonCommande.numeroReglement || "",
+                                    banque: selectedBonCommande.banqueCheque || "",
+                                    dateEcheance: selectedBonCommande.dateEcheance || "",
+                                    date: moment().format("YYYY-MM-DD"),
+                                  },
+                                ]
+                            );
+
                             setIsEdit(true);
                             setModal(true);
                             setDetailModal(false);
@@ -2659,6 +2787,13 @@ const VenteComptoire = () => {
                           className="btn-invoice btn-invoice-info me-2"
                         >
                           <i className="ri-pencil-line me-2"></i> Modifier
+                        </Button>
+                        <Button
+                          color="primary"
+                          onClick={() => prepareBonLivraisonCreation(selectedBonCommande)}
+                          className="btn-invoice btn-invoice-primary me-2"
+                        >
+                          <i className="ri-truck-line me-2"></i> Créer BL
                         </Button>
                       </>
                     )}
@@ -2687,6 +2822,8 @@ const VenteComptoire = () => {
                           className={
                             isCreatingFacture
                               ? "ri-file-text-line text-primary fs-4"
+                              : isCreatingBonLivraison
+                              ? "ri-truck-line text-primary fs-4"
                               : "ri-shopping-cart-line text-primary fs-4"
                           }
                         ></i>
@@ -2695,6 +2832,8 @@ const VenteComptoire = () => {
                         <h4 className="mb-0 fw-bold text-dark">
                           {isCreatingFacture
                             ? "Créer Facture Client"
+                            : isCreatingBonLivraison
+                            ? "Créer Bon de Livraison"
                             : isEdit
                               ? "Modifier Vente Comptoire"
                               : "Créer Vente Comptoire"}
@@ -2828,7 +2967,7 @@ const VenteComptoire = () => {
                               <Col md={4}>
                                 <div className="mb-3">
                                   <Label className="form-label-lg fw-semibold">
-                                    Numéro Vente*
+                                    {isCreatingFacture ? "Numéro Facture*" : isCreatingBonLivraison ? "Numéro BL*" : "Numéro Vente*"}
                                   </Label>
                                   <Input
                                     name="numeroCommande"
@@ -2954,7 +3093,7 @@ const VenteComptoire = () => {
 
                                         if (digitCount >= totalLength * 0.7) {
                                           // If 70% or more are digits
-                                          const formatted = formatPhoneInput(value);
+                                          const formatted = formatPhoneSearch(value);
                                           setClientSearch(formatted);
                                         } else {
                                           setClientSearch(value);
@@ -3002,7 +3141,7 @@ const VenteComptoire = () => {
                                 {/* Enhanced Client Dropdown Results - ABSOLUTELY POSITIONED */}
                                 {!isCreatingFacture &&
                                   !selectedClient &&
-                                  clientSearch.length >= 3 && (
+                                  clientSearch.length >= 1 && (
                                     <div
                                       className="search-results client-results mt-1"
                                       style={{
@@ -3278,7 +3417,7 @@ const VenteComptoire = () => {
                               </button>
                             </div>
 
-                            {articleSearch.length >= 3 && (
+                            {articleSearch.length >= 1 && (
                               <div
                                 ref={setDropdownRef}
                                 className="search-results mt-2 border rounded shadow-sm"
@@ -3951,8 +4090,8 @@ const VenteComptoire = () => {
                                           <tr className={`real-time-update ${discountPercentage > 10 ? "table-danger" : "table-success"}`}>
                                             <th className={`text-end fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                               {remiseType === "percentage"
-                                                ? `Remise (Global) ${Number(globalRemise).toFixed(8)}%`
-                                                : `Remise (Montant fixe) ${discountPercentage.toFixed(8)}%`}
+                                                ? `Remise (Global) ${Number(globalRemise).toFixed(2)}%`
+                                                : `Remise (Montant fixe) ${discountPercentage.toFixed(2)}%`}
                                             </th>
                                             <td className={`text-end fw-bold fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                               - {discountAmount.toFixed(3)} DT
@@ -4145,6 +4284,28 @@ const VenteComptoire = () => {
                                   </Col>
                                 )}
 
+                                {/* Date - For all payment methods */}
+                                <Col md={paymentMethods.length === 1 ? 6 : 3}>
+                                  <Label className="form-label fw-semibold">
+                                    Date
+                                  </Label>
+                                  <Input
+                                    type="date"
+                                    value={
+                                      payment.date ||
+                                      moment().format("YYYY-MM-DD")
+                                    }
+                                    onChange={(e) =>
+                                      updatePaymentMethod(
+                                        payment.id,
+                                        "date",
+                                        e.target.value
+                                      )
+                                    }
+                                    className="form-control"
+                                  />
+                                </Col>
+
                                 {/* Date Échéance - Only for traite */}
                                 {payment.method === "traite" && (
                                   <Col md={paymentMethods.length === 1 ? 6 : 3}>
@@ -4154,8 +4315,7 @@ const VenteComptoire = () => {
                                     <Input
                                       type="date"
                                       value={
-                                        payment.dateEcheance ||
-                                        moment().format("YYYY-MM-DD")
+                                        payment.dateEcheance || ""
                                       }
                                       onChange={(e) =>
                                         updatePaymentMethod(
@@ -4168,6 +4328,7 @@ const VenteComptoire = () => {
                                     />
                                   </Col>
                                 )}
+
                               </Row>
 
                               {/* Auto-set amount to finalTotal when only one payment method */}
@@ -4472,27 +4633,12 @@ const VenteComptoire = () => {
                           <Label className="form-label fw-semibold">
                             Téléphone 1
                           </Label>
-                          <Input
+                          <PhoneInput
                             value={newClient.telephone1}
-                            onChange={(e) => {
-                              const value = e.target.value;
-
-                              // Apply auto-space formatting for phone numbers
-                              if (value) {
-                                const formatted = formatPhoneInput(value);
-                                setNewClient({
-                                  ...newClient,
-                                  telephone1: formatted,
-                                });
-                              } else {
-                                setNewClient({
-                                  ...newClient,
-                                  telephone1: value,
-                                });
-                              }
-                            }}
-                            placeholder="22 222 222"
-                            className="form-control-lg"
+                            onChange={(telephone1) =>
+                              setNewClient({ ...newClient, telephone1 })
+                            }
+                            bsSize="lg"
                           />
                         </div>
                       </Col>
@@ -4501,27 +4647,12 @@ const VenteComptoire = () => {
                           <Label className="form-label fw-semibold">
                             Téléphone 2
                           </Label>
-                          <Input
+                          <PhoneInput
                             value={newClient.telephone2}
-                            onChange={(e) => {
-                              const value = e.target.value;
-
-                              // Apply auto-space formatting for phone numbers
-                              if (value) {
-                                const formatted = formatPhoneInput(value);
-                                setNewClient({
-                                  ...newClient,
-                                  telephone2: formatted,
-                                });
-                              } else {
-                                setNewClient({
-                                  ...newClient,
-                                  telephone2: value,
-                                });
-                              }
-                            }}
-                            placeholder="22 222 222"
-                            className="form-control-lg"
+                            onChange={(telephone2) =>
+                              setNewClient({ ...newClient, telephone2 })
+                            }
+                            bsSize="lg"
                           />
                         </div>
                       </Col>
@@ -4693,13 +4824,11 @@ const VenteComptoire = () => {
                                   <option value="">
                                     Sélectionner une famille principale
                                   </option>
-                                  {categories
-                                    .filter((c) => !c.parent_id)
-                                    .map((c) => (
-                                      <option key={c.id} value={c.id}>
-                                        {c.nom}
-                                      </option>
-                                    ))}
+                                  {familleOptions.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
+                                    </option>
+                                  ))}
                                 </Input>
                                 <small className="text-muted">
                                   Catégorie principale
@@ -4726,9 +4855,9 @@ const VenteComptoire = () => {
                                   <option value="">
                                     Sélectionner une sous-famille
                                   </option>
-                                  {subcategories.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      {s.nom}
+                                  {sousFamilleOptions.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
                                     </option>
                                   ))}
                                 </Input>
@@ -4757,7 +4886,7 @@ const VenteComptoire = () => {
                                   <div className="position-relative">
                                     <Input
                                       type="text"
-                                      placeholder="Rechercher un fournisseur (3 caractères min)..."
+                                      placeholder="Rechercher un fournisseur..."
                                       value={fournisseurSearch}
                                       onChange={(e) => setFournisseurSearch(e.target.value)}
                                       className="form-control-lg pe-10"
@@ -4787,7 +4916,7 @@ const VenteComptoire = () => {
                                     )}
 
                                     {/* Enhanced Fournisseur Dropdown Results */}
-                                    {!newArticle.fournisseur_id && fournisseurSearch.length >= 3 && (
+                                    {!newArticle.fournisseur_id && fournisseurSearch.length >= 1 && (
                                       <div
                                         className="search-results fournisseur-results mt-1"
                                         style={{
@@ -5156,7 +5285,7 @@ const VenteComptoire = () => {
                     }
 
                     // Refresh clients list
-                    loadClients(clientSearch, 1, 20);
+                    loadClients(clientSearch, 1, 500);
                   }}
                 />
 

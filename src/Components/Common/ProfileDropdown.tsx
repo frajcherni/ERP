@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
+import { Link } from 'react-router-dom';
 import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle } from 'reactstrap';
 
 //import images
@@ -73,7 +74,7 @@ const ProfileDropdown = () => {
                                 className="align-middle">Settings</span></DropdownItem>
                     <DropdownItem href={process.env.PUBLIC_URL + "/auth-lockscreen-basic"}><i
                         className="mdi mdi-lock text-muted fs-16 align-middle me-1"></i> <span className="align-middle">Lock screen</span></DropdownItem>
-                    <DropdownItem href={process.env.PUBLIC_URL + "/logout"}><i
+                    <DropdownItem tag={Link} to="/logout"><i
                         className="mdi mdi-logout text-muted fs-16 align-middle me-1"></i> <span
                             className="align-middle" data-key="t-logout">Logout</span></DropdownItem>
                 </DropdownMenu>

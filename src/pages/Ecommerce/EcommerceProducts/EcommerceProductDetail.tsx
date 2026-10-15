@@ -111,7 +111,7 @@ const PricingWidgetList = (props:any) => {
 };
 
 function EcommerceProductDetail(props:any) {
-  document.title="Product Details | Velzon - React Admin & Dashboard Template";
+  document.title="Product Details | Royal Lumiere";
 
   const [thumbsSwiper, setThumbsSwiper] = useState<any>(null);
   const [ttop, setttop] = useState<boolean>(false);

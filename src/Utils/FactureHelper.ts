@@ -7,6 +7,7 @@ export const calculateFactureTotals = (facture: any) => {
       totalTax: 0,
       totalTTC: 0,
       netAPayer: 0,
+      retentionMontant: 0,
       timbre: 0
     };
   }
@@ -26,6 +27,7 @@ export const calculateFactureTotals = (facture: any) => {
     totalTax: totals.totalTax,
     totalTTC: totals.finalTotal,
     netAPayer: totals.netAPayer,
+    retentionMontant: totals.retentionMontant,
     timbre: totals.timbreFiscal ? 1 : 0
   };
 };

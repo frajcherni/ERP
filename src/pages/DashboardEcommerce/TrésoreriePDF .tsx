@@ -410,7 +410,7 @@ const TrésoreriePDF: React.FC<any> = ({ data, companyInfo, dateRange }) => {
         const label = getPaymentLabel(pm, docNumber);
         
         // Use payment-specific date if it exists, otherwise fallback to transaction date
-        const rowDate = pm.dateEcheance || transactionDate;
+        const rowDate = pm.date || transactionDate;
 
         processedRows.push({
           id: `${transaction.id}_${idx}`,

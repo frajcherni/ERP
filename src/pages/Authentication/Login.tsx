@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Card, CardBody, Col, Container, Input, Label, Row, Button, Form, FormFeedback, Alert, Spinner } from 'reactstrap';
+import { Card, CardBody, Col, Container, Input, InputGroup, InputGroupText, Label, Row, Button, Form, FormFeedback, Alert, Spinner } from 'reactstrap';
 import ParticlesAuth from "../AuthenticationInner/ParticlesAuth";
 
 //redux
@@ -15,7 +15,7 @@ import { useFormik } from "formik";
 // actions
 import { loginUser, socialLogin, resetLoginFlag } from "../../slices/thunks";
 
-import logoLight from "../../assets/images/logo-light.png";
+import companyLogo from "../../assets/images/imglogo.png";
 import { createSelector } from 'reselect';
 //import images
 
@@ -90,7 +90,7 @@ const Login = (props: any) => {
         }
     }, [dispatch, errorMsg]);
 
-    document.title = "Basic SignIn | Velzon - React Admin & Dashboard Template";
+    document.title = "Basic SignIn | Royal Lumiere";
     return (
         <React.Fragment>
             <ParticlesAuth>
@@ -98,10 +98,12 @@ const Login = (props: any) => {
                     <Container>
                         <Row>
                             <Col lg={12}>
-                                <div className="text-center mt-sm-5 mb-4 text-white-50">
+                                <div className="text-center mt-sm-5 mb-4">
                                     <div>
                                         <Link to="/" className="d-inline-block auth-logo">
-                                            <img src={logoLight} alt="" height="70" />
+                                            <div className="rounded-4 shadow-lg d-inline-flex align-items-center justify-content-center p-3 px-4">
+                                                <img src={companyLogo} alt="Royal Lumiere" height="90" />
+                                            </div>
                                         </Link>
                                     </div>
                                 </div>
@@ -110,14 +112,15 @@ const Login = (props: any) => {
 
                         <Row className="justify-content-center">
                             <Col md={8} lg={6} xl={5}>
-                                <Card className="mt-4">
-                                    <CardBody className="p-4">
-                                        <div className="text-center mt-2">
-                                            <h5 className="text-primary">Bonjour !</h5>
-                                            <p className="text-muted">Royal Lumiere.</p>
+                                <Card className="mt-4 border-0 rounded-4 shadow-lg overflow-hidden">
+                                    <div style={{ height: 6, background: "linear-gradient(to right, var(--vz-primary), var(--vz-success))" }}></div>
+                                    <CardBody className="p-4 p-sm-5">
+                                        <div className="text-center mb-4">
+                                            <h4 className="text-primary fw-semibold">Bienvenue</h4>
+                                            <p className="text-muted mb-0">Connectez-vous pour accéder à votre espace Royal Lumiere</p>
                                         </div>
-                                        {error && error ? (<Alert color="danger"> {error} </Alert>) : null}
-                                        <div className="p-2 mt-4">
+                                        {error && error ? (<Alert color="danger" className="text-center"> {error} </Alert>) : null}
+                                        <div className="mt-4">
                                             <Form
                                                 onSubmit={(e) => {
                                                     e.preventDefault();
@@ -126,64 +129,67 @@ const Login = (props: any) => {
                                                 }}
                                                 action="#">
 
-<div className="mb-3">
-    <Label htmlFor="username" className="form-label">Username</Label>
-    <Input
-        name="username"
-        className="form-control"
-        placeholder="Enter username"
-        onChange={validation.handleChange}
-        onBlur={validation.handleBlur}
-        value={validation.values.username || ""}
-    />
-</div>
-
+                                                <div className="mb-3">
+                                                    <Label htmlFor="username" className="form-label">Nom d'utilisateur</Label>
+                                                    <InputGroup>
+                                                        <InputGroupText className="bg-light border-end-0"><i className="ri-user-3-line text-muted"></i></InputGroupText>
+                                                        <Input
+                                                            name="username"
+                                                            className="form-control border-start-0"
+                                                            placeholder="Entrez votre nom d'utilisateur"
+                                                            onChange={validation.handleChange}
+                                                            onBlur={validation.handleBlur}
+                                                            value={validation.values.username || ""}
+                                                        />
+                                                    </InputGroup>
+                                                </div>
 
                                                 <div className="mb-3">
                                                     <div className="float-end">
-                                                        <Link to="/forgot-password" className="text-muted">Forgot password?</Link>
+                                                        <Link to="/forgot-password" className="text-muted">Mot de passe oublié ?</Link>
                                                     </div>
-                                                    <Label className="form-label" htmlFor="password-input">Password</Label>
-                                                    <div className="position-relative auth-pass-inputgroup mb-3">
+                                                    <Label className="form-label" htmlFor="password-input">Mot de passe</Label>
+                                                    <InputGroup className="auth-pass-inputgroup">
+                                                        <InputGroupText className="bg-light border-end-0"><i className="ri-lock-2-line text-muted"></i></InputGroupText>
                                                         <Input
                                                             name="password"
                                                             value={validation.values.password || ""}
                                                             type={passwordShow ? "text" : "password"}
-                                                            className="form-control pe-5"
-                                                            placeholder="Enter Password"
+                                                            className="form-control border-start-0 border-end-0"
+                                                            placeholder="Entrez votre mot de passe"
                                                             onChange={validation.handleChange}
                                                             onBlur={validation.handleBlur}
                                                             invalid={
                                                                 validation.touched.password && validation.errors.password ? true : false
                                                             }
                                                         />
+                                                        <InputGroupText className="bg-light border-start-0" style={{ cursor: "pointer" }} onClick={() => setPasswordShow(!passwordShow)}>
+                                                            <i className={`${passwordShow ? "ri-eye-off-line" : "ri-eye-line"} text-muted`}></i>
+                                                        </InputGroupText>
                                                         {validation.touched.password && validation.errors.password ? (
                                                             <FormFeedback type="invalid">{validation.errors.password}</FormFeedback>
                                                         ) : null}
-                                                        <button className="btn btn-link position-absolute end-0 top-0 text-decoration-none text-muted" type="button" id="password-addon" onClick={() => setPasswordShow(!passwordShow)}><i className="ri-eye-fill align-middle"></i></button>
-                                                    </div>
+                                                    </InputGroup>
                                                 </div>
 
-                                                <div className="form-check">
+                                                <div className="form-check mb-3">
                                                     <Input className="form-check-input" type="checkbox" value="" id="auth-remember-check" />
-                                                    <Label className="form-check-label" htmlFor="auth-remember-check">Remember me</Label>
+                                                    <Label className="form-check-label" htmlFor="auth-remember-check">Se souvenir de moi</Label>
                                                 </div>
 
                                                 <div className="mt-4">
-                                                    <Button color="success"
+                                                    <Button color="primary"
                                                         disabled={loader && true}
-                                                        className="btn btn-success w-100" type="submit">
+                                                        className="w-100 rounded-pill shadow-sm py-2 fw-semibold" type="submit">
                                                         {loader && <Spinner size="sm" className='me-2'> Loading... </Spinner>}
-                                                        Sign In
+                                                        Se connecter
                                                     </Button>
                                                 </div>
 
-                                                
                                             </Form>
                                         </div>
                                     </CardBody>
                                 </Card>
-
 
                             </Col>
                         </Row>

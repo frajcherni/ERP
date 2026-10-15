@@ -408,7 +408,7 @@ const BonLivraisonNonValorisePDF: React.FC<BonLivraisonPDFProps> = ({
               <>
                 {bonLivraison.client.raison_sociale && wrapClientText(bonLivraison.client.raison_sociale, 35).map((line, idx) => (<Text key={`rs-${idx}`} style={styles.clientLineItem}>{line}</Text>))}
                 {bonLivraison.client.matricule_fiscal && (<Text style={styles.clientLineItem}>MF: {bonLivraison.client.matricule_fiscal}</Text>)}
-                {bonLivraison.client.adresse && wrapClientText(bonLivraison.client.adresse, 35).map((line, idx) => (<Text key={`adr-${idx}`} style={styles.clientLineItem}>{line}</Text>))}
+                {[bonLivraison.client.adresse, bonLivraison.client.ville].filter(Boolean).join(" - ") && wrapClientText([bonLivraison.client.adresse, bonLivraison.client.ville].filter(Boolean).join(" - "), 35).map((line, idx) => (<Text key={`adr-${idx}`} style={styles.clientLineItem}>{line}</Text>))}
                 {bonLivraison.client.telephone1 && (<Text style={styles.clientLineItem}>Tél: {bonLivraison.client.telephone1}</Text>)}
                 {bonLivraison.client.telephone2 && (<Text style={styles.clientLineItem}>Tél: {bonLivraison.client.telephone2}</Text>)}
               </>
@@ -459,14 +459,14 @@ const BonLivraisonNonValorisePDF: React.FC<BonLivraisonPDFProps> = ({
     <>
       {renderSummarySection(205, floated)}
       <View style={styles.cachetSignatureSection}>
-        <View style={styles.signatureContainer}>
-          <Text style={styles.signatureText}>Signature & Cachet</Text>
-          <Text style={styles.subText}>Du Responsable</Text>
-        </View>
         <View style={styles.cachetContainer}>
           <Text style={styles.cachetText}>Le Client</Text>
           <Text style={styles.subText}>Reçu conforme</Text>
           <Text style={styles.subText}>Signature & Cachet</Text>
+        </View>
+        <View style={styles.signatureContainer}>
+          <Text style={styles.signatureText}>Signature & Cachet</Text>
+          <Text style={styles.subText}>Du Responsable</Text>
         </View>
       </View>
     </>

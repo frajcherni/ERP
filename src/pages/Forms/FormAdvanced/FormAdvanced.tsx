@@ -45,7 +45,7 @@ const FormAdvanced = () => {
     id(prev_data_attr - 1);
   }
 
-  document.title = "Form Advanced | Velzon - React Admin & Dashboard Template";
+  document.title = "Form Advanced | Royal Lumiere";
 
 
   const [seletedCountry, setseletedCountry] = useState<any>('');

@@ -45,6 +45,7 @@ import {
   fetchCategories,
   fetchFournisseurs,
   searchArticles,
+  fetchArticleById,
 } from "../../../Components/Article/ArticleServices";
 
 import {
@@ -52,6 +53,16 @@ import {
   Fournisseur,
   Article,
 } from "../../../Components/Article/Interfaces";
+import {
+  buildRootCategoryOptions,
+  buildSubcategoryOptions,
+  getRootCategoryId,
+} from "../../../Components/Article/CategoryTree";
+
+// Module-level cache for the article-form dropdown metadata (categories + fournisseurs).
+// These barely change but are fetched unpaginated, so caching makes the edit-modal
+// dropdowns appear instantly on every visit after the first (refreshed in background).
+let metadataCache: { categories: Categorie[]; fournisseurs: Fournisseur[] } | null = null;
 
 const ArticlesList = () => {
   const [modal, setModal] = useState(false);
@@ -69,6 +80,8 @@ const ArticlesList = () => {
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [isExportCSV, setIsExportCSV] = useState(false);
   const [searchText, setSearchText] = useState("");
+  const [referenceSearch, setReferenceSearch] = useState("");
+  const [debouncedReferenceSearch, setDebouncedReferenceSearch] = useState("");
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [currentPage, setCurrentPage] = useState(0);
@@ -77,7 +90,11 @@ const ArticlesList = () => {
   const [pageSize, setPageSize] = useState(10);
   const [debouncedSearchText, setDebouncedSearchText] = useState("");
   const [detailsModal, setDetailsModal] = useState(false);
-  const [subcategories, setSubcategories] = useState<Categorie[]>([]);
+  const [stocksParDepot, setStocksParDepot] = useState<
+    Array<{ depot_id: number; depot_nom: string; qte: number }>
+  >([]);
+  const [detailMagazinQte, setDetailMagazinQte] = useState<number | null>(null);
+  const [loadingDetailStock, setLoadingDetailStock] = useState(false);
   const [printModal, setPrintModal] = useState(false); // NOUVEAU: Modal pour l'impression
   const [barcodeSize, setBarcodeSize] = useState<"small" | "large">("small"); // NOUVEAU: Taille du code-barre
   const API_BASE = process.env.REACT_APP_API_BASE;
@@ -159,7 +176,8 @@ const ArticlesList = () => {
           break;
         }
         case 'puv_ht': {
-          const ttc = calculateTTCFromHT(numericValue, tva, hasFodec);
+          // FODEC applies to achat only, never to vente
+          const ttc = calculateTTCFromHT(numericValue, tva, false);
           validation.setFieldValue("puv_ttc", ttc);
           setPriceInputs(prev => ({
             ...prev,
@@ -177,7 +195,8 @@ const ArticlesList = () => {
           break;
         }
         case 'puv_ttc': {
-          const ht = calculateHTFromTTC(numericValue, tva, hasFodec);
+          // FODEC applies to achat only, never to vente
+          const ht = calculateHTFromTTC(numericValue, tva, false);
           validation.setFieldValue("puv_ht", ht);
           setPriceInputs(prev => ({
             ...prev,
@@ -205,7 +224,8 @@ const ArticlesList = () => {
       }
 
       if (validation.values.puv_ht) {
-        const ttc = calculateTTCFromHT(validation.values.puv_ht, numericValue, hasFodec);
+        // FODEC applies to achat only, never to vente
+        const ttc = calculateTTCFromHT(validation.values.puv_ht, numericValue, false);
         validation.setFieldValue("puv_ttc", ttc);
         setPriceInputs(prev => ({ ...prev, puv_ttc: formatPriceInput(ttc) }));
       }
@@ -292,7 +312,8 @@ const ArticlesList = () => {
       }
 
       if (validation.values.puv_ht) {
-        const ttc = calculateTTCFromHT(validation.values.puv_ht, tva, checked);
+        // FODEC applies to achat only, never to vente
+        const ttc = calculateTTCFromHT(validation.values.puv_ht, tva, false);
         validation.setFieldValue("puv_ttc", ttc);
         setPriceInputs(prev => ({ ...prev, puv_ttc: formatPriceInput(ttc) }));
       }
@@ -413,7 +434,8 @@ const ArticlesList = () => {
         }
         case 'puv_ht': {
           const ht = parseNumber(newValue);
-          const ttc = calculateTTCFromHT(ht, tva, hasFodec);
+          // FODEC applies to achat only, never to vente
+          const ttc = calculateTTCFromHT(ht, tva, false);
           if (!validation.touched.puv_ttc) {
             validation.setFieldValue("puv_ttc", formatNumber(ttc));
           }
@@ -421,7 +443,8 @@ const ArticlesList = () => {
         }
         case 'puv_ttc': {
           const ttc = parseNumber(newValue);
-          const ht = calculateHTFromTTC(ttc, tva, hasFodec);
+          // FODEC applies to achat only, never to vente
+          const ht = calculateHTFromTTC(ttc, tva, false);
           if (!validation.touched.puv_ht) {
             validation.setFieldValue("puv_ht", formatNumber(ht));
           }
@@ -449,7 +472,8 @@ const ArticlesList = () => {
 
       if (validation.values.puv_ht && !validation.touched.puv_ttc) {
         const ht = parseNumber(validation.values.puv_ht);
-        const ttc = calculateTTCFromHT(ht, newTva, hasFodec);
+        // FODEC applies to achat only, never to vente
+        const ttc = calculateTTCFromHT(ht, newTva, false);
         validation.setFieldValue("puv_ttc", formatNumber(ttc));
       }
     }, 10);
@@ -516,6 +540,7 @@ const ArticlesList = () => {
         await Promise.all([
           searchArticles({
             query: debouncedSearchText,
+            reference: debouncedReferenceSearch,
             page: currentPage + 1,
             limit: pageSize,
             type: typeMap[activeTab],
@@ -528,6 +553,8 @@ const ArticlesList = () => {
 
       const formattedArticles = articlesResponse.articles.map((a: any) => ({
         ...a,
+        qte_magazin: Number(a.qte_magazin ?? 0),
+        qte: Number(a.qte_magazin ?? a.qte ?? 0),
         type:
           a.type?.toLowerCase() === "consigné" ? "Consigné" : "Non Consigné",
         createdAt: a.createdAt || new Date().toISOString(),
@@ -560,20 +587,31 @@ const ArticlesList = () => {
       );
       setLoading(false);
     }
-  }, [debouncedSearchText, currentPage, pageSize, activeTab, startDate, endDate]);
+  }, [debouncedSearchText, debouncedReferenceSearch, currentPage, pageSize, activeTab, startDate, endDate]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // Fetch categories and fournisseurs only once on mount
+  // Fetch categories and fournisseurs for the form dropdowns.
+  // Show cached data immediately (instant dropdowns on revisits), then
+  // revalidate in the background so the lists stay fresh.
   useEffect(() => {
+    let cancelled = false;
+
+    if (metadataCache) {
+      setCategories(metadataCache.categories);
+      setFournisseurs(metadataCache.fournisseurs);
+    }
+
     const fetchMetadata = async () => {
       try {
         const [categoriesData, fournisseursData] = await Promise.all([
           fetchCategories(),
           fetchFournisseurs(),
         ]);
+        if (cancelled) return;
+        metadataCache = { categories: categoriesData, fournisseurs: fournisseursData };
         setCategories(categoriesData);
         setFournisseurs(fournisseursData);
       } catch (err) {
@@ -581,6 +619,10 @@ const ArticlesList = () => {
       }
     };
     fetchMetadata();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
 
@@ -608,7 +650,7 @@ const ArticlesList = () => {
   // Reset page when search or tab changes
   useEffect(() => {
     setCurrentPage(0);
-  }, [debouncedSearchText, activeTab]);
+  }, [debouncedSearchText, debouncedReferenceSearch, activeTab]);
 
   // Debounce search text
   useEffect(() => {
@@ -617,6 +659,13 @@ const ArticlesList = () => {
     }, 500);
     return () => clearTimeout(timer);
   }, [searchText]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedReferenceSearch(referenceSearch);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [referenceSearch]);
 
   // Delete article
   const handleDelete = async () => {
@@ -684,16 +733,32 @@ const ArticlesList = () => {
     }
   };
 
+  // Les deux listes suivent l'arborescence de la liste des catégories : la
+  // famille est une racine, la sous-famille n'importe laquelle de ses
+  // descendantes, indentée selon sa profondeur.
+  const familleOptions = useMemo(
+    () => buildRootCategoryOptions(categories),
+    [categories]
+  );
+
+  // La famille principale d'un article : celle enregistrée, sinon la racine de
+  // sa sous-catégorie, qui peut vivre à plusieurs niveaux de profondeur.
+  const familleIdOf = useCallback(
+    (a: Article | null | undefined) => {
+      if (a?.categorie?.id) return String(a.categorie.id);
+      if (!a?.sousCategorie?.id) return "";
+      const root = getRootCategoryId(categories, a.sousCategorie.id);
+      return String(root ?? a.sousCategorie.parent_id ?? "");
+    },
+    [categories]
+  );
+
   const validation = useFormik({
     enableReinitialize: true, // This should be true to reinitialize when article changes
     initialValues: {
       reference: article?.reference || "",
       designation: article?.designation || "",
-      categorie_id: article?.categorie?.id
-        ? String(article.categorie.id)
-        : article?.sousCategorie?.parent_id
-          ? String(article.sousCategorie.parent_id)
-          : "",
+      categorie_id: familleIdOf(article),
       sous_categorie_id: article?.sousCategorie?.id
         ? String(article.sousCategorie.id)
         : "",
@@ -776,11 +841,7 @@ const ArticlesList = () => {
         validation.setValues({
           reference: article.reference || "",
           designation: article.designation || "",
-          categorie_id: article.categorie?.id
-            ? String(article.categorie.id)
-            : article.sousCategorie?.parent_id
-              ? String(article.sousCategorie.parent_id)
-              : "",
+          categorie_id: familleIdOf(article),
           sous_categorie_id: article.sousCategorie?.id
             ? String(article.sousCategorie.id)
             : "",
@@ -1840,10 +1901,10 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
         enableColumnFilter: false,
       },
       {
-        header: "Quantité",
+        header: "Qté magazin",
         accessorKey: "qte",
         enableColumnFilter: false,
-        cell: (cell: any) => cell.getValue() || 0,
+        cell: (cell: any) => cell.getValue() ?? 0,
       },
       {
         header: "Prix d'achat (TTC)",
@@ -1903,8 +1964,13 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                   to="#"
                   className="text-info d-inline-block"
                   onClick={() => {
-                    setArticle(cellProps.row.original);
+                    const art = cellProps.row.original;
+                    setArticle(art);
+                    setDetailMagazinQte(
+                      art.qte_magazin != null ? Number(art.qte_magazin) : Number(art.qte ?? 0)
+                    );
                     setDetailsModal(true);
+                    loadArticleDetailStock(art.id);
                   }}
                 >
                   <i className="ri-eye-fill fs-16"></i>
@@ -1971,28 +2037,47 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
     }
   }, [modal]);
 
+  const loadArticleDetailStock = useCallback(async (articleId: number) => {
+    try {
+      setLoadingDetailStock(true);
+      const full = await fetchArticleById(articleId);
+      setStocksParDepot(full.stocks_par_depot || []);
+      setDetailMagazinQte(
+        full.qte_magazin != null ? Number(full.qte_magazin) : Number(full.qte ?? 0)
+      );
+    } catch {
+      setStocksParDepot([]);
+      setDetailMagazinQte(null);
+    } finally {
+      setLoadingDetailStock(false);
+    }
+  }, []);
+
   const toggleDetailsModal = useCallback(() => {
     setDetailsModal(!detailsModal);
+    if (detailsModal) {
+      setStocksParDepot([]);
+      setDetailMagazinQte(null);
+    }
   }, [detailsModal]);
 
+  const sousFamilleOptions = useMemo(
+    () => buildSubcategoryOptions(categories, validation.values.categorie_id),
+    [categories, validation.values.categorie_id]
+  );
+
+  // Une sous-famille qui ne vit plus sous la famille choisie n'a plus de sens.
+  // Tant que les catégories ne sont pas chargées on ne conclut rien, sinon on
+  // effacerait le choix de l'article qu'on vient d'ouvrir.
   useEffect(() => {
-    if (validation.values.categorie_id) {
-      const categoryId = parseInt(validation.values.categorie_id.toString());
-      const subs = categories.filter((cat) => cat.parent_id === categoryId);
-      setSubcategories(subs);
-
-      const currentSubId = validation.values.sous_categorie_id
-        ? parseInt(validation.values.sous_categorie_id.toString())
-        : null;
-
-      if (!subs.find((sub) => sub.id === currentSubId)) {
-        validation.setFieldValue("sous_categorie_id", "");
-      }
-    } else {
-      setSubcategories([]);
+    if (!categories.length) return;
+    const current = validation.values.sous_categorie_id;
+    if (!current) return;
+    if (!sousFamilleOptions.some((o) => String(o.id) === String(current))) {
       validation.setFieldValue("sous_categorie_id", "");
     }
-  }, [validation.values.categorie_id, categories]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sousFamilleOptions, categories.length]);
 
   return (
     <div className="page-content">
@@ -2094,12 +2179,24 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                   </Nav>
 
                   <Row className="mt-3 mb-3">
-                    <Col md={4}>
+                    <Col md={3}>
                       <div className="search-box">
                         <Input
                           type="text"
                           className="form-control"
-                          placeholder="Rechercher..."
+                          placeholder="Référence article..."
+                          value={referenceSearch}
+                          onChange={(e) => setReferenceSearch(e.target.value)}
+                        />
+                        <i className="ri-barcode-line search-icon"></i>
+                      </div>
+                    </Col>
+                    <Col md={3}>
+                      <div className="search-box">
+                        <Input
+                          type="text"
+                          className="form-control"
+                          placeholder="Désignation, fournisseur..."
                           value={searchText}
                           onChange={(e) => setSearchText(e.target.value)}
                         />
@@ -2164,7 +2261,10 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                       totalDataCount={totalArticles}
                       currentPage={currentPage}
                       onPageChange={(page: number) => setCurrentPage(page)}
-                      onPageSizeChange={(size: number) => setPageSize(size)}
+                      onPageSizeChange={(size: number) => {
+                        setPageSize(size);
+                        setCurrentPage(0);
+                      }}
                       customPageSize={pageSize}
                       divClass="table-responsive table-card mb-1 mt-0"
                       tableClass="align-middle table-nowrap"
@@ -2270,10 +2370,10 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                                     <i className="ri-store-2-line text-primary me-2 fs-5"></i>
                                     <div>
                                       <small className="text-muted d-block">
-                                        Stock
+                                        Stock magazin
                                       </small>
                                       <strong className="text-dark">
-                                        {article.qte} unités
+                                        {detailMagazinQte ?? article.qte ?? 0} unités
                                       </strong>
                                     </div>
                                   </div>
@@ -2282,6 +2382,34 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                             </div>
                           </Col>
                         </Row>
+
+                        <Card className="border-0 shadow-sm mb-4">
+                          <CardBody className="p-4">
+                            <h6 className="fw-semibold mb-3 text-primary">
+                              <i className="ri-building-2-line me-2"></i>
+                              Stock par dépôt
+                            </h6>
+                            {loadingDetailStock ? (
+                              <p className="text-muted mb-0">Chargement...</p>
+                            ) : stocksParDepot.length === 0 ? (
+                              <p className="text-muted mb-0">Aucun dépôt configuré</p>
+                            ) : (
+                              <ul className="list-unstyled mb-0">
+                                {stocksParDepot.map((row) => (
+                                  <li
+                                    key={row.depot_id}
+                                    className="d-flex justify-content-between align-items-center py-2 border-bottom"
+                                  >
+                                    <span className="fw-medium">{row.depot_nom}</span>
+                                    <Badge color="light" className="text-dark">
+                                      {row.qte} unités
+                                    </Badge>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </CardBody>
+                        </Card>
 
                         {/* Section Code-barres - MODIFIÉE */}
 
@@ -2593,70 +2721,75 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                               </Button>
                             </div>
                           </div>
+                {/* Modal d'ajout/modification (inchangé) */}
 
                           <div className="col-md-6">
-                            {/* Aperçu */}
-                            <Card className="border mb-3">
-                              <CardBody className="p-3">
-                                <Row className="g-2">
-                                  <Col xs={6}>
-                                    <div className="text-muted small">Référence</div>
-                                    <div className="fw-semibold">{article.reference}</div>
-                                  </Col>
-                                  <Col xs={6}>
-                                    <div className="text-muted small">Prix TTC</div>
-                                    <div className="fw-semibold text-success">
-                                      {Number(article.puv_ttc || 0).toFixed(3)} TND
-                                    </div>
-                                  </Col>
-                                  <Col xs={12}>
-                                    <div className="text-muted small mt-2">Désignation</div>
-                                    <div className="fw-semibold">
-                                      {article.designation}
-                                    </div>
-                                  </Col>
-                                  <Col xs={12}>
-                                    <div className="text-muted small mt-2">Code Fournisseur</div>
-                                    <div className="d-flex align-items-center gap-2 mt-1">
-                                      <Input
-                                        type="text"
-                                        value={fournisseurCodeOverride}
-                                        onChange={(e) =>
-                                          setFournisseurCodeOverride(e.target.value.toUpperCase())
-                                        }
-                                        placeholder="ex: ROY"
-                                        className="fw-semibold text-info"
-                                        style={{ width: "120px", textTransform: "uppercase" }}
-                                      />
-                                      {article.fournisseur?.raison_sociale && (
-                                        <small className="text-muted">
-                                          (défaut : {getFirstThreeLetters(article.fournisseur.raison_sociale)} — de {article.fournisseur.raison_sociale})
-                                        </small>
-                                      )}
-                                    </div>
-                                  </Col>
-                                </Row>
-                              </CardBody>
-                            </Card>
+  {/* Aperçu */}
+  {/*
+<div className="col-md-6">
+  <Card className="border mb-3">
+    <CardBody className="p-3">
+      <Row className="g-2">
+        <Col xs={6}>
+          <div className="text-muted small">Référence</div>
+          <div className="fw-semibold">{article.reference}</div>
+        </Col>
+        <Col xs={6}>
+          <div className="text-muted small">Prix TTC</div>
+          <div className="fw-semibold text-success">
+            {Number(article.puv_ttc || 0).toFixed(3)} TND
+          </div>
+        </Col>
+        <Col xs={12}>
+          <div className="text-muted small mt-2">Désignation</div>
+          <div className="fw-semibold">
+            {article.designation}
+          </div>
+        </Col>
+        <Col xs={12}>
+          <div className="text-muted small mt-2">Code Fournisseur</div>
+          <div className="d-flex align-items-center gap-2 mt-1">
+            <Input
+              type="text"
+              value={fournisseurCodeOverride}
+              onChange={(e) =>
+                setFournisseurCodeOverride(e.target.value.toUpperCase())
+              }
+              placeholder="ex: ROY"
+              className="fw-semibold text-info"
+              style={{ width: "120px", textTransform: "uppercase" }}
+            />
+            {article.fournisseur?.raison_sociale && (
+              <small className="text-muted">
+                (défaut : {getFirstThreeLetters(article.fournisseur.raison_sociale)} — de {article.fournisseur.raison_sociale})
+              </small>
+            )}
+          </div>
+        </Col>
+      </Row>
+    </CardBody>
+  </Card>
 
-                            <div className="alert alert-info mb-0 py-2 small">
-                              <i className="ri-information-line me-2"></i>
-                              Chaque format peut être imprimé avec ou sans le prix de vente (Valorisé/Non Valorisé)
-                            </div>
-                          </div>
+  <div className="alert alert-info mb-0 py-2 small">
+    <i className="ri-information-line me-2"></i>
+    Chaque format peut être imprimé avec ou sans le prix de vente (Valorisé/Non Valorisé)
+  </div>
+</div>
+*/}
+
+  {/*
+  <div className="alert alert-info mb-0 py-2 small">
+    <i className="ri-information-line me-2"></i>
+    Chaque format peut être imprimé avec ou sans le prix de vente (Valorisé/Non Valorisé)
+  </div>
+  */}
+</div> 
                         </div>
                       </div>
                     )}
                   </ModalBody>
                   <div className="modal-footer border-0">
-                    <Button color="light" onClick={() => setPrintModal(false)}>
-                      <i className="ri-close-line me-1"></i>
-                      Annuler
-                    </Button>
-                    <Button color="primary" onClick={() => handlePrintBarcode('large', printSettings.largeLabel.showPrice, fournisseurCodeOverride)}>
-                      <i className="ri-printer-line me-1"></i>
-                      Imprimer maintenant
-                    </Button>
+                
                   </div>
                 </Modal>
 
@@ -2810,16 +2943,11 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                               <option value="">
                                 Sélectionner une famille principale
                               </option>
-                              {categories
-                                .filter((cat) => !cat.parent_id)
-                                .map((categorie) => (
-                                  <option
-                                    key={categorie.id}
-                                    value={categorie.id}
-                                  >
-                                    {categorie.nom}
-                                  </option>
-                                ))}
+                              {familleOptions.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                  {option.label}
+                                </option>
+                              ))}
                             </Input>
                             <FormFeedback>
                               {validation.errors.categorie_id}
@@ -2840,12 +2968,9 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                               <option value="">
                                 Sélectionner une sous-famille
                               </option>
-                              {subcategories.map((subcategorie) => (
-                                <option
-                                  key={subcategorie.id}
-                                  value={subcategorie.id}
-                                >
-                                  {subcategorie.nom}
+                              {sousFamilleOptions.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                  {option.label}
                                 </option>
                               ))}
                             </Input>
@@ -3009,7 +3134,7 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                               }}
                             />
                             <small className="text-muted">
-                              HT × {validation.values.taux_fodec ? '1.01' : '1'} × {1 + parseNumber(validation.values.tva) / 100}
+                              HT × {1 + parseNumber(validation.values.tva) / 100}
                             </small>
                           </div>
                         </Col>
@@ -3064,7 +3189,8 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                                     }
 
                                     if (validation.values.puv_ht) {
-                                      const ttc = calculateTTCFromHT(validation.values.puv_ht, tva, hasFodec);
+                                      // FODEC applies to achat only, never to vente
+                                      const ttc = calculateTTCFromHT(validation.values.puv_ht, tva, false);
                                       validation.setFieldValue("puv_ttc", ttc);
                                       setPriceInputs(prev => ({
                                         ...prev,

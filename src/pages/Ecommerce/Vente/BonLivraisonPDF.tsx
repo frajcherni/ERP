@@ -516,7 +516,10 @@ const BonLivraisonPDF: React.FC<BonLivraisonPDFProps> = ({
               <>
                 {bonLivraison.client.raison_sociale && wrapClientText(bonLivraison.client.raison_sociale, 35).map((line, idx) => (<Text key={`rs-${idx}`} style={styles.clientLineItem}>{line}</Text>))}
                 {bonLivraison.client.matricule_fiscal && (<Text style={styles.clientLineItem}>MF: {bonLivraison.client.matricule_fiscal}</Text>)}
-                {bonLivraison.client.adresse && (<Text style={styles.clientLineItem}>{bonLivraison.client.adresse}</Text>)}
+                {[bonLivraison.client.adresse, bonLivraison.client.ville].filter(Boolean).join(" - ") && 
+                  wrapClientText([bonLivraison.client.adresse, bonLivraison.client.ville].filter(Boolean).join(" - "), 35).map((line, idx) => (
+                    <Text key={`adr-${idx}`} style={styles.clientLineItem}>{line}</Text>
+                  ))}
                 {bonLivraison.client.telephone1 && (<Text style={styles.clientLineItem}>Tél: {bonLivraison.client.telephone1}</Text>)}
                 {bonLivraison.client.telephone2 && (<Text style={styles.clientLineItem}>Tél: {bonLivraison.client.telephone2}</Text>)}
               </>

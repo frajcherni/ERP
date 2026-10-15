@@ -421,13 +421,8 @@ const calculateMaxAllowedAmount = useCallback(() => {
         enableColumnFilter: false,
         cell: (cell: any) => {
           const bonCommande = cell.row.original.bonCommandeClient;
-          // Ensure it's a number - use netAPayer or calculate from total
-          let netAPayer = Number(bonCommande?.netAPayer) || 0;
-          if (!netAPayer && bonCommande) {
-            const total = Number(bonCommande.totalTTCAfterRemise) || Number(bonCommande.totalTTC) || 0;
-            // Apply retention calculation if needed
-            netAPayer = total > 1000 ? total * 0.99 : total;
-          }
+          // The retenue à la source is not subtracted from the net à payer
+          const netAPayer = Number(bonCommande?.totalTTCAfterRemise) || Number(bonCommande?.totalTTC) || 0;
           return `${netAPayer.toFixed(3)} DT`;
         },
       },

@@ -53,6 +53,7 @@ export interface FactureClient {
   updatedAt: string;
   lockedPercentage?: number | null;
   locked_percentage?: number | null;
+  espaceNotes?: string;
 }
 export interface Client {
   id: number;
@@ -91,6 +92,10 @@ export interface Article {
   nom: string;
   image: string;
   qte: number;
+  /** Quantité dans les dépôts magazin (nom contient magazin/magasin) */
+  qte_magazin?: number;
+  /** Détail stock par dépôt (détail article) */
+  stocks_par_depot?: Array<{ depot_id: number; depot_nom: string; qte: number }>;
   designation: string;
   pua_ttc: number;
   puv_ttc: number;
@@ -136,6 +141,8 @@ export interface Categorie {
   image?: string;
   on_website?: boolean;
   website_order?: number;
+  show_in_univers?: boolean;
+  univers_order?: number;
   // Relations (optional - might not come from API)
   parent?: Categorie | null;
   subcategories?: Categorie[];
@@ -233,7 +240,7 @@ export interface BonLivraisonArticle {
   article?: Article;
   quantite: number;
   designation?: string;
-  quantiteLivree: number;
+  quantiteLivree?: number;
   prix_unitaire: number;
   tva?: number | null;
   remise?: number | null;
@@ -248,12 +255,20 @@ export interface BonLivraison {
   client?: Client;
   vendeur?: Vendeur;
   bonCommandeClient?: BonCommandeClient;
+  venteComptoire?: BonCommandeClient;
+  facture?: FactureClient;
   status: "Brouillon" | "Livree" | "Partiellement Livree" | "Annulee";
   notes?: string;
   taxMode: "HT" | "TTC";
   remise: number;
   remiseType: "percentage" | "fixed";
   articles: BonLivraisonArticle[];
+  client_id?: number | null;
+  vendeur_id?: number | null;
+  facture_id?: number | null;
+  bonCommandeClient_id?: number | null;
+  vente_comptoire_id?: number | null;
+  skipStockUpdate?: boolean;
   createdAt?: string;
   updatedAt?: string;
 
@@ -311,13 +326,14 @@ export interface BonCommandeClient {
   clientWebsite?: ClientWebsite;
   dateCommande: string;
   dateLivBonCommande: string;
-  status: "Brouillon" | "Confirme" | "Livre" | "Partiellement Livre" | "Annule";
+  status: "En Attente" | "Brouillon" | "Confirme" | "Livre" | "Partiellement Livre" | "Annule";
   taxMode: "HT" | "TTC";
   remise: number;
   remiseType: "percentage" | "fixed";
   notes?: string;
   created_at?: string;
   updated_at?: string;
+  devis?: any; // Source tracking from Devis
 
   client_id: number;
   vendeur_id: number;

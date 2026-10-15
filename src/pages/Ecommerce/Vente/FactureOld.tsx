@@ -50,6 +50,10 @@ import {
 } from "../../../Components/Article/ArticleServices";
 import { Categorie, Fournisseur } from "../../../Components/Article/Interfaces";
 import {
+  buildRootCategoryOptions,
+  buildSubcategoryOptions,
+} from "../../../Components/Article/CategoryTree";
+import {
   fetchFacturesClient,
   createFacture,
   updateFacture,
@@ -348,7 +352,6 @@ const ListFactureClient = () => {
 
   const [categories, setCategories] = useState<Categorie[]>([]);
   const [fournisseurs, setFournisseurs] = useState<Fournisseur[]>([]);
-  const [subcategories, setSubcategories] = useState<Categorie[]>([]);
 
   const [selectedArticles, setSelectedArticles] = useState<
     {
@@ -520,7 +523,7 @@ const ListFactureClient = () => {
 useEffect(() => {
   const searchClientsDebounced = async () => {
     if (clientSearch.length >= 1 || createEditModal) {
-      await loadClients(clientSearch, 1, 15);
+      await loadClients(clientSearch, 1, 500);
     } else {
       setFilteredClients([]);
     }
@@ -1165,24 +1168,29 @@ useEffect(() => {
   };
 
 
-  // Add effect for subcategories
-  useEffect(() => {
-    if (newArticle.categorie_id) {
-      const categoryId = parseInt(newArticle.categorie_id);
-      const subs = categories.filter((cat) => cat.parent_id === categoryId);
-      setSubcategories(subs);
+  // Les deux listes suivent l'arborescence de la liste des catégories : la
+  // famille est une racine, la sous-famille n'importe laquelle de ses
+  // descendantes, indentée selon sa profondeur.
+  const familleOptions = useMemo(
+    () => buildRootCategoryOptions(categories),
+    [categories]
+  );
+  const sousFamilleOptions = useMemo(
+    () => buildSubcategoryOptions(categories, newArticle.categorie_id),
+    [categories, newArticle.categorie_id]
+  );
 
-      // Reset subcategory if parent category changes
-      if (
-        !subs.find((sub) => sub.id === parseInt(newArticle.sous_categorie_id))
-      ) {
-        setNewArticle((prev) => ({ ...prev, sous_categorie_id: "" }));
-      }
-    } else {
-      setSubcategories([]);
-      setNewArticle((prev) => ({ ...prev, sous_categorie_id: "" }));
+  // Une sous-famille qui ne vit plus sous la famille choisie n'a plus de sens.
+  // Tant que les catégories ne sont pas chargées on ne conclut rien.
+  useEffect(() => {
+    if (!categories.length || !newArticle.sous_categorie_id) return;
+    const stillThere = sousFamilleOptions.some(
+      (o) => String(o.id) === String(newArticle.sous_categorie_id)
+    );
+    if (!stillThere) {
+      setNewArticle((prev: any) => ({ ...prev, sous_categorie_id: "" }));
     }
-  }, [newArticle.categorie_id, categories]);
+  }, [sousFamilleOptions, categories.length, newArticle.sous_categorie_id]);
 
   // In your ListFactureClient component, add this state variable
   const [exoneration, setExoneration] = useState<boolean>(false);
@@ -3347,13 +3355,11 @@ const toggleCreateEditModal = useCallback(() => {
                                   <option value="">
                                     Sélectionner une famille principale
                                   </option>
-                                  {categories
-                                    .filter((c) => !c.parent_id)
-                                    .map((c) => (
-                                      <option key={c.id} value={c.id}>
-                                        {c.nom}
-                                      </option>
-                                    ))}
+                                  {familleOptions.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
+                                    </option>
+                                  ))}
                                 </Input>
                                 <small className="text-muted">
                                   Catégorie principale
@@ -3380,9 +3386,9 @@ const toggleCreateEditModal = useCallback(() => {
                                   <option value="">
                                     Sélectionner une sous-famille
                                   </option>
-                                  {subcategories.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      {s.nom}
+                                  {sousFamilleOptions.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
                                     </option>
                                   ))}
                                 </Input>
@@ -6653,7 +6659,7 @@ const toggleCreateEditModal = useCallback(() => {
     }
     
     // Refresh clients list
-    loadClients(clientSearch, 1, 20);
+    loadClients(clientSearch, 1, 500);
   }}
 />
 

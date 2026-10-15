@@ -6,7 +6,7 @@ import FeatherIcon from 'feather-icons-react';
 import { Link } from "react-router-dom";
 
 const PrivacyPolicy = () => {
-  document.title = "Privacy Policy | Velzon - React Admin & Dashboard Template";
+  document.title = "Privacy Policy | Royal Lumiere";
   return (
     <React.Fragment>
       <div className="page-content">

@@ -368,9 +368,8 @@ const FactureClientReceiptPDF: React.FC<FactureClientReceiptPDFProps> = ({
       });
     }
 
-    // Step 6: Calculate net à payer
-    let netAPayer = Math.round((finalTotalValue - retentionAmount) * 1000) / 1000;
-    netAPayer = Math.max(0, netAPayer);
+    // Step 6: Net à payer (the retenue à la source is not subtracted)
+    const netAPayer = Math.max(0, finalTotalValue);
 
     return {
       sousTotalHT: sousTotalHTValue,
@@ -535,7 +534,7 @@ const FactureClientReceiptPDF: React.FC<FactureClientReceiptPDFProps> = ({
             <View style={styles.totalRow}>
               <Text style={styles.totalLabel}>Retenue:</Text>
               <Text style={styles.totalValue}>
-                - {totals.retentionAmount.toFixed(3)} DT
+                {totals.retentionAmount.toFixed(3)} DT
               </Text>
             </View>
           )}

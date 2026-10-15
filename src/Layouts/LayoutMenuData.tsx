@@ -272,7 +272,7 @@ const Navdata = () => {
                 {
                     id: "website-parametres",
                     label: "Paramètres Site Web",
-                    link: "/website-settings",
+                    link: "/website-logo",
                     parentId: "website",
                 },
                 {
@@ -291,6 +291,42 @@ const Navdata = () => {
                     id: "website-carousel",
                     label: "Gestion Carousel",
                     link: "/website-carousel",
+                    parentId: "website",
+                },
+                {
+                    id: "website-offers",
+                    label: "Gestion Offres",
+                    link: "/website-offers",
+                    parentId: "website",
+                },
+                {
+                    id: "website-promos",
+                    label: "Gestion Promotions",
+                    link: "/website-promos",
+                    parentId: "website",
+                },
+                {
+                    id: "website-brands",
+                    label: "Gestion Marques",
+                    link: "/website-brands",
+                    parentId: "website",
+                },
+                {
+                    id: "website-features",
+                    label: "Gestion Points Forts",
+                    link: "/website-features",
+                    parentId: "website",
+                },
+                {
+                    id: "website-testimonials",
+                    label: "Gestion Avis Clients",
+                    link: "/website-testimonials",
+                    parentId: "website",
+                },
+                {
+                    id: "website-announcements",
+                    label: "Gestion Annonces",
+                    link: "/website-announcements",
                     parentId: "website",
                 },
             ],

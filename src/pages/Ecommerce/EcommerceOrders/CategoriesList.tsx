@@ -38,10 +38,13 @@ import {
   fetchCategories,
   createCategorie,
   updateCategorie,
-  deleteCategorie
+  deleteCategorie,
+  getImageUrl
 } from "../../../Components/Article/ArticleServices";
 
+
 import { Categorie } from "../../../Components/Article/Interfaces";
+import { buildCategoryTreeOptions } from "../../../Components/Article/CategoryTree";
 
 const CategoriesList = () => {
   const [modal, setModal] = useState(false);
@@ -57,12 +60,12 @@ const CategoriesList = () => {
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [isExportCSV, setIsExportCSV] = useState(false);
   const [searchText, setSearchText] = useState("");
-  const [parentCategories, setParentCategories] = useState<Categorie[]>([]);
 
 
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
 const [imagePreview, setImagePreview] = useState<string | null>(null);
-const API_BASE = process.env.REACT_APP_API_BASE;
+
+
 
 // Image upload handler
 const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -96,11 +99,7 @@ const fetchData = useCallback(async () => {
       createdAt: c.createdAt || new Date().toISOString()
     }));
     
-    // Separate parent categories and subcategories
-    const parents = formattedCategories.filter((c: any) => !c.parent_id);
-    
     setCategories(formattedCategories);
-    setParentCategories(parents);
     setFilteredCategories(formattedCategories);
     setLoading(false);
   } catch (err) {
@@ -204,10 +203,42 @@ const fetchData = useCallback(async () => {
     onSubmit: handleSubmit
   });
 
+  // Le champ « Catégorie Parente » propose toute l’arborescence, indentée,
+  // sauf la catégorie en cours de modification et sa descendance : une
+  // catégorie ne peut ni se contenir elle-même, ni tenir dans une de ses filles.
+  const parentOptions = useMemo(
+    () => buildCategoryTreeOptions(categories, isEdit ? categorie?.id : undefined),
+    [categories, categorie, isEdit]
+  );
+
   const columns = useMemo(
     () => [
       {
+        header: "Image",
+        accessorKey: "image",
+        enableColumnFilter: false,
+        cell: (cell: any) => {
+          const img = cell.getValue();
+          return img ? (
+            <img 
+              src={getImageUrl(img)} 
+              alt="cat" 
+              className="rounded" 
+              style={{ width: '40px', height: '40px', objectFit: 'cover' }} 
+            />
+          ) : (
+            <div 
+              className="rounded bg-light d-flex align-items-center justify-content-center" 
+              style={{ width: '40px', height: '40px' }}
+            >
+              <i className="ri-image-line text-muted"></i>
+            </div>
+          );
+        },
+      },
+      {
         header: "Nom",
+
         accessorKey: "nom",
         enableColumnFilter: false,
       },
@@ -239,10 +270,15 @@ const fetchData = useCallback(async () => {
                   to="#"
                   className="text-primary d-inline-block edit-item-btn"
                   onClick={() => {
-                    setCategorie(cellProps.row.original);
+                    const data = cellProps.row.original;
+                    setCategorie(data);
                     setIsEdit(true);
                     setModal(true);
+                    // Reset image states for edit
+                    setSelectedImage(null);
+                    setImagePreview(null);
                   }}
+
                 >
                   <i className="ri-pencil-fill fs-16"></i>
                 </Link>
@@ -415,7 +451,7 @@ const fetchData = useCallback(async () => {
         {imagePreview || categorie?.image ? (
           <div className="mb-3">
             <img 
-              src={imagePreview || (categorie?.image ? `${API_BASE}/${categorie.image.replace(/\\/g, "/")}` : "")}
+              src={imagePreview || getImageUrl(categorie?.image)}
               alt="Preview" 
               className="img-fluid rounded mb-2"
               style={{ maxHeight: '150px', objectFit: 'cover' }}
@@ -495,9 +531,9 @@ const fetchData = useCallback(async () => {
                   value={validation.values.parent_id}
                 >
                   <option value="">Catégorie Principale</option>
-                  {parentCategories.map(parent => (
-                    <option key={parent.id} value={parent.id}>
-                      {parent.nom}
+                  {parentOptions.map(option => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
                     </option>
                   ))}
                 </Input>

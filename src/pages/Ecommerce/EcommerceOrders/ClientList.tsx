@@ -38,10 +38,13 @@ import {
   fetchClients,
   createClient,
   updateClient,
-  deleteClient
+  deleteClient,
+  searchClients
 } from "../../../Components/Article/ArticleServices";
 
 import { Client } from "../../../Components/Article/Interfaces";
+import PhoneInput from "../../../Components/Common/PhoneInput";
+import { formatPhoneDisplay, formatPhoneSearch } from "../../../helpers/phone_helper";
 
 const ClientsList = () => {
   const [modal, setModal] = useState(false);
@@ -57,71 +60,75 @@ const ClientsList = () => {
   const [endDate, setEndDate] = useState<Date | null>(null);
   const [isExportCSV, setIsExportCSV] = useState(false);
   const [searchText, setSearchText] = useState("");
+  const [currentPage, setCurrentPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
 
-  // Fetch all data
-  const fetchData = useCallback(async () => {
+  // Fetch all data with server-side pagination
+  const fetchData = useCallback(async (
+    page = currentPage, 
+    limit = pageSize, 
+    query = searchText, 
+    tab = activeTab,
+    start = startDate,
+    end = endDate
+  ) => {
     try {
       setLoading(true);
-      const clientsData = await fetchClients();
       
-      const formattedClients = clientsData.map((c: any) => ({
+      let statusParam = "";
+      if (tab === "2") statusParam = "Actif";
+      else if (tab === "3") statusParam = "Inactif";
+
+      const response = await searchClients({
+        query: query,
+        page: page + 1, // API is 1-indexed
+        limit: limit,
+        status: statusParam || undefined,
+        startDate: start ? moment(start).startOf('day').toISOString() : undefined,
+        endDate: end ? moment(end).endOf('day').toISOString() : undefined
+      });
+      
+      const formattedClients = (response.clients || []).map((c: any) => ({
         ...c,
         createdAt: c.createdAt || new Date().toISOString()
       }));
       
       setClients(formattedClients);
       setFilteredClients(formattedClients);
+      setTotalCount(response.total || 0);
       setLoading(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Échec du chargement des clients");
       setLoading(false);
     }
-  }, []);
+  }, [currentPage, pageSize, searchText, activeTab, startDate, endDate]);
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+  }, []); // Initial load only
 
-  // Filter clients
+  // Effect for search and filters - debounced
   useEffect(() => {
-    let result = [...clients];
-    
-    // Filter by status
-    if (activeTab === "2") {
-      result = result.filter(c => c.status === "Actif");
-    } else if (activeTab === "3") {
-      result = result.filter(c => c.status === "Inactif");
-    }
-    
-    // Filter by date range
-    if (startDate && endDate) {
-      const start = moment(startDate).startOf('day');
-      const end = moment(endDate).endOf('day');
-      
-      result = result.filter(c => {
-        const cDate = moment(c.createdAt);
-        return cDate.isBetween(start, end, null, '[]');
-      });
-    }
-    
-    // Filter by search text
-    if (searchText) {
-      const searchLower = searchText.toLowerCase();
-      result = result.filter(c => 
-        c.raison_sociale.toLowerCase().includes(searchLower) ||
-        c.designation?.toLowerCase().includes(searchLower) ||
-        c.matricule_fiscal?.toLowerCase().includes(searchLower) ||
-        c.register_commerce?.toLowerCase().includes(searchLower) ||
-        c.adresse?.toLowerCase().includes(searchLower) ||
-        c.ville?.toLowerCase().includes(searchLower) ||
-        c.telephone1?.toLowerCase().includes(searchLower) ||
-        c.telephone2?.toLowerCase().includes(searchLower) ||
-        c.email?.toLowerCase().includes(searchLower)
-      );
-    }
-    
-    setFilteredClients(result);
-  }, [activeTab, startDate, endDate, searchText, clients]);
+    const timer = setTimeout(() => {
+      setCurrentPage(0);
+      fetchData(0, pageSize, searchText, activeTab, startDate, endDate);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchText, activeTab, startDate, endDate]);
+
+  // Handle page change
+  const onPageChange = (page: number) => {
+    setCurrentPage(page);
+    fetchData(page, pageSize, searchText, activeTab, startDate, endDate);
+  };
+
+  // Handle page size change
+  const onPageSizeChange = (size: number) => {
+    setPageSize(size);
+    setCurrentPage(0);
+    fetchData(0, size, searchText, activeTab, startDate, endDate);
+  };
 
   // Delete client
   const handleDelete = async () => {
@@ -212,6 +219,7 @@ const ClientsList = () => {
         header: "Téléphone",
         accessorKey: "telephone1",
         enableColumnFilter: false,
+        cell: (cell: any) => formatPhoneDisplay(cell.getValue(), ""),
       },
       {
         header: "Email",
@@ -372,9 +380,9 @@ const ClientsList = () => {
                         <Input
                           type="text"
                           className="form-control"
-                          placeholder="Rechercher..."
+                          placeholder="Rechercher par nom, téléphone, email..."
                           value={searchText}
-                          onChange={(e) => setSearchText(e.target.value)}
+                          onChange={(e) => setSearchText(formatPhoneSearch(e.target.value))}
                         />
                         <i className="ri-search-line search-icon"></i>
                       </div>
@@ -432,7 +440,12 @@ const ClientsList = () => {
                       columns={columns}
                       data={filteredClients}
                       isGlobalFilter={false}
-                      customPageSize={10}
+                      isPagination={true}
+                      totalDataCount={totalCount}
+                      onPageChange={onPageChange}
+                      onPageSizeChange={onPageSizeChange}
+                      currentPage={currentPage}
+                      customPageSize={pageSize}
                       divClass="table-responsive table-card mb-1 mt-0"
                       tableClass="align-middle table-nowrap"
                       theadClass="table-light text-muted text-uppercase"
@@ -557,10 +570,9 @@ const ClientsList = () => {
                         <Col md={6}>
                           <div className="mb-3">
                             <Label className="form-label">Téléphone 1</Label>
-                            <Input
+                            <PhoneInput
                               name="telephone1"
-                              placeholder="Entrer le téléphone principal"
-                              onChange={validation.handleChange}
+                              onChange={(value) => validation.setFieldValue("telephone1", value)}
                               onBlur={validation.handleBlur}
                               value={validation.values.telephone1}
                               invalid={validation.touched.telephone1 && !!validation.errors.telephone1}
@@ -571,10 +583,9 @@ const ClientsList = () => {
                         <Col md={6}>
                           <div className="mb-3">
                             <Label className="form-label">Téléphone 2</Label>
-                            <Input
+                            <PhoneInput
                               name="telephone2"
-                              placeholder="Entrer le téléphone secondaire"
-                              onChange={validation.handleChange}
+                              onChange={(value) => validation.setFieldValue("telephone2", value)}
                               onBlur={validation.handleBlur}
                               value={validation.values.telephone2}
                               invalid={validation.touched.telephone2 && !!validation.errors.telephone2}

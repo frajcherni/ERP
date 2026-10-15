@@ -27,7 +27,7 @@ import { getAPIKey } from "../../slices/thunks";
 import { createSelector } from "reselect";
 
 const APIKey = () => {
-  document.title = "API Key | Velzon -  Admin & Dashboard Template";
+  document.title = "API Key | Royal Lumiere";
   const dispatch: any = useDispatch();
   const [show, setShow] = useState<boolean>(false);
   const [deleteModal, setDeleteModal] = useState<boolean>(false);

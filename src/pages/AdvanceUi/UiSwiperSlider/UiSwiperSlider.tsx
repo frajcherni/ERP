@@ -30,7 +30,7 @@ import img11 from "../../../assets/images/small/img-11.jpg";
 import img12 from "../../../assets/images/small/img-12.jpg";
 
 const UiSwiperSlider = () => {
-    document.title="Swiper Slider | Velzon - React Admin & Dashboard Template";
+    document.title="Swiper Slider | Royal Lumiere";
 
     return (
         <React.Fragment>

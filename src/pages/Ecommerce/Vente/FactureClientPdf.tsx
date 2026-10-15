@@ -10,6 +10,7 @@ import {
 } from "@react-pdf/renderer";
 import moment from "moment";
 import { FactureClient } from "../../../Components/Article/Interfaces";
+import { formatPhoneDisplay } from "../../../helpers/phone_helper";
 import { calculateDocumentTotals, calculateLineTotals } from "../../../Utils/CalculationEngine";
 
 Font.register({
@@ -423,14 +424,8 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
     return lines;
   };
 
-  const formatPhoneNumber = (phone: string | null | undefined): string => {
-    if (!phone) return "";
-    const cleaned = phone.replace(/\D/g, "");
-    if (cleaned.length === 8) {
-      return `${cleaned.substring(0, 2)} ${cleaned.substring(2, 5)} ${cleaned.substring(5, 8)}`;
-    }
-    return phone;
-  };
+  const formatPhoneNumber = (phone: string | null | undefined): string =>
+    formatPhoneDisplay(phone, "");
 
   // ─────────────────────────────────────────────
   // RENDERERS
@@ -516,7 +511,7 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
             {retentionMontant > 0 && (
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Retenue à la source:</Text>
-                <Text style={styles.summaryValue}>- {formatCurrency(retentionMontant)} DT</Text>
+                <Text style={styles.summaryValue}>{formatCurrency(retentionMontant)} DT</Text>
               </View>
             )}
             <View style={styles.netAPayerContainer}>
@@ -548,6 +543,9 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
         {group.articles.map((item, index) => {
           const globalRowNumber = group.startIndex + index + 1;
           const line = calculateLineTotals(item, group.startIndex + index, { isExonerated });
+          // Real TTC (tax included) for the M.TTC column, shown even when exonerated
+          // so the user can see the true TTC price. Totals are unaffected.
+          const realLine = calculateLineTotals(item, group.startIndex + index, {});
           const tvaRate = Number(item.tva) || 0;
 
           return (
@@ -559,7 +557,7 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
               <View style={[styles.colPUHT, styles.tableCol]}><Text>{formatCurrency(line.unitHT)}</Text></View>
               <View style={[styles.colTVA, styles.tableCol]}><Text>{tvaRate > 0 ? `${tvaRate}%` : "-"}</Text></View>
               <View style={[styles.colPUTTC, styles.tableCol]}><Text>{formatCurrency(line.unitTTC)}</Text></View>
-              <View style={[styles.colMontantTTC, styles.tableCol]}><Text>{formatCurrency(line.ttc)}</Text></View>
+              <View style={[styles.colMontantTTC, styles.tableCol]}><Text>{formatCurrency(realLine.ttc)}</Text></View>
             </View>
           );
         })}
@@ -626,8 +624,8 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
                 {facture.client.matricule_fiscal && (
                   <Text style={styles.clientLineItem}>MF: {facture.client.matricule_fiscal}</Text>
                 )}
-                {facture.client.adresse &&
-                  wrapTextHelper(facture.client.adresse, 45).map((line, idx) => (
+                {[facture.client.adresse, facture.client.ville].filter(Boolean).join(" - ") &&
+                  wrapTextHelper([facture.client.adresse, facture.client.ville].filter(Boolean).join(" - "), 45).map((line, idx) => (
                     <Text key={`adr-${idx}`} style={styles.clientLineItem}>{line}</Text>
                   ))}
                 {facture.client.telephone1 && (

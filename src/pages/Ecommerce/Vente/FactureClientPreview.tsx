@@ -1,6 +1,7 @@
 import React, { useRef, useState } from "react";
 import { Modal, ModalHeader, ModalBody, Button } from "reactstrap";
 import { FactureClient } from "../../../Components/Article/Interfaces";
+import { formatPhoneDisplay } from "../../../helpers/phone_helper";
 import moment from "moment";
 import './FactureClientPreview.css'
 
@@ -336,14 +337,8 @@ const FactureClientPreview: React.FC<FactureClientPreviewProps> = ({
 
     const amountInWords = numberToWords(finalTotal);
 
-    const formatPhoneNumber = (phone: string | null | undefined): string => {
-        if (!phone) return "";
-        const cleaned = phone.replace(/\D/g, "");
-        if (cleaned.length === 8) {
-            return `${cleaned.substring(0, 2)} ${cleaned.substring(2, 5)} ${cleaned.substring(5, 8)}`;
-        }
-        return phone;
-    };
+    const formatPhoneNumber = (phone: string | null | undefined): string =>
+        formatPhoneDisplay(phone, "");
 
     const tvaRates = Object.keys(tvaTableData.tvaBreakdown)
         .map((rate) => parseFloat(rate))

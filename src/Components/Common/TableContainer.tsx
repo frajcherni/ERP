@@ -158,6 +158,13 @@ const TableContainer = ({
     return itemRank.passed;
   };
 
+  const serverPageCount = Math.ceil((totalDataCount || 0) / (customPageSize || 10));
+
+  const handleServerPageClick = (e: React.MouseEvent, page: number) => {
+    e.preventDefault();
+    onPageChange?.(page);
+  };
+
   const table = useReactTable({
     columns,
     data,
@@ -167,13 +174,23 @@ const TableContainer = ({
     state: {
       columnFilters,
       globalFilter,
+      ...(isPagination
+        ? {
+            pagination: {
+              pageIndex: currentPage ?? 0,
+              pageSize: Number(customPageSize) || 10,
+            },
+          }
+        : {}),
     },
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
     globalFilterFn: fuzzyFilter,
+    manualPagination: !!isPagination,
+    pageCount: isPagination ? serverPageCount : undefined,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
+    ...(isPagination ? {} : { getPaginationRowModel: getPaginationRowModel() }),
     getSortedRowModel: getSortedRowModel()
   });
 
@@ -191,8 +208,10 @@ const TableContainer = ({
   } = table;
 
   useEffect(() => {
-    Number(customPageSize) && setPageSize(Number(customPageSize));
-  }, [customPageSize, setPageSize]);
+    if (!isPagination && Number(customPageSize)) {
+      setPageSize(Number(customPageSize));
+    }
+  }, [customPageSize, isPagination, setPageSize]);
 
   // Enhanced pagination with limits and ellipsis
   const getVisiblePages = () => {
@@ -384,13 +403,13 @@ const TableContainer = ({
               {/* Pagination Buttons */}
               <ul className="pagination pagination-separated pagination-md justify-content-center justify-content-sm-start mb-0">
                 <li className={(isPagination ? (currentPage === 0) : !getCanPreviousPage()) ? "page-item disabled" : "page-item"}>
-                  <Link to="#" className="page-link" onClick={() => isPagination ? onPageChange?.(0) : setPageIndex(0)} title="First Page">
+                  <Link to="#" className="page-link" onClick={(e) => isPagination ? handleServerPageClick(e, 0) : (e.preventDefault(), setPageIndex(0))} title="First Page">
                     «
                   </Link>
                 </li>
 
                 <li className={(isPagination ? (currentPage === 0) : !getCanPreviousPage()) ? "page-item disabled" : "page-item"}>
-                  <Link to="#" className="page-link" onClick={() => isPagination ? onPageChange?.((currentPage || 0) - 1) : previousPage()}>Previous</Link>
+                  <Link to="#" className="page-link" onClick={(e) => isPagination ? handleServerPageClick(e, (currentPage || 0) - 1) : (e.preventDefault(), previousPage())}>Previous</Link>
                 </li>
 
                 {getVisiblePages().map((page: any, key: number) => (
@@ -401,7 +420,7 @@ const TableContainer = ({
                       <Link
                         to="#"
                         className="page-link"
-                        onClick={() => isPagination ? onPageChange?.(page) : setPageIndex(page)}
+                        onClick={(e) => isPagination ? handleServerPageClick(e, page) : (e.preventDefault(), setPageIndex(page))}
                       >
                         {page + 1}
                       </Link>
@@ -409,15 +428,15 @@ const TableContainer = ({
                   </li>
                 ))}
 
-                <li className={(isPagination ? ((currentPage || 0) >= Math.ceil((totalDataCount || 0) / (customPageSize || 10)) - 1) : !getCanNextPage()) ? "page-item disabled" : "page-item"}>
-                  <Link to="#" className="page-link" onClick={() => isPagination ? onPageChange?.((currentPage || 0) + 1) : nextPage()}>Next</Link>
+                <li className={(isPagination ? ((currentPage || 0) >= serverPageCount - 1) : !getCanNextPage()) ? "page-item disabled" : "page-item"}>
+                  <Link to="#" className="page-link" onClick={(e) => isPagination ? handleServerPageClick(e, (currentPage || 0) + 1) : (e.preventDefault(), nextPage())}>Next</Link>
                 </li>
 
-                <li className={(isPagination ? ((currentPage || 0) >= Math.ceil((totalDataCount || 0) / (customPageSize || 10)) - 1) : !getCanNextPage()) ? "page-item disabled" : "page-item"}>
+                <li className={(isPagination ? ((currentPage || 0) >= serverPageCount - 1) : !getCanNextPage()) ? "page-item disabled" : "page-item"}>
                   <Link
                     to="#"
                     className="page-link"
-                    onClick={() => isPagination ? onPageChange?.(Math.ceil((totalDataCount || 0) / (customPageSize || 10)) - 1) : setPageIndex(getPageOptions().length - 1)}
+                    onClick={(e) => isPagination ? handleServerPageClick(e, Math.max(0, serverPageCount - 1)) : (e.preventDefault(), setPageIndex(getPageOptions().length - 1))}
                     title="Last Page"
                   >
                     »
@@ -431,16 +450,25 @@ const TableContainer = ({
                 <input
                   type="number"
                   min="1"
-                  max={getPageOptions().length}
-                  defaultValue={getState().pagination.pageIndex + 1}
+                  max={isPagination ? serverPageCount : getPageOptions().length}
+                  key={isPagination ? `server-${currentPage}` : `client-${getState().pagination.pageIndex}`}
+                  defaultValue={isPagination ? (currentPage ?? 0) + 1 : getState().pagination.pageIndex + 1}
                   onChange={e => {
                     const page = e.target.value ? Number(e.target.value) - 1 : 0;
-                    setPageIndex(Math.max(0, Math.min(page, getPageOptions().length - 1)));
+                    const maxPage = isPagination
+                      ? Math.max(0, serverPageCount - 1)
+                      : getPageOptions().length - 1;
+                    const nextPage = Math.max(0, Math.min(page, maxPage));
+                    if (isPagination) {
+                      onPageChange?.(nextPage);
+                    } else {
+                      setPageIndex(nextPage);
+                    }
                   }}
                   className="form-control form-control-sm"
                   style={{ width: '70px' }}
                 />
-                <span className="text-muted ms-2 text-nowrap">of {getPageOptions().length}</span>
+                <span className="text-muted ms-2 text-nowrap">of {isPagination ? serverPageCount : getPageOptions().length}</span>
               </div>
             </div>
           </div>

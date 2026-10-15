@@ -435,9 +435,9 @@ const VenteComptoireReceiptPDF: React.FC<VenteComptoireReceiptPDFProps> = ({
                     case "especes":
                       return `ESPÈCES`;
                     case "cheque":
-                      return `CHÈQUE${payment.numero ? ` N°${payment.numero}` : ""}${payment.banque ? ` (${payment.banque})` : ""}`;
+                      return `CHÈQUE${payment.numero ? ` N°${payment.numero}` : ""}${payment.banque ? ` (${payment.banque})` : ""}${payment.date ? ` le ${moment(payment.date).format("DD/MM/YY")}` : ""}`;
                     case "virement":
-                      return `VIREMENT${payment.numero ? ` N°${payment.numero}` : ""}`;
+                      return `VIREMENT${payment.numero ? ` N°${payment.numero}` : ""}${payment.date ? ` le ${moment(payment.date).format("DD/MM/YY")}` : ""}`;
                     case "traite":
                       return `TRAITE${payment.numero ? ` N°${payment.numero}` : ""}${payment.dateEcheance ? ` Éch. ${moment(payment.dateEcheance).format("DD/MM/YY")}` : ""}`;
                     case "carte":

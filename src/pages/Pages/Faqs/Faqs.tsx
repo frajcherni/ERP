@@ -6,7 +6,7 @@ import classnames from "classnames";
 import faqImg from "../../../assets/images/faq-img.png";
 
 const Faqs = () => {
-    document.title="FAQs | Velzon - React Admin & Dashboard Template";
+    document.title="FAQs | Royal Lumiere";
 
     const [col1, setcol1] = useState<boolean>(true);
     const [col2, setcol2] = useState<boolean>(false);

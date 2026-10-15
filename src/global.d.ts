@@ -11,3 +11,8 @@ declare module 'react-apexcharts';
 declare module 'react-scrollspy';
 declare module 'react-select';
 declare module 'react-dragula';
+declare module 'react-toastify/dist/ReactToastify.css';
+declare module '*.css' {
+    const content: { [className: string]: string };
+    export default content;
+}

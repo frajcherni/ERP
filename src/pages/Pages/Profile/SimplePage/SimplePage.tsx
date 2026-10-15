@@ -28,7 +28,7 @@ import { projects,  documents } from '../../../../common/data';
 
 const SimplePage = () => {
 
-    document.title = "Profile | Velzon - React Admin & Dashboard Template";
+    document.title = "Profile | Royal Lumiere";
     
 
     const [activeTab, setActiveTab] = useState('1');

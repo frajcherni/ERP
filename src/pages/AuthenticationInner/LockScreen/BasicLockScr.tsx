@@ -12,7 +12,7 @@ import { useFormik } from 'formik';
 import * as Yup from 'yup';
 
 const BasicLockScreen = () => {
-    document.title = "Lock Screen | Velzon - React Admin & Dashboard Template";
+    document.title = "Lock Screen | Royal Lumiere";
 
     const validation: any = useFormik({
         enableReinitialize: true,

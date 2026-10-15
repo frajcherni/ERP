@@ -18,7 +18,7 @@ import EcommerceOrderProduct from "./EcommerceOrderProduct";
 import avatar3 from "../../../assets/images/users/avatar-3.jpg";
 
 const EcommerceOrderDetail = (props:any) => {
-  document.title = "Order Details | Velzon - React Admin & Dashboard Template";
+  document.title = "Order Details | Royal Lumiere";
 
   const [col1, setcol1] = useState<boolean>(true);
   const [col2, setcol2] = useState<boolean>(true);

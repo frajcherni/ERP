@@ -76,6 +76,39 @@ export const fetchInventaires = async (): Promise<Inventaire[]> => {
     }
 };
 
+/** GET /api/inventaire/getAllInventaires?page=X&limit=Y - Paginated version */
+export const fetchInventairesPaginated = async (page: number = 1, limit: number = 10): Promise<{ data: Inventaire[]; total: number; page: number; limit: number; pages: number }> => {
+    try {
+        const response = await axios.get(`${API_BASE}/inventaire/getAllInventaires`, {
+            params: { page, limit }
+        });
+        const result = response.data?.data;
+        
+        // If backend returns paginated response with data field
+        if (result && result.data) {
+            return result;
+        }
+        
+        // If backend returns array directly (fallback for non-paginated response)
+        const all = Array.isArray(result) ? result : response.data?.data ?? response.data;
+        if (Array.isArray(all)) {
+            const start = (page - 1) * limit;
+            const end = start + limit;
+            return {
+                data: all.slice(start, end),
+                total: all.length,
+                page,
+                limit,
+                pages: Math.ceil(all.length / limit)
+            };
+        }
+        
+        throw new Error("Invalid response format");
+    } catch (error: any) {
+        throw error.response?.data?.message || error.message || "Network error";
+    }
+};
+
 /** GET /api/inventaire/getNextInventaireNumberEnhanced */
 export const fetchNextInventaireNumber = async (): Promise<string> => {
     try {

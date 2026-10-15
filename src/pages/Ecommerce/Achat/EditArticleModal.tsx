@@ -1,7 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal, ModalHeader, ModalBody, ModalFooter, Button, Form, FormGroup, Label, Input, Row, Col } from 'reactstrap';
 import { updateArticle } from '../../../Components/Article/ArticleServices';
 import { toast } from 'react-toastify';
+import {
+  buildRootCategoryOptions,
+  buildSubcategoryOptions,
+  getRootCategoryId,
+} from '../../../Components/Article/CategoryTree';
 
 interface EditArticleModalProps {
   isOpen: boolean;
@@ -37,8 +42,20 @@ const EditArticleModal: React.FC<EditArticleModalProps> = ({
     remise: 0
   });
 
-  const [subCategories, setSubCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Les deux listes suivent l'arborescence de la liste des catégories : la
+  // catégorie est une racine, la sous-catégorie n'importe laquelle de ses
+  // descendantes, indentée selon sa profondeur.
+  const categoryOptions = useMemo(
+    () => buildRootCategoryOptions(categories),
+    [categories]
+  );
+  const subCategoryOptions = useMemo(
+    () => buildSubcategoryOptions(categories, formData.categorie_id),
+    [categories, formData.categorie_id]
+  );
+
 
   useEffect(() => {
     if (article && isOpen) {
@@ -54,16 +71,24 @@ const EditArticleModal: React.FC<EditArticleModalProps> = ({
         taux_fodec: article.taux_fodec || false,
         type: article.type || 'Non Consigné',
         fournisseur_id: article.fournisseur_id || article.fournisseur?.id || '',
-        categorie_id: article.categorie_id || article.categorie?.id || '',
-        sous_categorie_id: article.sous_categorie_id || article.sous_categorie?.id || '',
+        categorie_id:
+          article.categorie_id ||
+          article.categorie?.id ||
+          getRootCategoryId(
+            categories,
+            article.sous_categorie_id ||
+              article.sousCategorie?.id ||
+              article.sous_categorie?.id
+          ) ||
+          '',
+        sous_categorie_id:
+          article.sous_categorie_id ||
+          article.sousCategorie?.id ||
+          article.sous_categorie?.id ||
+          '',
         remise: article.remise || 0
       });
 
-      if (article.categorie_id || (article.categorie && article.categorie.id)) {
-        const catId = article.categorie_id || article.categorie.id;
-        const filtered = categories.filter(c => c.parent_id === parseInt(catId));
-        setSubCategories(filtered);
-      }
     }
   }, [article, isOpen, categories]);
 
@@ -85,9 +110,8 @@ const EditArticleModal: React.FC<EditArticleModalProps> = ({
           : value
       };
 
+      // Changer de famille invalide la sous-famille choisie sous l'ancienne.
       if (name === 'categorie_id') {
-        const filtered = categories.filter(c => c.parent_id === parseInt(value));
-        setSubCategories(filtered);
         updated.sous_categorie_id = '';
       }
 
@@ -99,15 +123,17 @@ const EditArticleModal: React.FC<EditArticleModalProps> = ({
         updated.pua_ttc = parseFloat((updated.pua_ht * fodecMultiplier * (1 + tvaRate)).toFixed(3));
       }
       if (name === 'puv_ht' || name === 'tva' || name === 'taux_fodec') {
-        updated.puv_ttc = parseFloat((updated.puv_ht * fodecMultiplier * (1 + tvaRate)).toFixed(3));
+        // FODEC applies to achat only, never to vente
+        updated.puv_ttc = parseFloat((updated.puv_ht * (1 + tvaRate)).toFixed(3));
       }
-      
+
       // Calculate reverse if TTC is changed directly
       if (name === 'pua_ttc') {
         updated.pua_ht = parseFloat((updated.pua_ttc / (fodecMultiplier * (1 + tvaRate))).toFixed(3));
       }
       if (name === 'puv_ttc') {
-        updated.puv_ht = parseFloat((updated.puv_ttc / (fodecMultiplier * (1 + tvaRate))).toFixed(3));
+        // FODEC applies to achat only, never to vente
+        updated.puv_ht = parseFloat((updated.puv_ttc / (1 + tvaRate)).toFixed(3));
       }
 
       return updated;
@@ -160,8 +186,8 @@ const EditArticleModal: React.FC<EditArticleModalProps> = ({
                 <Label>Catégorie</Label>
                 <Input type="select" name="categorie_id" value={formData.categorie_id} onChange={handleChange}>
                   <option value="">Sélectionnez une catégorie</option>
-                  {categories.filter(c => !c.parent_id).map(c => (
-                    <option key={c.id} value={c.id}>{c.nom}</option>
+                  {categoryOptions.map(o => (
+                    <option key={o.id} value={o.id}>{o.label}</option>
                   ))}
                 </Input>
               </FormGroup>
@@ -171,8 +197,8 @@ const EditArticleModal: React.FC<EditArticleModalProps> = ({
                 <Label>Sous-Catégorie</Label>
                 <Input type="select" name="sous_categorie_id" value={formData.sous_categorie_id} onChange={handleChange}>
                   <option value="">Sélectionnez une sous-catégorie</option>
-                  {subCategories.map(c => (
-                    <option key={c.id} value={c.id}>{c.nom}</option>
+                  {subCategoryOptions.map(o => (
+                    <option key={o.id} value={o.id}>{o.label}</option>
                   ))}
                 </Input>
               </FormGroup>

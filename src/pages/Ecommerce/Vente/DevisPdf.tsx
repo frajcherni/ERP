@@ -543,7 +543,10 @@ const DevisPDF: React.FC<DevisPDFProps> = ({
               <>
                 {bonCommande.client.raison_sociale && wrapTextHelper(bonCommande.client.raison_sociale, 35).map((line, idx) => (<Text key={`rs-${idx}`} style={styles.clientLineItem}>{line}</Text>))}
                 {bonCommande.client.matricule_fiscal && <Text style={styles.clientLineItem}>MF: {bonCommande.client.matricule_fiscal}</Text>}
-                {bonCommande.client.adresse && wrapTextHelper(bonCommande.client.adresse, 35).map((line, idx) => (<Text key={`adr-${idx}`} style={styles.clientLineItem}>{line}</Text>))}
+                {[bonCommande.client.adresse, bonCommande.client.ville].filter(Boolean).join(" - ") && 
+                  wrapTextHelper([bonCommande.client.adresse, bonCommande.client.ville].filter(Boolean).join(" - "), 35).map((line, idx) => (
+                    <Text key={`adr-${idx}`} style={styles.clientLineItem}>{line}</Text>
+                  ))}
                 {bonCommande.client.telephone1 && <Text style={styles.clientLineItem}>Tél: {bonCommande.client.telephone1}</Text>}
                 {bonCommande.client.telephone2 && <Text style={styles.clientLineItem}>Tél: {bonCommande.client.telephone2}</Text>}
               </>

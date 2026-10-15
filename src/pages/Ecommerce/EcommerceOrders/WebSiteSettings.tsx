@@ -20,7 +20,8 @@ import {
     DropdownToggle,
     DropdownMenu,
     Button,
-    DropdownItem
+    DropdownItem,
+    Spinner
 } from "reactstrap";
 import BreadCrumb from "../../../Components/Common/BreadCrumb";
 import TableContainer from "../../../Components/Common/TableContainer";
@@ -31,6 +32,7 @@ import * as Yup from "yup";
 import { useFormik } from "formik";
 import {
     fetchArticles,
+    searchArticles,
     removeArticleWebsiteImage,
     updateArticleWebsiteSettings,
     uploadArticleWebsiteImages
@@ -39,7 +41,6 @@ import {
 import { Article } from "../../../Components/Article/Interfaces";
 
 const WebsiteArticlesManager = () => {
-    const [articles, setArticles] = useState<Article[]>([]);
     const [websiteArticles, setWebsiteArticles] = useState<Article[]>([]);
     const [searchText, setSearchText] = useState("");
     const [searchResults, setSearchResults] = useState<Article[]>([]);
@@ -47,9 +48,17 @@ const WebsiteArticlesManager = () => {
     const [settingsModal, setSettingsModal] = useState(false);
     const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
     const [loading, setLoading] = useState(true);
+    const [searchLoading, setSearchLoading] = useState(false);
     const [imagePreviews, setImagePreviews] = useState<string[]>([]);
     const [selectedImages, setSelectedImages] = useState<File[]>([]);
+    
+    // Pagination states
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [totalCount, setTotalCount] = useState(0);
+
     const searchContainerRef = useRef<HTMLDivElement>(null);
+    const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const API_BASE = process.env.REACT_APP_API_BASE;
     const IMAGE_BASE = API_BASE ? API_BASE.replace('/api', '') : 'http://localhost:5000';
 
@@ -69,15 +78,19 @@ const handleImagePreview = (imageUrl: string) => {
     setPreviewModal(true);
 };
 
-    // Fetch all articles
+    // Fetch articles already on website with pagination
     const fetchData = useCallback(async () => {
-        debugger
         try {
             setLoading(true);
-            const articlesData = await fetchArticles();
-             const activeArticles = articlesData
+            const response = await searchArticles({
+                onWebsite: true,
+                page: currentPage,
+                limit: pageSize,
+                sortBy: "article.updated_at",
+                sortOrder: "DESC"
+            });
 
-            const formattedArticles = activeArticles.map((a: any) => ({
+            const formattedArticles = response.articles.map((a: any) => ({
                 ...a,
                 type: a.type?.toLowerCase() === "consigné" ? "Consigné" : "Non Consigné",
                 createdAt: a.createdAt || new Date().toISOString(),
@@ -85,54 +98,58 @@ const handleImagePreview = (imageUrl: string) => {
                 tva: a.tva ? a.tva.toString() : "0",
                 pua_ht: Number(a.pua_ht) || 0,
                 puv_ht: Number(a.puv_ht) || 0,
-                // Website specific fields
                 on_website: Boolean(a.on_website),
                 is_offre: Boolean(a.is_offre),
                 is_top_seller: Boolean(a.is_top_seller),
                 is_new_arrival: Boolean(a.is_new_arrival),
-                website_images: a.website_images || [], // Use website_images (not websiteImages)
+                website_images: a.website_images || [],
                 website_description: a.website_description || ""
             }));
 
-            setArticles(formattedArticles);
-            
-            // Get articles that are already on website
-            const websiteArticles = formattedArticles.filter((a: any) => a.on_website);
-            setWebsiteArticles(websiteArticles);
-            
+            setWebsiteArticles(formattedArticles);
+            setTotalCount(response.total);
             setLoading(false);
         } catch (err) {
             toast.error(err instanceof Error ? err.message : "Échec du chargement des données");
             setLoading(false);
         }
-    }, []);
+    }, [currentPage, pageSize]);
 
     useEffect(() => {
         fetchData();
     }, [fetchData]);
 
-    // Search functionality with 3 characters minimum
+    // Search functionality with debouncing and server-side fetch
     const handleSearch = useCallback((text: string) => {
         setSearchText(text);
         
+        if (searchTimeoutRef.current) {
+            clearTimeout(searchTimeoutRef.current);
+        }
+
         if (text.length >= 3) {
-            const searchLower = text.toLowerCase();
-            // Filter from original articles, not the current state which might be outdated
-            const allArticles = articles.filter(art => !art.on_website); // Only show articles not on website
-            const results = allArticles.filter(art =>
-                art.reference.toLowerCase().includes(searchLower) ||
-                art.designation.toLowerCase().includes(searchLower) ||
-                art.designation.toLowerCase().includes(searchLower) ||
-                (art.categorie?.nom && art.categorie.nom.toLowerCase().includes(searchLower))
-            );
-            
-            setSearchResults(results);
-            setSearchDropdownOpen(true);
+            setSearchLoading(true);
+            searchTimeoutRef.current = setTimeout(async () => {
+                try {
+                    const response = await searchArticles({
+                        query: text,
+                        onWebsite: false, // Only search for articles NOT on website
+                        limit: 10
+                    });
+                    setSearchResults(response.articles);
+                    setSearchDropdownOpen(true);
+                } catch (err) {
+                    console.error("Search error:", err);
+                } finally {
+                    setSearchLoading(false);
+                }
+            }, 500);
         } else {
             setSearchResults([]);
             setSearchDropdownOpen(false);
+            setSearchLoading(false);
         }
-    }, [articles]); // Depend on articles array
+    }, []);
     
     // Add article to website - FIXED to refetch data after successful add
     const handleAddToWebsite = useCallback(async (articleToAdd: Article, event?: React.MouseEvent) => {
@@ -176,16 +193,12 @@ const handleImagePreview = (imageUrl: string) => {
                 is_new_arrival: false
             });
 
-            setWebsiteArticles(prev => prev.filter(art => art.id !== articleId));
-            setArticles(prev => prev.map(art => 
-                art.id === articleId ? { ...art, on_website: false } : art
-            ));
-            
+            await fetchData();
             toast.success("Article retiré du site web");
         } catch (err) {
             toast.error("Échec du retrait du site web");
         }
-    }, []);
+    }, [fetchData]);
 
 
 
@@ -234,7 +247,6 @@ const handleRemoveImage = async (index: number) => {
             const updatedImages = selectedArticle.website_images?.filter((_, i) => i !== index) || [];
             const updatedArticle = { ...selectedArticle, website_images: updatedImages };
             setSelectedArticle(updatedArticle);
-            setArticles(prev => prev.map(a => a.id === selectedArticle.id ? updatedArticle : a));
             setWebsiteArticles(prev => prev.map(a => a.id === selectedArticle.id ? updatedArticle : a));
         }
 
@@ -297,13 +309,7 @@ const validation = useFormik({
                 await fetchData();
             } else {
                 // No new images, update local state
-                setArticles(prev => prev.map(art => 
-                    art.id === selectedArticle.id ? updatedArticle : art
-                ));
-                
-                setWebsiteArticles(prev => prev.map(art => 
-                    art.id === selectedArticle.id ? updatedArticle : art
-                ));
+                await fetchData();
             }
 
             setSettingsModal(false);
@@ -481,18 +487,32 @@ const validation = useFormik({
                     }
                 }}
             />
-            <i 
-                className={`ri-search-line search-icon position-absolute pointer-events-none ${
-                    searchText.length >= 3 ? 'text-primary' : 'text-muted'
-                }`}
-                style={{ 
-                    right: '15px', 
-                    top: '50%', 
-                    transform: 'translateY(-50%)',
-                    pointerEvents: 'none',
-                    zIndex: 4 
-                }}
-            ></i>
+            {searchLoading ? (
+                <div 
+                    className="position-absolute"
+                    style={{ 
+                        right: '15px', 
+                        top: '50%', 
+                        transform: 'translateY(-50%)',
+                        zIndex: 4 
+                    }}
+                >
+                    <Spinner size="sm" color="primary" />
+                </div>
+            ) : (
+                <i 
+                    className={`ri-search-line search-icon position-absolute pointer-events-none ${
+                        searchText.length >= 3 ? 'text-primary' : 'text-muted'
+                    }`}
+                    style={{ 
+                        right: '15px', 
+                        top: '50%', 
+                        transform: 'translateY(-50%)',
+                        pointerEvents: 'none',
+                        zIndex: 4 
+                    }}
+                ></i>
+            )}
             
             {/* Dropdown for search results */}
             {searchDropdownOpen && searchResults.length > 0 && (
@@ -569,7 +589,12 @@ const validation = useFormik({
                                         columns={columns}
                                         data={websiteArticles}
                                         isGlobalFilter={false}
-                                        customPageSize={10}
+                                        isPagination={true}
+                                        totalDataCount={totalCount}
+                                        currentPage={currentPage - 1}
+                                        onPageChange={(page: number) => setCurrentPage(page + 1)}
+                                        onPageSizeChange={(size: number) => setPageSize(size)}
+                                        customPageSize={pageSize}
                                         divClass="table-responsive table-card mb-1"
                                         tableClass="align-middle table-nowrap"
                                         theadClass="table-light text-muted text-uppercase"

@@ -6,7 +6,7 @@ import { Col, Container, Row } from 'reactstrap';
 import error500 from "../../../assets/images/error500.png";
 
 const Error500 = () => {
-    document.title="500 Error | Velzon - React Admin & Dashboard Template";
+    document.title="500 Error | Royal Lumiere";
 
     return (
         <React.Fragment>

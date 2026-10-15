@@ -8,7 +8,7 @@ import { createSelector } from 'reselect';
 
 
 const CryproOrder = () => {
-    document.title="Orders | Velzon - React Admin & Dashboard Template";
+    document.title="Orders | Royal Lumiere";
 
     const dispatch :any= useDispatch();
 

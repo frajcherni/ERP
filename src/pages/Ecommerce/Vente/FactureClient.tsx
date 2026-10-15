@@ -38,7 +38,7 @@ import DeleteModal from "../../../Components/Common/DeleteModal";
 import Loader from "../../../Components/Common/Loader";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-import { calculateDocumentTotals } from "../../../Utils/CalculationEngine";
+import { calculateDocumentTotals, calculateLineTotals } from "../../../Utils/CalculationEngine";
 import Flatpickr from "react-flatpickr";
 import * as Yup from "yup";
 import { useFormik } from "formik";
@@ -51,6 +51,10 @@ import {
   fetchCategories,
 } from "../../../Components/Article/ArticleServices";
 import { Categorie, Fournisseur } from "../../../Components/Article/Interfaces";
+import {
+  buildRootCategoryOptions,
+  buildSubcategoryOptions,
+} from "../../../Components/Article/CategoryTree";
 import FactureClientReceiptModal from "./FactureClientReceiptModal";
 import {
   fetchFacturesClientPaginated,
@@ -61,6 +65,10 @@ import {
   createEncaissementClient,
   fetchNextEncaissementNumberFromAPI,
 } from "./FactureClientServices";
+import {
+  createBonLivraison,
+  fetchNextLivraisonNumberAPI,
+} from "../../../Components/CommandeClient/BonLivraisonServices"; // ✅ ADD THIS
 import {
   searchArticles,
   searchClients,
@@ -83,6 +91,8 @@ import { useProfile } from "Components/Hooks/UserHooks";
 import logo from "../../../assets/images/imglogo.png"; // Add this import
 import backgroundImage from "../../../assets/images/backgroundImage.png"; // Add this import
 import EditClientModal from "./EditClientModal";
+import PhoneInput from "../../../Components/Common/PhoneInput";
+import { formatPhoneDisplay, formatPhoneSearch, PHONE_FORMAT_HINT } from "../../../helpers/phone_helper";
 
 import "./InvoiceModal.css";
 import DiscountAlertModal from "../../../Components/Common/DiscountAlertModal";
@@ -90,6 +100,35 @@ import "./ArticleTableStyles.css"; // Import unified table styles
 import FacturesListPDF from "./JournalFactures";
 import { calculateFactureTotals } from "../../../Utils/FactureHelper";
 import { fetchDepots } from "../Stock/DepotServices";
+
+// The facture list API merges the règlements of the source documents (bon de commande,
+// vente comptoire, bon de livraison) into `paymentMethods`. Only the facture's own
+// règlements may be edited or shown as "Règlements Facture": saving the merged list
+// would copy the source règlements into the facture and count them twice.
+const getOwnPaymentMethods = (facture: any): any[] =>
+  facture?.facturePaymentMethods ?? facture?.paymentMethods ?? [];
+
+// Other documents store some types differently ("Carte Bancaire TPE", "Espece"...);
+// map them to the values of the règlement select so the type is not lost on edit
+type ReglementMethod = "especes" | "cheque" | "virement" | "traite" | "tpe" | "retenue";
+const REGLEMENT_METHOD_ALIASES: Record<string, ReglementMethod> = {
+  especes: "especes",
+  espece: "especes",
+  "espèces": "especes",
+  cheque: "cheque",
+  "chèque": "cheque",
+  virement: "virement",
+  traite: "traite",
+  tpe: "tpe",
+  carte: "tpe",
+  "carte bancaire tpe": "tpe",
+  retenue: "retenue",
+  retention: "retenue",
+};
+// An unknown type is kept as-is: the select then shows "Sélectionner" and asks for one
+const normalizeReglementMethod = (method: any): ReglementMethod =>
+  REGLEMENT_METHOD_ALIASES[String(method ?? "").trim().toLowerCase()] ?? method;
+
 const ListFactureClient = () => {
   const [detailModal, setDetailModal] = useState(false);
   const [encaissementModal, setEncaissementModal] = useState(false);
@@ -99,6 +138,7 @@ const ListFactureClient = () => {
   );
   const [facture, setFacture] = useState<FactureClient | null>(null);
   const [isEdit, setIsEdit] = useState(false);
+  const [isCreatingBonLivraison, setIsCreatingBonLivraison] = useState(false); // ✅ ADD THIS
   const [activeTab, setActiveTab] = useState("1");
   const [factures, setFactures] = useState<FactureClient[]>([]);
   const [filteredFactures, setFilteredFactures] = useState<FactureClient[]>([]);
@@ -132,6 +172,7 @@ const ListFactureClient = () => {
       numero?: string;
       banque?: string;
       dateEcheance?: string;
+      date?: string;
       tauxRetention?: number;
     }>
   >([]);
@@ -191,18 +232,42 @@ const ListFactureClient = () => {
   // ===   // Function to generate PDF blob ===
 
   const generateJournalPDF = async () => {
-    // Fetch ALL factures matching the current date filters for the journal
-    // (the paginated list only shows 50 at a time, journal needs everything)
+    // Fetch ALL factures matching the current date filters for the journal.
+    // The API returns at most 100 factures per request, so load every page.
     toast.info("Chargement des factures pour le journal...", { autoClose: 2000 });
 
-    const journalResult = await fetchFacturesClientPaginated({
-      page: 1,
-      limit: 10000, // Get all matching factures for the journal
+    const filters = {
+      limit: 100, // server-side maximum per page
       startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
       endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
-    });
+    };
 
-    const journalFactures = journalResult.factures;
+    const firstPage = await fetchFacturesClientPaginated({ ...filters, page: 1 });
+    const { totalCount, totalPages } = firstPage.pagination;
+    // Keyed by id so a facture shifted between pages during the export is not listed twice
+    const byId = new Map<number, FactureClient>();
+    firstPage.factures.forEach((f) => byId.set(f.id, f));
+
+    // Load the remaining pages a few at a time to stay gentle on the server
+    const remainingPages = Array.from({ length: Math.max(0, totalPages - 1) }, (_, i) => i + 2);
+    for (let i = 0; i < remainingPages.length; i += 4) {
+      const results = await Promise.all(
+        remainingPages
+          .slice(i, i + 4)
+          .map((page) => fetchFacturesClientPaginated({ ...filters, page }))
+      );
+      results.forEach((result) => result.factures.forEach((f) => byId.set(f.id, f)));
+    }
+
+    const journalFactures = Array.from(byId.values());
+
+    // A failed page comes back empty: never export an incomplete journal
+    if (journalFactures.length < totalCount) {
+      toast.error(
+        `Impossible de charger toutes les factures (${journalFactures.length}/${totalCount}). Veuillez réessayer.`
+      );
+      return null;
+    }
 
     if (journalFactures.length === 0) {
       toast.warning("Aucune facture à exporter pour la période sélectionnée");
@@ -414,7 +479,6 @@ const ListFactureClient = () => {
   const [filteredFournisseurs, setFilteredFournisseurs] = useState<Fournisseur[]>([]);
   const [fournisseurSearch, setFournisseurSearch] = useState("");
   const [fournisseursLoading, setFournisseursLoading] = useState(false);
-  const [subcategories, setSubcategories] = useState<Categorie[]>([]);
 
   const [selectedArticles, setSelectedArticles] = useState<
     {
@@ -534,10 +598,10 @@ const ListFactureClient = () => {
         setNextFactureNumber(defaultNumber);
       }
     };
-    if (createEditModal && !isEdit) {
+    if (createEditModal && !isEdit && !isCreatingBonLivraison) {
       fetchNextNumber();
     }
-  }, [createEditModal, isEdit, factures.length]);
+  }, [createEditModal, isEdit, isCreatingBonLivraison, factures.length]);
   useEffect(() => {
     const fetchNextEncaissementNumber = async () => {
       try {
@@ -553,46 +617,12 @@ const ListFactureClient = () => {
     fetchNextEncaissementNumber();
   }, []);
 
-  const formatPhoneInput = (value: string): string => {
-    // Remove all non-digit characters
-    const cleaned = value.replace(/\D/g, "");
-
-    // Limit to 8 digits (Tunisian phone number length)
-    const limited = cleaned.slice(0, 8);
-
-    // Format as XX XXX XXX
-    if (limited.length <= 2) {
-      return limited;
-    } else if (limited.length <= 5) {
-      return `${limited.substring(0, 2)} ${limited.substring(2)}`;
-    } else {
-      return `${limited.substring(0, 2)} ${limited.substring(
-        2,
-        5
-      )} ${limited.substring(5, 8)}`;
-    }
-  };
-
-  // Display formatting function (if not already present)
-  const formatPhoneDisplay = (phone: string | null | undefined): string => {
-    if (!phone) return "N/A";
-
-    const cleanPhone = phone.replace(/\D/g, "");
-    if (cleanPhone.length === 8) {
-      return `${cleanPhone.substring(0, 2)} ${cleanPhone.substring(
-        2,
-        5
-      )} ${cleanPhone.substring(5, 8)}`;
-    }
-    return phone;
-  };
-
   // Update the client search useEffect
   // Replace your current client search useEffect with this:
   useEffect(() => {
     const searchClientsDebounced = async () => {
-      if (clientSearch.length >= 1 || createEditModal) {
-        await loadClients(clientSearch, 1, 10);
+      if (clientSearch.length >= 1) {
+        await loadClients(clientSearch, 1, 500);
       } else {
         setFilteredClients([]);
       }
@@ -600,28 +630,13 @@ const ListFactureClient = () => {
 
     const timer = setTimeout(searchClientsDebounced, 300);
     return () => clearTimeout(timer);
-  }, [clientSearch, createEditModal]);
+  }, [clientSearch]);
 
   // Replace the current useEffect for article search:
   useEffect(() => {
     const searchArticlesDebounced = async () => {
-      if (articleSearch.length >= 3 || createEditModal) {
-        setArticlesLoading(true);
-        try {
-          const result = await searchArticles({
-            query: articleSearch,
-            page: 1,
-            limit: 10,
-          });
-          if (articleSearch === "" && !createEditModal) {
-            setArticles(result.articles || []);
-          }
-          setFilteredArticles(result.articles || []);
-        } catch (err) {
-          console.error("Failed to load articles:", err);
-        } finally {
-          setArticlesLoading(false);
-        }
+      if (articleSearch.length >= 1) {
+        await loadArticles(articleSearch, 1, 10);
       } else {
         setFilteredArticles([]);
       }
@@ -629,7 +644,7 @@ const ListFactureClient = () => {
 
     const timer = setTimeout(searchArticlesDebounced, 300);
     return () => clearTimeout(timer);
-  }, [articleSearch, createEditModal]);
+  }, [articleSearch]);
 
   // ============================================================
   // OPTIMIZED: fetchData uses the paginated endpoint
@@ -659,7 +674,7 @@ const ListFactureClient = () => {
           limit: limit,
           search: searchText || undefined,
           searchPhone: searchPhone || undefined,
-          status: statusParam || undefined,
+          status: statusParam as "Brouillon" | "Validee" | "Payee" | "Annulee" | undefined,
           startDate: startDate
             ? moment(startDate).format("YYYY-MM-DD")
             : undefined,
@@ -681,9 +696,8 @@ const ListFactureClient = () => {
           paginatedResult = await paginatedPromise;
         }
 
-        // Server already computed all totals — just set the data
-        setFactures(paginatedResult.factures);
-        setFilteredFactures(paginatedResult.factures);
+        setFactures(paginatedResult.factures as FactureClient[]);
+        setFilteredFactures(paginatedResult.factures as FactureClient[]);
         setTotalCount(paginatedResult.pagination.totalCount);
         setTotalPages(paginatedResult.pagination.totalPages);
         setCurrentPage(paginatedResult.pagination.page);
@@ -692,13 +706,7 @@ const ListFactureClient = () => {
         if (!skipSecondary) {
           setSecondaryLoading(true);
           try {
-            const [articlesResult, clientsResult] = await Promise.all([
-              searchArticles({ query: "", page: 1, limit: 10 }),
-              searchClients({ query: "", page: 1, limit: 10 }),
-            ]);
-            setArticles(articlesResult.articles || []);
-            setClients(clientsResult.clients || []);
-            setFilteredClients(clientsResult.clients || []);
+            // Depots are already fetched in the first block
           } catch (secondaryErr) {
             console.error("Secondary data loading failed:", secondaryErr);
           } finally {
@@ -761,7 +769,7 @@ const ListFactureClient = () => {
   // Update fournisseur search effect
   useEffect(() => {
     const searchFournisseursDebounced = async () => {
-      if (fournisseurSearch.length >= 3) {
+      if (fournisseurSearch.length >= 1) {
         await loadFournisseurs(fournisseurSearch, 1, 20);
       } else {
         setFilteredFournisseurs([]);
@@ -776,24 +784,17 @@ const ListFactureClient = () => {
     if (createEditModal) {
       setModalLoading(true);
       try {
-        // Load categories and fournisseurs for article modal
-        const [categoriesResult, fournisseursData] = await Promise.all([
-          fetchCategories(),
-          fetchFournisseurs(),
+        const [categoriesResult, depotsResult] = await Promise.all([
+          categories.length === 0 ? fetchCategories() : Promise.resolve(categories),
+          depots.length === 0 ? fetchDepots() : Promise.resolve(depots)
         ]);
 
-        setCategories(categoriesResult);
-        setFournisseurs(fournisseursData);
-
-        // Load initial articles and clients for modal (EXACT SAME AS BL)
-        await Promise.all([
-          loadArticles("", 1, 10),
-          loadClients("", 1, 10),
-        ]);
+        if (categories.length === 0) setCategories(categoriesResult);
+        if (depots.length === 0) setDepots(depotsResult);
 
         // Auto-select default depot (Magasin) for new records
         if (!isEdit && !selectedDepot) {
-          const magasinDepot = depots.find(d =>
+          const magasinDepot = (depotsResult || depots).find(d =>
             d.nom.toLowerCase().includes("magasin") ||
             d.nom.toLowerCase().includes("magazin")
           );
@@ -1006,24 +1007,29 @@ const ListFactureClient = () => {
   };
 
 
-  // Add effect for subcategories
-  useEffect(() => {
-    if (newArticle.categorie_id) {
-      const categoryId = parseInt(newArticle.categorie_id);
-      const subs = categories.filter((cat) => cat.parent_id === categoryId);
-      setSubcategories(subs);
+  // Les deux listes suivent l'arborescence de la liste des catégories : la
+  // famille est une racine, la sous-famille n'importe laquelle de ses
+  // descendantes, indentée selon sa profondeur.
+  const familleOptions = useMemo(
+    () => buildRootCategoryOptions(categories),
+    [categories]
+  );
+  const sousFamilleOptions = useMemo(
+    () => buildSubcategoryOptions(categories, newArticle.categorie_id),
+    [categories, newArticle.categorie_id]
+  );
 
-      // Reset subcategory if parent category changes
-      if (
-        !subs.find((sub) => sub.id === parseInt(newArticle.sous_categorie_id))
-      ) {
-        setNewArticle((prev) => ({ ...prev, sous_categorie_id: "" }));
-      }
-    } else {
-      setSubcategories([]);
-      setNewArticle((prev) => ({ ...prev, sous_categorie_id: "" }));
+  // Une sous-famille qui ne vit plus sous la famille choisie n'a plus de sens.
+  // Tant que les catégories ne sont pas chargées on ne conclut rien.
+  useEffect(() => {
+    if (!categories.length || !newArticle.sous_categorie_id) return;
+    const stillThere = sousFamilleOptions.some(
+      (o) => String(o.id) === String(newArticle.sous_categorie_id)
+    );
+    if (!stillThere) {
+      setNewArticle((prev: any) => ({ ...prev, sous_categorie_id: "" }));
     }
-  }, [newArticle.categorie_id, categories]);
+  }, [sousFamilleOptions, categories.length, newArticle.sous_categorie_id]);
 
   // In your ListFactureClient component, add this state variable
   const [exoneration, setExoneration] = useState<boolean>(false);
@@ -1202,11 +1208,11 @@ const ListFactureClient = () => {
   };
 
   useEffect(() => {
-    if (createEditModal && !isEdit) {
+    if (createEditModal && !isEdit && !isCreatingBonLivraison) {
       setRemiseType("fixed");
       setGlobalRemise(0);
     }
-  }, [createEditModal, isEdit]);
+  }, [createEditModal, isEdit, isCreatingBonLivraison]);
   // Keep the formatPaymentMethodName function
   const formatPaymentMethodName = (method: string) => {
     switch (method) {
@@ -1560,6 +1566,7 @@ const ListFactureClient = () => {
       setRemiseType("fixed");
       setShowRemise(false);
       setIsEdit(false);
+      setIsCreatingBonLivraison(false); // ✅ RESET THIS
       setTimbreFiscal(true);
       setExoneration(false);
       setConditionPaiement("");
@@ -1575,6 +1582,63 @@ const ListFactureClient = () => {
     }
   }, [createEditModal]);
 
+  // ✅ ADD THIS FUNCTION FOR BL TRANSFORMATION
+  const prepareBonLivraisonCreation = async (facture: FactureClient) => {
+    try {
+      setModalLoading(true);
+      const nextNumero = await fetchNextLivraisonNumberAPI();
+
+      setDetailModal(false); // Close the detail modal
+      setFacture(facture);
+      setSelectedClient(facture.client || null);
+      setSelectedArticles(
+        facture.articles.map((item) => ({
+          article_id: item.article.id,
+          quantite: item.quantite,
+          prixUnitaire: Number(item.prixUnitaire),
+          prixTTC: Number(item.prix_ttc),
+          tva: item.tva != null ? Number(item.tva) : null,
+          remise: item.remise != null ? Number(item.remise) : null,
+          articleDetails: item.article,
+          designation: item.designation || item.article?.designation || "",
+        }))
+      );
+
+      setGlobalRemise(Number(facture.remise) || 0);
+      setRemiseType((facture.remiseType as "percentage" | "fixed") || "percentage");
+      setShowRemise(Number(facture.remise) > 0);
+      setLockedPercentage(facture.lockedPercentage != null ? Number(facture.lockedPercentage) : null);
+      setTimbreFiscal(!!facture.timbreFiscal);
+      setExoneration(!!facture.exoneration);
+      setEspaceNotes(facture.espaceNotes || "");
+      setSelectedVendeur(facture.vendeur || null);
+      setSelectedDepot(facture.depot || null);
+
+      setIsEdit(false);
+      setIsCreatingBonLivraison(true);
+      setNextFactureNumber(nextNumero);
+
+      // Initialize form with BL next number
+      setTimeout(() => {
+        validation.setValues({
+          ...validation.initialValues,
+          numeroFacture: nextNumero, // Use as BL number field in modal
+          dateFacture: moment().format("YYYY-MM-DD"),
+          client_id: facture.client?.id ?? "",
+          vendeur_id: facture.vendeur?.id ?? "",
+          depot_id: facture.depot?.id ?? "",
+          notes: facture.notes ?? "",
+        });
+      }, 0);
+
+      setCreateEditModal(true);
+    } catch (err) {
+      toast.error("Échec de la préparation du Bon de Livraison");
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
   // Ajouter méthode de règlement
   const addMethodeReglement = () => {
     setMethodesReglement((prev) => [
@@ -1583,6 +1647,7 @@ const ListFactureClient = () => {
         id: Date.now().toString(),
         method: "especes",
         amount: "",
+        date: moment().format("YYYY-MM-DD"),
       },
     ]);
   };
@@ -1641,6 +1706,60 @@ const ListFactureClient = () => {
       return;
     }
     try {
+      // Resolve each line's final HT/TTC through the shared calculation engine so
+      // that whatever the user typed in the table (including a not-yet-committed
+      // edit still sitting in editingHT/editingTTC) is what actually gets saved.
+      const resolvedArticles = selectedArticles.map((item, index) => {
+        const line = calculateLineTotals(item, index, { editingHT, editingTTC });
+        return {
+          ...item,
+          prixUnitaire: Math.round(line.unitHT * 1000) / 1000,
+          prixTTC: Math.round(line.unitTTC * 1000) / 1000,
+        };
+      });
+
+      if (isCreatingBonLivraison) {
+        const blData = {
+          numeroLivraison: values.numeroFacture, // Map to BL field
+          dateLivraison: values.dateFacture,
+          facture_id: facture?.id, // ✅ LINK TO ORIGIN FACTURE
+          client_id: selectedClient?.id,
+          vendeur_id: values.vendeur_id,
+          depot_id: values.depot_id,
+          articles: resolvedArticles.map((item) => ({
+            article_id: item.article_id,
+            quantite: item.quantite === "" ? 0 : Number(item.quantite),
+            prix_unitaire: item.prixUnitaire,
+            prix_ttc: item.prixTTC,
+            tva: item.tva,
+            remise: item.remise,
+            designation: item.designation,
+          })),
+          remise: globalRemise,
+          remiseType: remiseType,
+          taxMode: taxMode,
+          notes: values.notes,
+          espaceNotes: espaceNotes,
+          skipStockUpdate: true, // ✅ AS REQUESTED: NO STOCK REDUCTION
+          status: "Livree" as const,
+          totalHT: sousTotalHT,
+          totalTVA: totalTax,
+          totalTTC: grandTotal,
+          totalTTCAfterRemise: finalTotal,
+          montantPaye: 0,
+          resteAPayer: finalTotal,
+          hasPayments: false,
+          totalPaymentAmount: 0,
+          hasRetenue: false,
+          montantRetenue: 0,
+        };
+
+        await createBonLivraison(blData);
+        toast.success("Bon de Livraison créé avec succès");
+        toggleCreateEditModal();
+        fetchData(currentPage, pageSize, true);
+        return;
+      }
       // ✅ CORRECTED VALIDATION: Payment methods should not exceed finalTotal (BEFORE retention)
       // Retention is not a payment - it's a deduction from the total amount
       if (methodesReglement.length > 0) {
@@ -1659,24 +1778,27 @@ const ListFactureClient = () => {
             return sum + amountValue;
           }, 0);
 
-          // Check if total payments exceed the final total (BEFORE retention)
-          if (totalPaymentAmount > netAPayer) {
+          // The retenue is settled by the client's certificate, so real payments
+          // can only cover the net à payer minus the retenue
+          const montantAEncaisser = netAPayer - retentionMontant;
+
+          if (totalPaymentAmount > montantAEncaisser) {
             toast.error(
               `Le total des règlements (${totalPaymentAmount.toFixed(
                 3
-              )} DT) dépasse le montant net à payer (${netAPayer.toFixed(3)} DT)`
+              )} DT) dépasse le montant net à payer${retentionMontant > 0 ? " après retenue à la source" : ""} (${montantAEncaisser.toFixed(3)} DT)`
             );
             return;
           }
 
-          // Check if any individual payment method exceeds the final total
+          // Check if any individual payment method exceeds the amount to collect
           const hasIndividualExceed = nonRetentionPayments.some((pm) => {
             if (!pm.amount || pm.amount === "") return false;
             const amountValue =
               typeof pm.amount === "string"
                 ? parseFloat(pm.amount.replace(",", ".")) || 0
                 : Number(pm.amount) || 0;
-            return amountValue > netAPayer;
+            return amountValue > montantAEncaisser;
           });
 
           if (hasIndividualExceed) {
@@ -1748,7 +1870,7 @@ const ListFactureClient = () => {
         remise: globalRemise,
         remiseType: remiseType,
         lockedPercentage: lockedPercentage,
-        articles: selectedArticles.map((item) => ({
+        articles: resolvedArticles.map((item) => ({
           article_id: item.article_id,
           quantite: item.quantite,
           prix_unitaire: item.prixUnitaire,
@@ -1781,7 +1903,8 @@ const ListFactureClient = () => {
                 amount: 0,
                 numero: pm.numero || "",
                 banque: pm.banque || "",
-                dateEcheance: pm.dateEcheance || "",
+                date: pm.date || moment().format("YYYY-MM-DD"),
+                dateEcheance: pm.dateEcheance || pm.date || moment().format("YYYY-MM-DD"),
                 tauxRetention: pm.tauxRetention || 1,
               };
             }
@@ -1791,6 +1914,8 @@ const ListFactureClient = () => {
               amount: amountValue,
               numero: pm.numero || "",
               banque: pm.banque || "",
+              date: pm.date || moment().format("YYYY-MM-DD"),
+              // Keep dateEcheance independent for traite
               dateEcheance: pm.dateEcheance || "",
             };
           }),
@@ -1866,7 +1991,7 @@ const ListFactureClient = () => {
     enableReinitialize: true,
     initialValues: {
       numeroFacture: isEdit ? facture?.numeroFacture || "" : nextFactureNumber,
-      dateFacture: facture?.dateFacture
+      dateFacture: isEdit && facture?.dateFacture
         ? moment(facture.dateFacture).format("YYYY-MM-DD")
         : moment().format("YYYY-MM-DD"),
       status: facture?.status ?? "Brouillon",
@@ -2168,7 +2293,7 @@ const ListFactureClient = () => {
 
             const totals = calculateFactureTotals(selectedFacture);
             const currentPaid = Number(selectedFacture.montantPaye) || 0;
-            const realAvailable = Math.round((totals.netAPayer - currentPaid) * 1000) / 1000;
+            const realAvailable = Math.round((totals.netAPayer - totals.retentionMontant - currentPaid) * 1000) / 1000;
 
             const roundedValue = Math.round(numericValue * 1000) / 1000;
             return roundedValue <= Math.max(0, realAvailable) + 0.001; // Small buffer for rounding if needed
@@ -2335,29 +2460,47 @@ const ListFactureClient = () => {
         enableColumnFilter: false,
         cell: (cell: any) => {
           const facture = cell.row.original;
+          const sources: { date: string; badge: JSX.Element }[] = [];
+
           if (facture.bonCommandeClient) {
-            return (
-              <Badge color="info">
-                <i className="ri-shopping-bag-line me-1"></i>
-                {facture.bonCommandeClient.numeroCommande}
-              </Badge>
-            );
-          } else if (facture.bonLivraison) {
-            return (
-              <Badge color="secondary">
-                <i className="ri-truck-line me-1"></i>
-                {facture.bonLivraison.numeroLivraison}
-              </Badge>
-            );
-          } else if (facture.venteComptoire) {
-            return (
-              <Badge color="warning">
-                <i className="ri-store-line me-1"></i>
-                {facture.venteComptoire.numeroCommande}
-              </Badge>
-            );
+            sources.push({
+              date: facture.bonCommandeClient.dateCommande || "",
+              badge: (
+                <Badge color="info" className="d-block mb-1">
+                  <i className="ri-shopping-bag-line me-1"></i>
+                  {facture.bonCommandeClient.numeroCommande}
+                </Badge>
+              ),
+            });
           }
-          return "-";
+          if (facture.bonLivraison) {
+            sources.push({
+              date: facture.bonLivraison.dateLivraison || "",
+              badge: (
+                <Badge color="secondary" className="d-block mb-1">
+                  <i className="ri-truck-line me-1"></i>
+                  {facture.bonLivraison.numeroLivraison}
+                </Badge>
+              ),
+            });
+          }
+          if (facture.venteComptoire) {
+            sources.push({
+              date: facture.venteComptoire.dateCommande || "",
+              badge: (
+                <Badge color="warning" className="d-block mb-1">
+                  <i className="ri-store-line me-1"></i>
+                  {facture.venteComptoire.numeroCommande}
+                </Badge>
+              ),
+            });
+          }
+
+          if (sources.length === 0) return <span>-</span>;
+
+          sources.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+          return <div>{sources.map((s, i) => <span key={i}>{s.badge}</span>)}</div>;
         },
       },
       {
@@ -2406,7 +2549,7 @@ const ListFactureClient = () => {
         cell: (cell: any) => {
           const totals = calculateFactureTotals(cell.row.original);
           const paye = Number(cell.row.original.montantPaye) || 0;
-          const reste = Math.round((totals.netAPayer - paye) * 1000) / 1000;
+          const reste = Math.round((totals.netAPayer - totals.retentionMontant - paye) * 1000) / 1000;
           return `${Math.max(0, reste < 0.005 ? 0 : reste).toFixed(3)} DT`;
         },
       },
@@ -2418,7 +2561,7 @@ const ListFactureClient = () => {
           const facture = cell.row.original;
           const totals = calculateFactureTotals(facture);
           const paye = Number(facture.montantPaye) || 0;
-          const reste = Math.round((totals.netAPayer - paye) * 1000) / 1000;
+          const reste = Math.round((totals.netAPayer - totals.retentionMontant - paye) * 1000) / 1000;
 
           let status = facture.status;
           if (status !== "Annulee") {
@@ -2595,7 +2738,7 @@ const ListFactureClient = () => {
                           const value = e.target.value;
                           // Apply auto-space formatting for phone numbers
                           if (value) {
-                            const formatted = formatPhoneInput(value);
+                            const formatted = formatPhoneSearch(value);
                             setSearchPhone(formatted);
                           } else {
                             setSearchPhone("");
@@ -2976,37 +3119,14 @@ const ListFactureClient = () => {
                           <Label className="form-label fw-semibold">
                             Téléphone 1*
                           </Label>
-                          <div className="position-relative">
-                            <Input
-                              value={newClient.telephone1}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                // Auto-format phone number
-                                if (value) {
-                                  const formatted = formatPhoneInput(value);
-                                  setNewClient({
-                                    ...newClient,
-                                    telephone1: formatted,
-                                  });
-                                } else {
-                                  setNewClient({
-                                    ...newClient,
-                                    telephone1: value,
-                                  });
-                                }
-                              }}
-                              placeholder="22 222 222"
-                              className="form-control-lg pe-5"
-                            />
-                            {newClient.telephone1 && (
-                              <div className="position-absolute end-0 top-50 translate-middle-y me-3">
-                                <i className="ri-phone-line text-muted"></i>
-                              </div>
-                            )}
-                          </div>
-                          <small className="text-muted">
-                            Format automatique: XX XXX XXX
-                          </small>
+                          <PhoneInput
+                            value={newClient.telephone1}
+                            onChange={(telephone1) =>
+                              setNewClient({ ...newClient, telephone1 })
+                            }
+                            bsSize="lg"
+                          />
+                          <small className="text-muted">{PHONE_FORMAT_HINT}</small>
                         </div>
                       </Col>
                       <Col md={6}>
@@ -3014,37 +3134,14 @@ const ListFactureClient = () => {
                           <Label className="form-label fw-semibold">
                             Téléphone 2
                           </Label>
-                          <div className="position-relative">
-                            <Input
-                              value={newClient.telephone2}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                // Auto-format phone number
-                                if (value) {
-                                  const formatted = formatPhoneInput(value);
-                                  setNewClient({
-                                    ...newClient,
-                                    telephone2: formatted,
-                                  });
-                                } else {
-                                  setNewClient({
-                                    ...newClient,
-                                    telephone2: value,
-                                  });
-                                }
-                              }}
-                              placeholder="22 222 222"
-                              className="form-control-lg pe-5"
-                            />
-                            {newClient.telephone2 && (
-                              <div className="position-absolute end-0 top-50 translate-middle-y me-3">
-                                <i className="ri-phone-line text-muted"></i>
-                              </div>
-                            )}
-                          </div>
-                          <small className="text-muted">
-                            Format automatique: XX XXX XXX
-                          </small>
+                          <PhoneInput
+                            value={newClient.telephone2}
+                            onChange={(telephone2) =>
+                              setNewClient({ ...newClient, telephone2 })
+                            }
+                            bsSize="lg"
+                          />
+                          <small className="text-muted">{PHONE_FORMAT_HINT}</small>
                         </div>
                       </Col>
                     </Row>
@@ -3217,13 +3314,11 @@ const ListFactureClient = () => {
                                   <option value="">
                                     Sélectionner une famille principale
                                   </option>
-                                  {categories
-                                    .filter((c) => !c.parent_id)
-                                    .map((c) => (
-                                      <option key={c.id} value={c.id}>
-                                        {c.nom}
-                                      </option>
-                                    ))}
+                                  {familleOptions.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
+                                    </option>
+                                  ))}
                                 </Input>
                                 <small className="text-muted">
                                   Catégorie principale
@@ -3250,9 +3345,9 @@ const ListFactureClient = () => {
                                   <option value="">
                                     Sélectionner une sous-famille
                                   </option>
-                                  {subcategories.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      {s.nom}
+                                  {sousFamilleOptions.map((o) => (
+                                    <option key={o.id} value={o.id}>
+                                      {o.label}
                                     </option>
                                   ))}
                                 </Input>
@@ -3311,7 +3406,7 @@ const ListFactureClient = () => {
                                     )}
 
                                     {/* Enhanced Fournisseur Dropdown Results */}
-                                    {!newArticle.fournisseur_id && fournisseurSearch.length >= 3 && (
+                                    {!newArticle.fournisseur_id && fournisseurSearch.length >= 1 && (
                                       <div
                                         className="search-results fournisseur-results mt-1"
                                         style={{
@@ -3975,8 +4070,8 @@ const ListFactureClient = () => {
                                               <th className="text-end text-muted fs-6">
                                                 Montant retenu:
                                               </th>
-                                              <td className="text-end fw-semibold fs-6 text-danger">
-                                                - {retentionAmount.toFixed(3)} DT
+                                              <td className="text-end fw-semibold fs-6 text-info">
+                                                {retentionAmount.toFixed(3)} DT
                                               </td>
                                             </tr>
                                           )}
@@ -4017,9 +4112,8 @@ const ListFactureClient = () => {
 
                           {/* Payment Summary in Boxes */}
                           <Row className="g-3 mb-3">
-                            {/* Facture Payments */}
-                            {selectedFacture.paymentMethods &&
-                              selectedFacture.paymentMethods.filter(
+                            {/* Facture Payments (own règlements only, the source ones are shown below) */}
+                            {getOwnPaymentMethods(selectedFacture).filter(
                                 (pm: any) =>
                                   pm.method !== "retenue" &&
                                   Number(pm.amount || 0) > 0
@@ -4033,7 +4127,7 @@ const ListFactureClient = () => {
                                         </h6>
                                         <small className="text-muted">
                                           {
-                                            selectedFacture.paymentMethods.filter(
+                                            getOwnPaymentMethods(selectedFacture).filter(
                                               (pm: any) =>
                                                 pm.method !== "retenue" &&
                                                 Number(pm.amount || 0) > 0
@@ -4043,7 +4137,7 @@ const ListFactureClient = () => {
                                         </small>
                                       </div>
                                       <Badge color="primary">
-                                        {selectedFacture.paymentMethods
+                                        {getOwnPaymentMethods(selectedFacture)
                                           .filter(
                                             (pm: any) => pm.method !== "retenue"
                                           )
@@ -4414,7 +4508,7 @@ const ListFactureClient = () => {
                               }
                             )
                           );
-                          setGlobalRemise(selectedFacture.remise || 0);
+                          setGlobalRemise(parseFloat(String(selectedFacture.remise)) || 0);
                           setRemiseType(selectedFacture.remiseType || "fixed");
                           setShowRemise(
                             !!selectedFacture.remise &&
@@ -4427,21 +4521,24 @@ const ListFactureClient = () => {
                           );
                           setExoneration(!!selectedFacture.exoneration); // FIXED: Use boolean conversion
                           setMethodesReglement(
-                            selectedFacture.paymentMethods &&
-                              selectedFacture.paymentMethods.length > 0
-                              ? selectedFacture.paymentMethods.map(
-                                (pm: any, index: number) => ({
-                                  id: pm.id || `edit-${index}`,
-                                  method: pm.method,
-                                  amount: pm.amount
-                                    ? pm.amount.toFixed(3).replace(".", ",")
+                            getOwnPaymentMethods(selectedFacture)
+                              .map((pm: any, index: number) => ({
+                                id: pm.id || `edit-${index}`,
+                                method: normalizeReglementMethod(pm.method),
+                                amount:
+                                  Number(pm.amount) > 0
+                                    ? Number(pm.amount).toFixed(3).replace(".", ",")
                                     : "",
-                                  numero: pm.numero || "",
-                                  banque: pm.banque || "",
-                                  dateEcheance: pm.dateEcheance || "",
-                                })
-                              )
-                              : []
+                                numero: pm.numero || "",
+                                banque: pm.banque || "",
+                                // Keep the original dates and rate, otherwise saving resets
+                                // the payment date to today and the retenue rate to 1%
+                                date: pm.date || "",
+                                dateEcheance: pm.dateEcheance || "",
+                                tauxRetention: pm.tauxRetention,
+                              }))
+                              // A règlement without montant means nothing (only the retenue is computed)
+                              .filter((pm: any) => pm.method === "retenue" || pm.amount !== "")
                           );
                           setConditionPaiement(
                             selectedFacture.conditionPaiement
@@ -4503,6 +4600,19 @@ const ListFactureClient = () => {
                       </Button>
                     )}
 
+                    {/* Bon de Livraison Button */}
+                    {selectedFacture &&
+                      selectedFacture.status !== "Annulee" && (
+                        <Button
+                          color="warning"
+                          size="md"
+                          onClick={() => prepareBonLivraisonCreation(selectedFacture)}
+                          className="btn-invoice btn-invoice-warning me-2"
+                        >
+                          <i className="ri-truck-line me-2"></i> Bon de Livraison
+                        </Button>
+                      )}
+
                     <Button
                       color="danger"
                       size="md"
@@ -4547,12 +4657,16 @@ const ListFactureClient = () => {
                         <h4 className="mb-0 fw-bold text-dark">
                           {isEdit
                             ? "Modifier Facture"
-                            : "Créer Nouvelle Facture"}
+                            : isCreatingBonLivraison
+                              ? "Créer Bon de Livraison"
+                              : "Créer Nouvelle Facture"}
                         </h4>
                         <small className="text-muted">
                           {isEdit
                             ? "Modifier les détails de la facture existante"
-                            : "Créer une nouvelle facture client"}
+                            : isCreatingBonLivraison
+                              ? `Transformation de la Facture #${facture?.numeroFacture}`
+                              : "Créer une nouvelle facture client"}
                         </small>
                       </div>
                     </div>
@@ -4574,7 +4688,9 @@ const ListFactureClient = () => {
                             <Col md={4}>
                               <div className="mb-3">
                                 <Label className="form-label-lg fw-semibold">
-                                  Numéro de Facture{" "}
+                                  {isCreatingBonLivraison
+                                    ? "Numéro BL"
+                                    : "Numéro de Facture"}{" "}
                                   <span className="text-danger"> *</span>
                                 </Label>
                                 <Input
@@ -4587,7 +4703,7 @@ const ListFactureClient = () => {
                                   }
                                   readOnly={isEdit}
                                   className="form-control-lg"
-                                  placeholder="FAC-2024-001"
+                                  placeholder={isCreatingBonLivraison ? "BL-2024-001" : "FAC-2024-001"}
                                 />
                                 <FormFeedback className="fs-6">
                                   {validation.errors.numeroFacture}
@@ -4598,7 +4714,9 @@ const ListFactureClient = () => {
                             <Col md={4}>
                               <div className="mb-3">
                                 <Label className="form-label-lg fw-semibold">
-                                  Date de Facture
+                                  {isCreatingBonLivraison
+                                    ? "Date BL"
+                                    : "Date de Facture"}
                                   <span className="text-danger"> *</span>
                                 </Label>
                                 <Input
@@ -4716,7 +4834,7 @@ const ListFactureClient = () => {
                                         const digitCount = (value.match(/\d/g) || []).length;
                                         const totalLength = value.length;
                                         if (digitCount >= totalLength * 0.7) {
-                                          const formatted = formatPhoneInput(value);
+                                          const formatted = formatPhoneSearch(value);
                                           setClientSearch(formatted);
                                         } else {
                                           setClientSearch(value);
@@ -4762,7 +4880,7 @@ const ListFactureClient = () => {
                                 </div>
 
                                 {/* Dropdown Results - same enhanced style as Bon Commande */}
-                                {!selectedClient && clientSearch.length >= 3 && (
+                                {!selectedClient && clientSearch.length >= 1 && (
                                   <div
                                     className="search-results client-results mt-1"
                                     style={{
@@ -5852,7 +5970,7 @@ const ListFactureClient = () => {
                                                 : "0.001"
                                             }
                                             value={
-                                              globalRemise === 0
+                                              globalRemise === 0 && !isEdit && !isCreatingBonLivraison
                                                 ? ""
                                                 : globalRemise
                                             }
@@ -5959,7 +6077,7 @@ const ListFactureClient = () => {
                                           <tr className="real-time-update">
                                             <th className="text-end text-muted fs-6">Retenue à la source:</th>
                                             <td className="text-end text-info fw-bold fs-6">
-                                              - {retentionMontant.toFixed(3)} DT
+                                              {retentionMontant.toFixed(3)} DT
                                             </td>
                                           </tr>
                                         )}
@@ -6051,6 +6169,29 @@ const ListFactureClient = () => {
                                   </div>
 
                                   <Row className="g-3">
+                                    {/* Date Paiement */}
+                                    <Col md={3}>
+                                      <Label className="form-label fw-semibold">
+                                        Date Paiement*
+                                      </Label>
+                                      <Input
+                                        type="date"
+                                        value={
+                                          methode.date ||
+                                          moment().format("YYYY-MM-DD")
+                                        }
+                                        onChange={(e) =>
+                                          updateMethodeReglement(
+                                            methode.id,
+                                            "date",
+                                            e.target.value
+                                          )
+                                        }
+                                        className="form-control"
+                                        required
+                                      />
+                                    </Col>
+
                                     {/* Type de méthode */}
                                     <Col md={3}>
                                       <Label className="form-label fw-semibold">
@@ -6230,8 +6371,7 @@ const ListFactureClient = () => {
                                         <Input
                                           type="date"
                                           value={
-                                            methode.dateEcheance ||
-                                            moment().format("YYYY-MM-DD")
+                                            methode.dateEcheance || ""
                                           }
                                           onChange={(e) =>
                                             updateMethodeReglement(
@@ -6325,7 +6465,11 @@ const ListFactureClient = () => {
                         }
                       >
                         <i className="ri-save-line me-2"></i>
-                        {isEdit ? "Modifier la Facture" : "Créer la Facture"}
+                        {isEdit
+                          ? "Modifier la Facture"
+                          : isCreatingBonLivraison
+                            ? "Créer Bon de Livraison"
+                            : "Créer la Facture"}
                       </Button>
                     </ModalFooter>
                   </Form>
@@ -6413,9 +6557,10 @@ const ListFactureClient = () => {
                                 : 0;
 
                             const totals = calculateFactureTotals(selectedFacture);
-                            const finalTotal = totals.netAPayer;
+                            // netAPayer does not include the retenue, so deduct it here:
+                            // the retenue part is settled by the client's certificate
+                            const finalTotal = totals.netAPayer - totals.retentionMontant;
 
-                            // Note: netAPayer already factors in retention if present in paymentMethods
                             const totalPaye = selectedFacture.montantPaye || 0;
 
                             const availableAmount = Math.max(
@@ -6662,7 +6807,7 @@ const ListFactureClient = () => {
             }
 
             // Refresh clients list
-            loadClients(clientSearch, 1, 20);
+            loadClients(clientSearch, 1, 500);
           }}
         />
 

@@ -2,7 +2,7 @@ import React from 'react';
 import { Button, Card, CardBody, Col, Container, Row } from 'reactstrap';
 
 const Offlinepage = () => {
-    document.title = "Offline Page | Velzon - React Admin & Dashboard Template";
+    document.title = "Offline Page | Royal Lumiere";
 
     const refresh = () => {
         window.location.reload();

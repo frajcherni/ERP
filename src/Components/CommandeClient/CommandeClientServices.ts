@@ -21,6 +21,7 @@ export const fetchBonsCommandeClientPaginated = async (params: {
     page?: number;
     limit?: number;
     search?: string;
+    searchPhone?: string;
     status?: string;
     startDate?: string;
     endDate?: string;
@@ -35,9 +36,10 @@ export const fetchBonsCommandeClientPaginated = async (params: {
 }> => {
     try {
         const queryParams = new URLSearchParams();
-        if (params.page) queryParams.append("page", params.page.toString());
-        if (params.limit) queryParams.append("limit", params.limit.toString());
+        if (params.page != null) queryParams.append("page", params.page.toString());
+        if (params.limit != null) queryParams.append("limit", params.limit.toString());
         if (params.search) queryParams.append("search", params.search);
+        if (params.searchPhone) queryParams.append("searchPhone", params.searchPhone);
         if (params.status) queryParams.append("status", params.status);
         if (params.startDate) queryParams.append("startDate", params.startDate);
         if (params.endDate) queryParams.append("endDate", params.endDate);
@@ -197,6 +199,7 @@ export const fetchDevisPaginated = async (params: {
     page?: number;
     limit?: number;
     search?: string;
+    searchPhone?: string;
     status?: string;
     startDate?: string;
     endDate?: string;
@@ -211,9 +214,10 @@ export const fetchDevisPaginated = async (params: {
 }> => {
     try {
         const queryParams = new URLSearchParams();
-        if (params.page) queryParams.append("page", params.page.toString());
-        if (params.limit) queryParams.append("limit", params.limit.toString());
+        if (params.page != null) queryParams.append("page", params.page.toString());
+        if (params.limit != null) queryParams.append("limit", params.limit.toString());
         if (params.search) queryParams.append("search", params.search);
+        if (params.searchPhone) queryParams.append("searchPhone", params.searchPhone);
         if (params.status) queryParams.append("status", params.status);
         if (params.startDate) queryParams.append("startDate", params.startDate);
         if (params.endDate) queryParams.append("endDate", params.endDate);
@@ -277,6 +281,7 @@ export const fetchVenteComptoirePaginated = async (params: {
     page?: number;
     limit?: number;
     search?: string;
+    searchPhone?: string;
     status?: string;
     startDate?: string;
     endDate?: string;
@@ -291,9 +296,10 @@ export const fetchVenteComptoirePaginated = async (params: {
 }> => {
     try {
         const queryParams = new URLSearchParams();
-        if (params.page) queryParams.append("page", params.page.toString());
-        if (params.limit) queryParams.append("limit", params.limit.toString());
+        if (params.page != null) queryParams.append("page", params.page.toString());
+        if (params.limit != null) queryParams.append("limit", params.limit.toString());
         if (params.search) queryParams.append("search", params.search);
+        if (params.searchPhone) queryParams.append("searchPhone", params.searchPhone);
         if (params.status) queryParams.append("status", params.status);
         if (params.startDate) queryParams.append("startDate", params.startDate);
         if (params.endDate) queryParams.append("endDate", params.endDate);

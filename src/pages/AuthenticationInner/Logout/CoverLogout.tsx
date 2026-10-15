@@ -5,7 +5,7 @@ import { Card, Col, Container, Row } from 'reactstrap';
 import AuthSlider from '../authCarousel';
 
 const CoverLogout = () => {
-    document.title="Log Out | Velzon - React Admin & Dashboard Template";
+    document.title="Log Out | Royal Lumiere";
 
     return (
         <React.Fragment>

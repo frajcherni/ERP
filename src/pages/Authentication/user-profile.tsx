@@ -266,7 +266,7 @@ const UserProfile = () => {
     );
   }
 
-  document.title = "Profile | Velzon - React Admin & Dashboard Template";
+  document.title = "Profile | Royal Lumiere";
 
   return (
     <React.Fragment>

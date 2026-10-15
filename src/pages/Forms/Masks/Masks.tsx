@@ -6,7 +6,7 @@ import "cleave.js/dist/addons/cleave-phone.in";
 
 
 const Masks = () => {
-  document.title="Input Masks | Velzon - React Admin & Dashboard Template";
+  document.title="Input Masks | Royal Lumiere";
 
   const [date, setDate] = useState<any>("");
   const [dateFormat, setDateFormat] = useState<any>("");

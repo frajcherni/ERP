@@ -26,13 +26,11 @@ import Flatpickr from "react-flatpickr";
 import classnames from "classnames";
 
 // Import all services
-import { fetchBonsCommandeClient } from "../../../Components/CommandeClient/CommandeClientServices";
-import { fetchDevis } from "../../../Components/CommandeClient/CommandeClientServices";
-import { fetchFacturesClient } from "./FactureClientServices";
-import { FetchBonLivraison } from "../../../Components/CommandeClient/BonLivraisonServices";
-import { fetchVenteComptoire } from "../../../Components/CommandeClient/CommandeClientServices";
+import { fetchBonsCommandeClientPaginated, fetchDevisPaginated, fetchVenteComptoirePaginated } from "../../../Components/CommandeClient/CommandeClientServices";
+import { fetchFacturesClientPaginated, fetchEncaissementsClient } from "./FactureClientServices";
+import { FetchBonLivraisonPaginated } from "../../../Components/CommandeClient/BonLivraisonServices";
 import { fetchPaiementsClient } from "./PaiementBcClientServices";
-import { fetchEncaissementsClient } from "./FactureClientServices";
+import { formatPhoneSearch } from "../../../helpers/phone_helper";
 
 // Helper functions (same as existing components)
 const getSafeNumber = (value: any): number => {
@@ -273,24 +271,6 @@ const StatusBadge = ({ status }: { status?: string }) => {
   );
 };
 
-// Phone formatting
-const formatPhoneInput = (value: string): string => {
-  const cleaned = value.replace(/\D/g, "");
-  const limited = cleaned.slice(0, 8);
-  if (limited.length <= 2) return limited;
-  if (limited.length <= 5) return `${limited.substring(0, 2)} ${limited.substring(2)}`;
-  return `${limited.substring(0, 2)} ${limited.substring(2, 5)} ${limited.substring(5, 8)}`;
-};
-
-const formatPhoneDisplay = (phone: string | null | undefined): string => {
-  if (!phone) return "N/A";
-  const cleanPhone = phone.replace(/\D/g, "");
-  if (cleanPhone.length === 8) {
-    return `${cleanPhone.substring(0, 2)} ${cleanPhone.substring(2, 5)} ${cleanPhone.substring(5, 8)}`;
-  }
-  return phone;
-};
-
 const UnifiedDashboard = ({ hideHeader = false }: { hideHeader?: boolean }) => {
   const [activeTab, setActiveTab] = useState("1");
   const [loading, setLoading] = useState(true);
@@ -302,105 +282,111 @@ const UnifiedDashboard = ({ hideHeader = false }: { hideHeader?: boolean }) => {
   const [unifiedData, setUnifiedData] = useState<any[]>([]);
   const [filteredData, setFilteredData] = useState<any[]>([]);
 
+  // ── Pagination state ──────────────────────────────────────────
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [totalCount, setTotalCount] = useState(0);
+
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [debouncedPhone, setDebouncedPhone] = useState("");
+
+  // Handle debouncing for search
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchText), 500);
+    return () => clearTimeout(timer);
+  }, [searchText]);
+
+  // Handle debouncing for phone
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedPhone(searchPhone), 500);
+    return () => clearTimeout(timer);
+  }, [searchPhone]);
+
   const fetchAllData = useCallback(async () => {
     try {
       setLoading(true);
 
-      const [bonsData, devisData, facturesData, livraisonsData, ventesData, paiementsData, encaissementsData] = await Promise.all([
-        fetchBonsCommandeClient(),
-        fetchDevis(),
-        fetchFacturesClient(),
-        FetchBonLivraison(),
-        fetchVenteComptoire(),
-        fetchPaiementsClient(),
-        fetchEncaissementsClient(),
-      ]);
+      const commonParams = {
+        page: currentPage,
+        limit: pageSize,
+        search: debouncedSearch || undefined,
+        searchPhone: debouncedPhone || undefined,
+        startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
+        endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
+      };
 
-      const processed = [
-        ...bonsData.map((bon: any) => processBonCommande(bon, paiementsData)),
-        ...devisData.map((devis: any) => processDevis(devis)),
-        ...facturesData.map((facture: any) => processFacture(facture, encaissementsData)),
-        ...livraisonsData.map((bon: any) => processBonLivraison(bon, paiementsData)),
-        ...ventesData.map((vente: any) => processVenteComptoire(vente)),
-      ];
+      let processed: any[] = [];
+      let total = 0;
+
+      // Tab-specific fetching
+      if (activeTab === "1") {
+        const smallLimit = Math.max(5, Math.ceil(pageSize / 5));
+        const [bonsRes, devisRes, facturesRes, livraisonsRes, ventesRes, paiementsData, encaissementsData] = await Promise.all([
+          fetchBonsCommandeClientPaginated({ ...commonParams, limit: smallLimit }),
+          fetchDevisPaginated({ ...commonParams, limit: smallLimit }),
+          fetchFacturesClientPaginated({ ...commonParams, limit: smallLimit }),
+          FetchBonLivraisonPaginated({ ...commonParams, limit: smallLimit }),
+          fetchVenteComptoirePaginated({ ...commonParams, limit: smallLimit }),
+          fetchPaiementsClient(),
+          fetchEncaissementsClient(),
+        ]);
+
+        processed = [
+          ...bonsRes.bons.map((bon: any) => processBonCommande(bon, paiementsData)),
+          ...devisRes.devis.map((devis: any) => processDevis(devis)),
+          ...facturesRes.factures.map((facture: any) => processFacture(facture, encaissementsData)),
+          ...livraisonsRes.bons.map((bon: any) => processBonLivraison(bon, paiementsData)),
+          ...ventesRes.bons.map((vente: any) => processVenteComptoire(vente)),
+        ];
+        total = bonsRes.pagination.totalCount + devisRes.pagination.totalCount + facturesRes.pagination.totalCount + livraisonsRes.pagination.totalCount + ventesRes.pagination.totalCount;
+      } else if (activeTab === "2") {
+        const [res, paiementsData] = await Promise.all([fetchBonsCommandeClientPaginated(commonParams), fetchPaiementsClient()]);
+        processed = res.bons.map((bon: any) => processBonCommande(bon, paiementsData));
+        total = res.pagination.totalCount;
+      } else if (activeTab === "3") {
+        const res = await fetchDevisPaginated(commonParams);
+        processed = res.devis.map((devis: any) => processDevis(devis));
+        total = res.pagination.totalCount;
+      } else if (activeTab === "4") {
+        const [res, encaissementsData] = await Promise.all([fetchFacturesClientPaginated(commonParams), fetchEncaissementsClient()]);
+        processed = res.factures.map((facture: any) => processFacture(facture, encaissementsData));
+        total = res.pagination.totalCount;
+      } else if (activeTab === "5") {
+        const [res, paiementsData] = await Promise.all([FetchBonLivraisonPaginated(commonParams), fetchPaiementsClient()]);
+        processed = res.bons.map((bon: any) => processBonLivraison(bon, paiementsData));
+        total = res.pagination.totalCount;
+      } else if (activeTab === "6") {
+        const res = await fetchVenteComptoirePaginated(commonParams);
+        processed = res.bons.map((vente: any) => processVenteComptoire(vente));
+        total = res.pagination.totalCount;
+      }
 
       setUnifiedData(processed);
+      setFilteredData(processed);
+      setTotalCount(total);
       setLoading(false);
     } catch (err) {
       console.error("Error fetching data:", err);
       setError(err instanceof Error ? err.message : "Échec du chargement des données");
       setLoading(false);
     }
-  }, []);
+  }, [activeTab, currentPage, pageSize, debouncedSearch, debouncedPhone, startDate, endDate]);
 
   useEffect(() => {
     fetchAllData();
   }, [fetchAllData]);
 
-  // Filter data
   useEffect(() => {
-    let result = [...unifiedData];
-
-    // Filter by tab
-    if (activeTab === "2") {
-      result = result.filter((item) => item.sourceType === "Bon Commande");
-    } else if (activeTab === "3") {
-      result = result.filter((item) => item.sourceType === "Devis");
-    } else if (activeTab === "4") {
-      result = result.filter((item) => item.sourceType === "Facture");
-    } else if (activeTab === "5") {
-      result = result.filter((item) => item.sourceType === "Bon Livraison");
-    } else if (activeTab === "6") {
-      result = result.filter((item) => item.sourceType === "Vente Comptoire");
-    }
-
-    // Filter by date
-    if (startDate && endDate) {
-      const start = moment(startDate).startOf("day");
-      const end = moment(endDate).endOf("day");
-      result = result.filter((item) => {
-        const itemDate = moment(item.displayDate);
-        return itemDate.isBetween(start, end, null, "[]");
-      });
-    }
-
-    // Filter by search text
-    if (searchText) {
-      const searchLower = searchText.toLowerCase();
-      result = result.filter((item) => {
-        const numero = (item.displayNumero || "").toLowerCase();
-        const clientName = (item.client?.raison_sociale || "").toLowerCase();
-        const clientDesignation = (item.client?.designation || "").toLowerCase();
-        return numero.includes(searchLower) || clientName.includes(searchLower) || clientDesignation.includes(searchLower);
-      });
-    }
-
-    // Filter by phone
-    if (searchPhone) {
-      const cleanPhoneSearch = searchPhone.replace(/\s/g, "").trim();
-      result = result.filter((item) => {
-        if (!item.client) return false;
-        const phone1 = (item.client.telephone1 || "").replace(/\s/g, "");
-        const phone2 = (item.client.telephone2 || "").replace(/\s/g, "");
-        return phone1.includes(cleanPhoneSearch) || phone2.includes(cleanPhoneSearch);
-      });
-    }
-
-    setFilteredData(result);
-  }, [activeTab, startDate, endDate, searchText, searchPhone, unifiedData]);
+    setCurrentPage(1);
+  }, [activeTab, debouncedSearch, debouncedPhone, startDate, endDate]);
 
   // Table columns - using the same pattern as existing pages
   const columns = useMemo(() => [
-
     {
       header: "Numéro",
       accessorKey: "displayNumero",
       enableColumnFilter: false,
-      cell: (cell: any) => (
-        <span className="text-body fw-medium">
-          {cell.getValue()}
-        </span>
-      ),
+      cell: (cell: any) => <span className="text-body fw-medium">{cell.getValue()}</span>,
     },
     {
       header: "Date",
@@ -423,7 +409,6 @@ const UnifiedDashboard = ({ hideHeader = false }: { hideHeader?: boolean }) => {
         return vendeur ? `${vendeur.nom || ""} ${vendeur.prenom || ""}` : "-";
       },
     },
-
     {
       header: "Net à Payer",
       accessorKey: "displayTotal",
@@ -457,16 +442,6 @@ const UnifiedDashboard = ({ hideHeader = false }: { hideHeader?: boolean }) => {
     },
   ], []);
 
-  // Calculate statistics
-  const stats = {
-    total: filteredData.length,
-    totalAmount: filteredData.reduce((sum, item) => sum + (item.displayTotal || 0), 0),
-    totalPaid: filteredData.reduce((sum, item) => sum + (item.displayPaid || 0), 0),
-    totalReste: filteredData.reduce((sum, item) => sum + (item.displayReste || 0), 0),
-    totalArticles: filteredData.reduce((sum, item) => sum + (item.articles?.length || 0), 0),
-    uniqueClients: new Set(filteredData.map((item) => item.client?.id).filter(Boolean)).size,
-  };
-
   return (
     <div className={hideHeader ? "" : "page-content"}>
       <Container fluid style={{ maxWidth: "100%" }}>
@@ -478,135 +453,92 @@ const UnifiedDashboard = ({ hideHeader = false }: { hideHeader?: boolean }) => {
               <CardHeader className="card-header border-0">
                 <Row className="align-items-center gy-3">
                   <div className="col-sm">
-                    <h5 className="card-title mb-0">
-                      Gestion
-                    </h5>
+                    <h5 className="card-title mb-0">Gestion</h5>
                   </div>
                   <div className="col-sm-auto">
-                    <div className="d-flex gap-1 flex-wrap">
-                      <Button
-                        color="info"
-                        onClick={() => {
-                          setStartDate(null);
-                          setEndDate(null);
-                          setSearchText("");
-                          setSearchPhone("");
-                        }}
-                        size="sm"
-                      >
-                        <i className="ri-close-line align-bottom me-1"></i>
-                        Réinitialiser tous les filtres
-                      </Button>
-                    </div>
+                    <Button
+                      color="info"
+                      onClick={() => {
+                        setStartDate(null);
+                        setEndDate(null);
+                        setSearchText("");
+                        setSearchPhone("");
+                        setCurrentPage(1);
+                      }}
+                      size="sm"
+                    >
+                      <i className="ri-close-line align-bottom me-1"></i> Réinitialiser
+                    </Button>
                   </div>
                 </Row>
               </CardHeader>
 
               <Nav className="nav-tabs nav-tabs-custom nav-success" role="tablist">
                 <NavItem>
-                  <NavLink
-                    className={classnames({ active: activeTab === "1" })}
-                    onClick={() => setActiveTab("1")}
-                  >
-                    <i className="ri-apps-line me-1 align-bottom"></i> Tous ({unifiedData.length})
+                  <NavLink className={classnames({ active: activeTab === "1" })} onClick={() => setActiveTab("1")}>
+                    <i className="ri-apps-line me-1 align-bottom"></i> Tous
                   </NavLink>
                 </NavItem>
                 <NavItem>
-                  <NavLink
-                    className={classnames({ active: activeTab === "2" })}
-                    onClick={() => setActiveTab("2")}
-                  >
+                  <NavLink className={classnames({ active: activeTab === "2" })} onClick={() => setActiveTab("2")}>
                     <i className="ri-shopping-bag-line me-1 align-bottom"></i> Bons Commande
                   </NavLink>
                 </NavItem>
                 <NavItem>
-                  <NavLink
-                    className={classnames({ active: activeTab === "3" })}
-                    onClick={() => setActiveTab("3")}
-                  >
+                  <NavLink className={classnames({ active: activeTab === "3" })} onClick={() => setActiveTab("3")}>
                     <i className="ri-file-list-3-line me-1 align-bottom"></i> Devis
                   </NavLink>
                 </NavItem>
                 <NavItem>
-                  <NavLink
-                    className={classnames({ active: activeTab === "4" })}
-                    onClick={() => setActiveTab("4")}
-                  >
+                  <NavLink className={classnames({ active: activeTab === "4" })} onClick={() => setActiveTab("4")}>
                     <i className="ri-file-text-line me-1 align-bottom"></i> Factures
                   </NavLink>
                 </NavItem>
                 <NavItem>
-                  <NavLink
-                    className={classnames({ active: activeTab === "5" })}
-                    onClick={() => setActiveTab("5")}
-                  >
+                  <NavLink className={classnames({ active: activeTab === "5" })} onClick={() => setActiveTab("5")}>
                     <i className="ri-truck-line me-1 align-bottom"></i> Bons Livraison
                   </NavLink>
                 </NavItem>
                 <NavItem>
-                  <NavLink
-                    className={classnames({ active: activeTab === "6" })}
-                    onClick={() => setActiveTab("6")}
-                  >
+                  <NavLink className={classnames({ active: activeTab === "6" })} onClick={() => setActiveTab("6")}>
                     <i className="ri-store-line me-1 align-bottom"></i> Ventes Comptoire
                   </NavLink>
                 </NavItem>
               </Nav>
 
               <CardBody className="pt-3">
-                {/* Filters Row */}
                 <Row className="mb-3">
                   <Col md={3}>
-                    <div className="search-box">
-                      <InputGroup>
-                        <InputGroupText>
-                          <i className="ri-search-line"></i>
-                        </InputGroupText>
-                        <input
-                          type="text"
-                          className="form-control"
-                          placeholder="Rechercher par numéro, client..."
-                          value={searchText}
-                          onChange={(e) => setSearchText(e.target.value)}
-                        />
-                      </InputGroup>
-                    </div>
+                    <InputGroup>
+                      <InputGroupText><i className="ri-search-line"></i></InputGroupText>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Numéro, client..."
+                        value={searchText}
+                        onChange={(e) => setSearchText(e.target.value)}
+                      />
+                    </InputGroup>
                   </Col>
                   <Col md={3}>
-                    <div className="search-box">
-                      <InputGroup>
-                        <InputGroupText>
-                          <i className="ri-phone-line"></i>
-                        </InputGroupText>
-                        <input
-                          type="text"
-                          className="form-control"
-                          placeholder="Rechercher par téléphone..."
-                          value={searchPhone}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            if (value) {
-                              const formatted = formatPhoneInput(value);
-                              setSearchPhone(formatted);
-                            } else {
-                              setSearchPhone("");
-                            }
-                          }}
-                        />
-                      </InputGroup>
-                    </div>
+                    <InputGroup>
+                      <InputGroupText><i className="ri-phone-line"></i></InputGroupText>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Téléphone..."
+                        value={searchPhone}
+                        onChange={(e) => setSearchPhone(formatPhoneSearch(e.target.value))}
+                      />
+                    </InputGroup>
                   </Col>
                   <Col md={3}>
                     <InputGroup>
                       <InputGroupText>De</InputGroupText>
                       <Flatpickr
                         className="form-control"
-                        options={{
-                          dateFormat: "d M, Y",
-                          altInput: true,
-                          altFormat: "F j, Y",
-                        }}
-                        placeholder="Date de début"
+                        options={{ dateFormat: "d M, Y" }}
+                        placeholder="Date début"
                         value={startDate ? [startDate] : []}
                         onChange={(dates) => setStartDate(dates[0])}
                       />
@@ -617,12 +549,8 @@ const UnifiedDashboard = ({ hideHeader = false }: { hideHeader?: boolean }) => {
                       <InputGroupText>À</InputGroupText>
                       <Flatpickr
                         className="form-control"
-                        options={{
-                          dateFormat: "d M, Y",
-                          altInput: true,
-                          altFormat: "F j, Y",
-                        }}
-                        placeholder="Date de fin"
+                        options={{ dateFormat: "d M, Y" }}
+                        placeholder="Date fin"
                         value={endDate ? [endDate] : []}
                         onChange={(dates) => setEndDate(dates[0])}
                       />
@@ -630,22 +558,20 @@ const UnifiedDashboard = ({ hideHeader = false }: { hideHeader?: boolean }) => {
                   </Col>
                 </Row>
 
-
-
-                {/* Data Table */}
-                {loading ? (
-                  <Loader />
-                ) : error ? (
-                  <div className="text-danger">{error}</div>
-                ) : (
+                {loading ? <Loader /> : error ? <div className="text-danger">{error}</div> : (
                   <TableContainer
                     columns={columns}
                     data={filteredData}
                     isGlobalFilter={false}
-                    customPageSize={10}
+                    customPageSize={pageSize}
                     divClass="table-responsive table-card mb-1 mt-0"
                     tableClass="align-middle table-nowrap"
                     theadClass="table-light text-muted text-uppercase"
+                    isPagination={true}
+                    totalDataCount={totalCount}
+                    currentPage={currentPage - 1}
+                    onPageChange={(page: number) => setCurrentPage(page + 1)}
+                    onPageSizeChange={(size: number) => setPageSize(size)}
                   />
                 )}
 

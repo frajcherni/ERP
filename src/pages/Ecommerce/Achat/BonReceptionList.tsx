@@ -52,6 +52,10 @@ const BonReceptionList = () => {
     const [selectedFournisseur, setSelectedFournisseur] = useState<Fournisseur | null>(null);
     const [filteredArticles, setFilteredArticles] = useState<Article[]>([]);
     const [filteredFournisseurs, setFilteredFournisseurs] = useState<Fournisseur[]>([]);
+    // Keyboard navigation for the article search dropdown (same UX as Commande/Facture/Vente)
+    const [focusedIndex, setFocusedIndex] = useState(-1);
+    const [dropdownRef, setDropdownRef] = useState<HTMLDivElement | null>(null);
+    const [itemRefs, setItemRefs] = useState<React.RefObject<HTMLLIElement>[]>([]);
  // Add these states near your other useState declarations
 const [editingTTC, setEditingTTC] = useState<{ [key: number]: string }>({});
 const [editingHT, setEditingHT] = useState<{ [key: number]: string }>({});
@@ -124,12 +128,33 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
     } else {
       setFilteredArticles([]);
     }
+    // Reset keyboard focus whenever the result set changes
+    setFocusedIndex(-1);
+    setItemRefs([]);
   }, [articleSearch, articles]);
+
+  // Scroll the focused item into view as the user navigates with arrow keys
+  useEffect(() => {
+    if (focusedIndex >= 0 && itemRefs[focusedIndex]?.current && dropdownRef) {
+      const item = itemRefs[focusedIndex].current!;
+      const dropdown = dropdownRef;
+      const itemTop = item.offsetTop;
+      const itemBottom = itemTop + item.offsetHeight;
+      const dropdownTop = dropdown.scrollTop;
+      const dropdownBottom = dropdownTop + dropdown.clientHeight;
+
+      if (itemTop < dropdownTop) {
+        dropdown.scrollTop = itemTop;
+      } else if (itemBottom > dropdownBottom) {
+        dropdown.scrollTop = itemBottom - dropdown.clientHeight;
+      }
+    }
+  }, [focusedIndex, dropdownRef, itemRefs]);
   
   // Update fournisseur search effect
   useEffect(() => {
     const searchFournisseursDebounced = async () => {
-      if (fournisseurSearch.length >= 3) {
+      if (fournisseurSearch.length >= 1) {
         const filtered = fournisseurs.filter(
           (fournisseur) =>
             (fournisseur.raison_sociale?.toLowerCase() || "").includes(fournisseurSearch.toLowerCase())
@@ -510,7 +535,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
             ...selectedArticles,
             {
               article_id: article.id,
-              quantite: "", // Start with empty instead of 0
+              quantite: 1, // Default quantity to 1 on add (réception)
               prixUnitaire: initialHT,
               prixTTC: Math.round(initialTTC * 1000) / 1000, // Ensure proper rounding
               tva: initialTVA,
@@ -521,6 +546,34 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
           ]);
         }
       };
+
+    // Keyboard navigation for the article search input (Arrow Up/Down, Enter, Escape)
+    const handleArticleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (filteredArticles.length === 0) return;
+
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setFocusedIndex((prev) => (prev < filteredArticles.length - 1 ? prev + 1 : 0));
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setFocusedIndex((prev) => (prev > 0 ? prev - 1 : filteredArticles.length - 1));
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+            // If nothing highlighted yet, pick the first result
+            const article = focusedIndex >= 0 ? filteredArticles[focusedIndex] : filteredArticles[0];
+            if (article) {
+                handleAddArticle(article.id.toString());
+                setArticleSearch("");
+                setFilteredArticles([]);
+                setFocusedIndex(-1);
+            }
+        } else if (e.key === "Escape") {
+            e.preventDefault();
+            setArticleSearch("");
+            setFilteredArticles([]);
+            setFocusedIndex(-1);
+        }
+    };
 
     const handleRemoveArticle = (articleId: number) => {
         setSelectedArticles(selectedArticles.filter(item => item.article_id !== articleId));
@@ -741,6 +794,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                             quantite: item.quantite,
                                             quantiteRecue: item.quantiteRecue,
                                             prixUnitaire: parseFloat(item.prixUnitaire),
+                                            prixTTC: (parseFloat(item.prixUnitaire) || 0) * (1 + ((item.tva != null ? parseFloat(item.tva) : 0) / 100)),
                                             tva: item.tva != null ? parseFloat(item.tva) : null,
                                             remise: item.remise != null ? parseFloat(item.remise) : null,
                                             articleDetails: item.article,
@@ -1211,6 +1265,8 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
         setGlobalRemise(selectedBonReception?.remise || 0);
         setRemiseType((selectedBonReception?.remiseType as "percentage" | "fixed" | undefined) ?? "percentage");
         setShowRemise((selectedBonReception?.remise || 0) > 0);
+        setSelectedFournisseur(selectedBonReception?.fournisseur || null);
+        setSelectedDepot(selectedBonReception?.depot || null);
         setIsEdit(true);
         setModal(true);
       }}
@@ -1523,7 +1579,11 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                   type="text"
                   placeholder="Rechercher article..."
                   value={articleSearch}
-                  onChange={(e) => setArticleSearch(e.target.value)}
+                  onChange={(e) => {
+                    setArticleSearch(e.target.value);
+                    setFocusedIndex(-1);
+                  }}
+                  onKeyDown={handleArticleSearchKeyDown}
                   className="form-control-lg ps-5"
                 />
                 <i className="ri-search-line search-icon position-absolute top-50 start-0 translate-middle-y ms-3 fs-5 text-muted"></i>
@@ -1535,40 +1595,61 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
             
             {/* Scrollable Dropdown Results */}
             {articleSearch.length >= 1 && (
-              <div 
+              <div
+                ref={setDropdownRef}
                 className="search-results mt-2 border rounded shadow-sm"
-                style={{ 
-                  maxHeight: "300px", 
+                style={{
+                  maxHeight: "300px",
                   overflowY: "auto",
                   position: "relative",
                   zIndex: 1000,
                   backgroundColor: "white"
                 }}
+                onKeyDown={(e) => e.stopPropagation()}
               >
                 {filteredArticles.length > 0 ? (
                   <ul className="list-group list-group-flush">
-                    {filteredArticles.map((article) => (
+                    {filteredArticles.map((article, index) => {
+                      if (!itemRefs[index]) {
+                        itemRefs[index] = React.createRef<HTMLLIElement>();
+                      }
+                      return (
                       <li
                         key={article.id}
+                        ref={itemRefs[index]}
                         className="list-group-item list-group-item-action"
                         onClick={() => {
                           handleAddArticle(article.id.toString());
                           setArticleSearch("");
                           setFilteredArticles([]);
+                          setFocusedIndex(-1);
                         }}
-                        style={{ 
-                          cursor: "pointer", 
+                        onMouseEnter={() => setFocusedIndex(index)}
+                        style={{
+                          cursor: "pointer",
                           padding: "12px 15px",
-                          opacity: selectedArticles.some(item => item.article_id === article.id) ? 0.6 : 1
+                          opacity: selectedArticles.some(item => item.article_id === article.id) ? 0.6 : 1,
+                          backgroundColor: focusedIndex === index ? "#e7f1ff" : "transparent",
+                          borderLeft: focusedIndex === index ? "4px solid #0d6efd" : "none"
                         }}
                       >
                         <div className="d-flex justify-content-between align-items-center">
                           <div className="flex-grow-1">
-                            <strong className="d-block">{article.designation}</strong>
-                            <small className="text-muted">
-                              Réf: {article.reference} | Stock: {article.qte} | 
-                              HT: {(Number(article.pua_ht) || 0).toFixed(3)} DT
+                            <div className="d-flex align-items-center mb-1">
+                              <strong className="fs-6 me-2 text-primary">{article.reference}</strong>
+                              <span className="badge bg-light text-dark me-2">Stock: {article.qte || 0}</span>
+                            </div>
+                            <small className="text-muted d-block" style={{ fontSize: "0.85rem" }}>
+                              {article.designation}
                             </small>
+                            <div className="mt-1">
+                              <span className="badge bg-success text-white">
+                                HT: {(Number(article.pua_ht) || 0).toFixed(3)} DT
+                              </span>
+                              {article.tva && article.tva > 0 && (
+                                <span className="badge bg-info ms-1">TVA: {article.tva}%</span>
+                              )}
+                            </div>
                           </div>
                           <div className="d-flex align-items-center gap-2">
                             {selectedArticles.some(item => item.article_id === article.id) ? (
@@ -1582,7 +1663,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                 Ajouter
                               </Badge>
                             )}
-                            <Button 
+                            <Button
                               color="link" 
                               className="text-primary p-0" 
                               onClick={(e) => {
@@ -1596,7 +1677,8 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                           </div>
                         </div>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 ) : (
                   <div className="text-muted p-3 text-center">
@@ -2271,7 +2353,11 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                 type="text"
                 placeholder="Rechercher article..."
                 value={articleSearch}
-                onChange={(e) => setArticleSearch(e.target.value)}
+                onChange={(e) => {
+                  setArticleSearch(e.target.value);
+                  setFocusedIndex(-1);
+                }}
+                onKeyDown={handleArticleSearchKeyDown}
                 className="form-control-lg ps-5"
               />
               <i className="ri-search-line search-icon position-absolute top-50 start-0 translate-middle-y ms-3 fs-5 text-muted"></i>
@@ -2279,40 +2365,61 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
             
             {/* Scrollable Dropdown Results */}
             {articleSearch.length >= 1 && (
-              <div 
+              <div
+                ref={setDropdownRef}
                 className="search-results mt-2 border rounded shadow-sm"
-                style={{ 
-                  maxHeight: "300px", 
+                style={{
+                  maxHeight: "300px",
                   overflowY: "auto",
                   position: "relative",
                   zIndex: 1000,
                   backgroundColor: "white"
                 }}
+                onKeyDown={(e) => e.stopPropagation()}
               >
                 {filteredArticles.length > 0 ? (
                   <ul className="list-group list-group-flush">
-                    {filteredArticles.map((article) => (
+                    {filteredArticles.map((article, index) => {
+                      if (!itemRefs[index]) {
+                        itemRefs[index] = React.createRef<HTMLLIElement>();
+                      }
+                      return (
                       <li
                         key={article.id}
+                        ref={itemRefs[index]}
                         className="list-group-item list-group-item-action"
                         onClick={() => {
                           handleAddArticle(article.id.toString());
                           setArticleSearch("");
                           setFilteredArticles([]);
+                          setFocusedIndex(-1);
                         }}
-                        style={{ 
-                          cursor: "pointer", 
+                        onMouseEnter={() => setFocusedIndex(index)}
+                        style={{
+                          cursor: "pointer",
                           padding: "12px 15px",
-                          opacity: selectedArticles.some(item => item.article_id === article.id) ? 0.6 : 1
+                          opacity: selectedArticles.some(item => item.article_id === article.id) ? 0.6 : 1,
+                          backgroundColor: focusedIndex === index ? "#e7f1ff" : "transparent",
+                          borderLeft: focusedIndex === index ? "4px solid #0d6efd" : "none"
                         }}
                       >
                         <div className="d-flex justify-content-between align-items-center">
                           <div className="flex-grow-1">
-                            <strong className="d-block">{article.designation}</strong>
-                            <small className="text-muted">
-                              Réf: {article.reference} | Stock: {article.qte} | 
-                              HT: {(Number(article.pua_ht) || 0).toFixed(3)} DT
+                            <div className="d-flex align-items-center mb-1">
+                              <strong className="fs-6 me-2 text-primary">{article.reference}</strong>
+                              <span className="badge bg-light text-dark me-2">Stock: {article.qte || 0}</span>
+                            </div>
+                            <small className="text-muted d-block" style={{ fontSize: "0.85rem" }}>
+                              {article.designation}
                             </small>
+                            <div className="mt-1">
+                              <span className="badge bg-success text-white">
+                                HT: {(Number(article.pua_ht) || 0).toFixed(3)} DT
+                              </span>
+                              {article.tva && article.tva > 0 && (
+                                <span className="badge bg-info ms-1">TVA: {article.tva}%</span>
+                              )}
+                            </div>
                           </div>
                           {selectedArticles.some(item => item.article_id === article.id) ? (
                             <Badge color="secondary" className="fs-6">
@@ -2327,7 +2434,8 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                           )}
                         </div>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 ) : (
                   <div className="text-muted p-3 text-center">

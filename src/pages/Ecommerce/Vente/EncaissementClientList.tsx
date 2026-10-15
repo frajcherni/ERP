@@ -23,6 +23,8 @@ import {
   createClient  // Add this import
 } from "../../../Components/Article/ArticleServices";
 import { Client, FactureClient, EncaissementClient } from "../../../Components/Article/Interfaces";
+import PhoneInput from "../../../Components/Common/PhoneInput";
+import { formatPhoneDisplay, formatPhoneSearch, PHONE_FORMAT_HINT } from "../../../helpers/phone_helper";
 
 const EncaissementClientList = () => {
   const location = useLocation();
@@ -67,37 +69,6 @@ const EncaissementClientList = () => {
     email: "",
     status: "Actif" as "Actif" | "Inactif",
   });
-
-  // Format phone input
-  const formatPhoneInput = (value: string): string => {
-    const cleaned = value.replace(/\D/g, "");
-    const limited = cleaned.slice(0, 8);
-    
-    if (limited.length <= 2) {
-      return limited;
-    } else if (limited.length <= 5) {
-      return `${limited.substring(0, 2)} ${limited.substring(2)}`;
-    } else {
-      return `${limited.substring(0, 2)} ${limited.substring(
-        2,
-        5
-      )} ${limited.substring(5, 8)}`;
-    }
-  };
-
-  // Format phone display
-  const formatPhoneDisplay = (phone: string | null | undefined): string => {
-    if (!phone) return "N/A";
-    
-    const cleanPhone = phone.replace(/\D/g, "");
-    if (cleanPhone.length === 8) {
-      return `${cleanPhone.substring(0, 2)} ${cleanPhone.substring(
-        2,
-        5
-      )} ${cleanPhone.substring(5, 8)}`;
-    }
-    return phone;
-  };
 
   // Client search effect
   useEffect(() => {
@@ -695,71 +666,23 @@ const EncaissementClientList = () => {
             <Col md={6}>
               <div className="mb-3">
                 <Label className="form-label fw-semibold">Téléphone 1*</Label>
-                <div className="position-relative">
-                  <Input
-                    value={newClient.telephone1}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value) {
-                        const formatted = formatPhoneInput(value);
-                        setNewClient({
-                          ...newClient,
-                          telephone1: formatted,
-                        });
-                      } else {
-                        setNewClient({
-                          ...newClient,
-                          telephone1: value,
-                        });
-                      }
-                    }}
-                    placeholder="22 222 222"
-                    className="form-control-lg pe-5"
-                  />
-                  {newClient.telephone1 && (
-                    <div className="position-absolute end-0 top-50 translate-middle-y me-3">
-                      <i className="ri-phone-line text-muted"></i>
-                    </div>
-                  )}
-                </div>
-                <small className="text-muted">
-                  Format automatique: XX XXX XXX
-                </small>
+                <PhoneInput
+                  value={newClient.telephone1}
+                  onChange={(telephone1) => setNewClient({ ...newClient, telephone1 })}
+                  bsSize="lg"
+                />
+                <small className="text-muted">{PHONE_FORMAT_HINT}</small>
               </div>
             </Col>
             <Col md={6}>
               <div className="mb-3">
                 <Label className="form-label fw-semibold">Téléphone 2</Label>
-                <div className="position-relative">
-                  <Input
-                    value={newClient.telephone2}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value) {
-                        const formatted = formatPhoneInput(value);
-                        setNewClient({
-                          ...newClient,
-                          telephone2: formatted,
-                        });
-                      } else {
-                        setNewClient({
-                          ...newClient,
-                          telephone2: value,
-                        });
-                      }
-                    }}
-                    placeholder="22 222 222"
-                    className="form-control-lg pe-5"
-                  />
-                  {newClient.telephone2 && (
-                    <div className="position-absolute end-0 top-50 translate-middle-y me-3">
-                      <i className="ri-phone-line text-muted"></i>
-                    </div>
-                  )}
-                </div>
-                <small className="text-muted">
-                  Format automatique: XX XXX XXX
-                </small>
+                <PhoneInput
+                  value={newClient.telephone2}
+                  onChange={(telephone2) => setNewClient({ ...newClient, telephone2 })}
+                  bsSize="lg"
+                />
+                <small className="text-muted">{PHONE_FORMAT_HINT}</small>
               </div>
             </Col>
           </Row>
@@ -968,7 +891,7 @@ const EncaissementClientList = () => {
                                 if (digitCount >= totalLength * 0.7) {
                                   // If 70% or more are digits
                                   const formatted =
-                                    formatPhoneInput(value);
+                                    formatPhoneSearch(value);
                                   setClientSearch(formatted);
                                 } else {
                                   setClientSearch(value);

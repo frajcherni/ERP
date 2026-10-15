@@ -104,7 +104,7 @@ const parseNumericInput = (value: string): number => {
     }, [articleSearch, articles]);
 
     useEffect(() => {
-        if (fournisseurSearch.length >= 3) {
+        if (fournisseurSearch.length >= 1) {
             const filtered = fournisseurs.filter(fournisseur =>
                 fournisseur.raison_sociale.toLowerCase().includes(fournisseurSearch.toLowerCase())
             );

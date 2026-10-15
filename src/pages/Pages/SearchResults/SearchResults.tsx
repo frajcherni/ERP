@@ -16,7 +16,7 @@ import { Autoplay } from "swiper/modules";
 import { SearchGallery, news, video, swiper } from '../../../common/data';
 
 const SearchResults = () => {
-    document.title = "Search Results | Velzon - React Admin & Dashboard Template";
+    document.title = "Search Results | Royal Lumiere";
 
 
     //Tab 
