@@ -109,27 +109,24 @@ import {
 } from "./PaiementBcClientServices";
 
 /** Buttons of the website-order workflow (En Attente → Confirme → Livre, or Annule). */
-const WEB_STEP_UI: Record<WebOrderStep, { label: string; icon: string; color: string; title: string; action: string }> = {
+const WEB_STEP_UI: Record<WebOrderStep, { label: string; icon: string; color: string; title: string }> = {
   Confirme: {
     label: "Confirmer",
     icon: "ri-check-line",
     color: "primary",
     title: "Confirmer la commande — aucun mouvement de stock",
-    action: "Confirmer la commande",
   },
   Livre: {
-    label: "Livrée",
+    label: "Livrer",
     icon: "ri-truck-line",
     color: "success",
-    title: "Marquer comme livrée — le stock est réduit à cette étape",
-    action: "Livrer et réduire le stock",
+    title: "Livrer tout ou partie — le stock est réduit à cette étape",
   },
   Annule: {
     label: "Annuler",
     icon: "ri-close-line",
     color: "danger",
     title: "Annuler la commande — aucun mouvement de stock",
-    action: "Annuler la commande",
   },
 };
 
@@ -995,18 +992,36 @@ const BonCommandeClientList = () => {
   }, [searchText, searchPhone, startDate, endDate, activeTab, pageSize]);
 
   /* ── WEBSITE ORDERS: status workflow ──────────────────────────
-     Confirmer and Annuler never touch the stock; Livrée is the one step
-     that takes it out, from the depot chosen in the dialog. */
+     Confirmer and Annuler never touch the stock. Delivering is the one step
+     that takes it out, in one of two ways — never both:
+       · with a bon de livraison: the BL is created exactly like "Créer Bon
+         Livraison" from a commande, and it is the BL that takes the stock out;
+       · without: the commande delivers directly (web-status "Livre").
+     The quantities to deliver are chosen per order line. */
   const [webStep, setWebStep] = useState<{ bon: any; status: WebOrderStep } | null>(null);
   const [webDepotId, setWebDepotId] = useState<number | null>(null);
   const [webLines, setWebLines] = useState<WebDeliveryLine[]>([]);
   const [webLinesLoading, setWebLinesLoading] = useState(false);
   const [webSaving, setWebSaving] = useState(false);
+  // Quantity to deliver now, per order line, as typed.
+  const [webQty, setWebQty] = useState<Record<number, string>>({});
+  // "Confirmer et livrer tout": the order is confirmed right before the delivery.
+  const [webConfirmFirst, setWebConfirmFirst] = useState(false);
+  // Second screen of a delivery: with or without a bon de livraison.
+  const [webAskBL, setWebAskBL] = useState(false);
 
-  const openWebStep = (bon: any, status: WebOrderStep) => {
+  /** Depot proposed for website deliveries: the "magasin" one when it exists. */
+  const defaultWebDepotId = (bon: any): number | null => {
+    const magasin = depots.find((d) => /maga[sz]in/i.test(d.nom || ""));
+    return magasin?.id ?? bon.depot_id ?? bon.depot?.id ?? depots[0]?.id ?? null;
+  };
+
+  const openWebStep = (bon: any, status: WebOrderStep, confirmFirst = false) => {
     setWebLines([]);
-    // Delivery starts from the order's own depot when it has one.
-    setWebDepotId(status === "Livre" ? bon.depot_id || bon.depot?.id || depots[0]?.id || null : null);
+    setWebQty({});
+    setWebAskBL(false);
+    setWebConfirmFirst(confirmFirst);
+    setWebDepotId(status === "Livre" ? defaultWebDepotId(bon) : null);
     setWebStep({ bon, status });
   };
 
@@ -1020,34 +1035,49 @@ const BonCommandeClientList = () => {
     let alive = true;
     setWebLinesLoading(true);
     fetchWebOrderDeliveryPreview(webStep.bon.id, webDepotId)
-      .then((lines) => { if (alive) setWebLines(lines); })
+      .then((lines) => {
+        if (!alive) return;
+        setWebLines(lines);
+        // Everything left is proposed; a quantity already typed is kept when
+        // only the depot changes.
+        setWebQty((prev) => {
+          const next = { ...prev };
+          lines.forEach((l) => {
+            if (next[l.line_id] === undefined) next[l.line_id] = String(l.aLivrer);
+          });
+          return next;
+        });
+      })
       .catch((err) => { if (alive) toast.error(err.message); })
       .finally(() => { if (alive) setWebLinesLoading(false); });
     return () => { alive = false; };
   }, [webStep, webDepotId]);
 
-  const webStockShort = webLines.some((l) => l.stockDepot != null && l.aLivrer > l.stockDepot);
-  const webUnitsOut = webLines.reduce((sum, l) => sum + l.aLivrer, 0);
+  /** The quantity chosen for a line, or NaN when it is not a whole number between 0 and what is left. */
+  const webChosenQty = (line: WebDeliveryLine): number => {
+    const raw = (webQty[line.line_id] ?? "").trim();
+    if (raw === "") return 0;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 0 && n <= line.aLivrer ? n : NaN;
+  };
+  const webInvalidLines = webLines.filter((l) => Number.isNaN(webChosenQty(l)));
+  const webUnitsOut = webLines.reduce((sum, l) => sum + (webChosenQty(l) || 0), 0);
+  const webStockShort = webLines.some((l) => l.stockDepot != null && (webChosenQty(l) || 0) > l.stockDepot);
+  const webDepotName = depots.find((d) => d.id === webDepotId)?.nom ?? "";
+  // The BL endpoint finds the commande's line by article: one article on two
+  // lines would be ambiguous, so such an order is delivered without BL.
+  const webArticleIds: any[] = (webStep?.bon?.articles || []).map((a: any) => a.article?.id);
+  const webBLPossible = new Set(webArticleIds).size === webArticleIds.length;
 
+  /** Confirmer / Annuler — no stock movement. */
   const confirmWebStep = async () => {
     if (!webStep) return;
     const { bon, status } = webStep;
-    if (status === "Livre" && !webDepotId) {
-      toast.error("Choisissez le dépôt d'où sortira le stock");
-      return;
-    }
     setWebSaving(true);
     try {
-      const result = await updateWebOrderStatus(bon.id, status, status === "Livre" ? webDepotId : null);
+      await updateWebOrderStatus(bon.id, status);
       if (status === "Confirme") {
         toast.success(`Commande ${bon.numeroCommande} confirmée. Aucun mouvement de stock : il sera réduit à la livraison.`);
-      } else if (status === "Livre") {
-        const units = result.moved.reduce((sum, m) => sum + m.quantite, 0);
-        toast.success(
-          units > 0
-            ? `Commande ${bon.numeroCommande} livrée. Stock réduit maintenant : ${units} unité(s) sortie(s) du dépôt ${result.depot?.nom ?? ""}.`
-            : `Commande ${bon.numeroCommande} livrée. Tout était déjà sorti du stock : aucun mouvement.`
-        );
       } else {
         toast.info(`Commande ${bon.numeroCommande} annulée. Aucun mouvement de stock.`);
       }
@@ -1057,6 +1087,148 @@ const BonCommandeClientList = () => {
       toast.error(err.message || "Échec du changement de statut");
     } finally {
       setWebSaving(false);
+    }
+  };
+
+  /** First delivery screen → the bon de livraison question, once the quantities are valid. */
+  const askWebDeliveryMode = () => {
+    if (!webDepotId) {
+      toast.error("Choisissez le dépôt d'où sortira le stock");
+      return;
+    }
+    if (webInvalidLines.length > 0) {
+      toast.error("Quantité invalide : un nombre entier entre 0 et le reste à livrer de la ligne");
+      return;
+    }
+    if (webUnitsOut === 0) {
+      toast.error("Indiquez au moins une quantité à livrer");
+      return;
+    }
+    setWebAskBL(true);
+  };
+
+  /**
+   * The bon de livraison, built exactly like "Créer Bon Livraison" from a
+   * commande: same remise handling (a fixed amount becomes a locked
+   * percentage), totals on the delivered quantities only, and per article the
+   * commande's new delivered total, which the BL endpoint expects.
+   */
+  const buildWebOrderBL = (bon: any, numeroLivraison: string) => {
+    const priced = (a: any) => ({
+      ...a,
+      article_id: a.article?.id,
+      prixUnitaire: Number(a.prixUnitaire),
+      prixTTC: Number(a.prix_ttc) || Number(a.prixUnitaire) * (1 + (Number(a.tva) || 0) / 100),
+    });
+
+    const bcTotals = calculateDocumentTotals({
+      articles: bon.articles.map(priced),
+      remise: 0,
+      remiseType: "percentage",
+    });
+    const target = Number(bon.remise) || 0;
+    const isFixed = bon.remiseType === "fixed" && bcTotals.grandTotal > 0 && target > 0 && target < bcTotals.grandTotal;
+    const remise = isFixed ? target : Number(bon.remise) || 0;
+    const remiseType = isFixed ? "fixed" : bon.remiseType || "percentage";
+    const lockedPercentage = isFixed ? ((bcTotals.grandTotal - target) / bcTotals.grandTotal) * 100 : null;
+
+    const delivered = webLines
+      .map((l) => ({ line: l, qty: webChosenQty(l) || 0, order: bon.articles.find((a: any) => a.id === l.line_id) }))
+      .filter((x) => x.qty > 0 && x.order);
+    const qtyByLine = new Map(delivered.map((x) => [x.line.line_id, x.qty]));
+    const exo = bon.client?.exoneration;
+    const totals = calculateDocumentTotals(
+      {
+        articles: bon.articles.map((a: any) => ({ ...priced(a), quantite: qtyByLine.get(a.id) || 0 })),
+        remise,
+        remiseType,
+        exoneration: exo === true || exo === "Oui" || exo === "OUI",
+        timbreFiscal: false,
+      },
+      { lockedPercentage }
+    );
+
+    return {
+      numeroLivraison,
+      dateLivraison: moment().format("YYYY-MM-DD"),
+      client_id: bon.client?.id ?? null,
+      vendeur_id: bon.vendeur?.id ?? null,
+      status: "Brouillon",
+      notes: bon.notes ?? "",
+      taxMode: bon.taxMode || "HT",
+      remise,
+      remiseType,
+      lockedPercentage,
+      bonCommandeClient_id: bon.id,
+      articles: delivered.map(({ line, qty, order }) => {
+        const p = priced(order);
+        return {
+          article_id: p.article_id,
+          designation: order.designation || order.article?.designation || "",
+          quantite: qty, // this BL only
+          quantiteLivree: line.dejaLivree + qty, // the commande's new delivered total
+          prix_unitaire: p.prixUnitaire,
+          tva: order.tva,
+          remise: order.remise,
+          prix_ttc: p.prixTTC,
+        };
+      }),
+      totalHT: totals.netHT,
+      totalTVA: totals.totalTax,
+      totalTTC: totals.grandTotal,
+      totalTTCAfterRemise: totals.finalTotal,
+      montantPaye: 0,
+      resteAPayer: totals.finalTotal,
+      hasPayments: false,
+      totalPaymentAmount: 0,
+      hasRetenue: false,
+      montantRetenue: 0,
+      cin: "",
+      voiture: "",
+      chauffeur: "",
+      serie: "",
+      depot_id: webDepotId,
+    };
+  };
+
+  /** Delivers the chosen quantities — through a bon de livraison or directly, never both. */
+  const executeWebDelivery = async (withBL: boolean) => {
+    if (!webStep) return;
+    const bon = webStep.bon;
+    setWebSaving(true);
+    let confirmedNow = false;
+    try {
+      if (webConfirmFirst) {
+        await updateWebOrderStatus(bon.id, "Confirme");
+        confirmedNow = true;
+        // Done: a retry must not try to confirm it again.
+        setWebConfirmFirst(false);
+      }
+
+      if (withBL) {
+        const numeroLivraison = await fetchNextLivraisonNumberAPI();
+        await createBonLivraison(buildWebOrderBL(bon, numeroLivraison) as any);
+        toast.success(
+          `Bon de livraison ${numeroLivraison} créé : ${webUnitsOut} unité(s) sortie(s) du stock (dépôt ${webDepotName}).`
+        );
+      } else {
+        const lines = webLines
+          .filter((l) => (webChosenQty(l) || 0) > 0)
+          .map((l) => ({ line_id: l.line_id, quantite: webChosenQty(l) }));
+        const result = await updateWebOrderStatus(bon.id, "Livre", webDepotId, lines);
+        toast.success(
+          `Commande ${bon.numeroCommande} ${result.status === "Livre" ? "livrée" : "partiellement livrée"} : ` +
+            `${webUnitsOut} unité(s) sortie(s) du stock (dépôt ${webDepotName}).`
+        );
+      }
+      setWebStep(null);
+    } catch (err: any) {
+      const reason = err.message || "erreur inconnue";
+      toast.error(confirmedNow ? `Commande confirmée, mais la livraison a échoué : ${reason}` : reason);
+      setWebAskBL(false);
+    } finally {
+      setWebSaving(false);
+      fetchData(currentPage, pageSize, true);
     }
   };
 
@@ -2612,7 +2784,8 @@ const BonCommandeClientList = () => {
       >
         <ModalHeader toggle={closeWebStep}>
           {webStep?.status === "Confirme" && "Confirmer la commande web"}
-          {webStep?.status === "Livre" && "Marquer la commande web comme livrée"}
+          {webStep?.status === "Livre" &&
+            (webConfirmFirst ? "Confirmer et livrer la commande web" : "Livrer la commande web")}
           {webStep?.status === "Annule" && "Annuler la commande web"}
         </ModalHeader>
         <ModalBody>
@@ -2635,7 +2808,8 @@ const BonCommandeClientList = () => {
                 <Alert color="info" className="mb-0">
                   <i className="ri-information-line me-1"></i>
                   <strong>Aucun mouvement de stock à cette étape.</strong> Le stock sera
-                  réduit uniquement quand la commande passera à « Livrée ».
+                  réduit uniquement à la livraison. Pour livrer tout de suite, choisissez
+                  « Confirmer et livrer tout ».
                 </Alert>
               )}
 
@@ -2647,12 +2821,18 @@ const BonCommandeClientList = () => {
                 </Alert>
               )}
 
-              {webStep.status === "Livre" && (
+              {webStep.status === "Livre" && !webAskBL && (
                 <>
+                  {webConfirmFirst && (
+                    <div className="small text-muted mb-2">
+                      <i className="ri-information-line me-1"></i>
+                      La commande sera d'abord confirmée, puis livrée.
+                    </div>
+                  )}
                   <Alert color="warning">
                     <i className="ri-alert-line me-1"></i>
                     <strong>C'est à cette étape que le stock est réduit.</strong> À la
-                    validation, les quantités « Sort du stock » ci-dessous sortent du dépôt choisi.
+                    validation, les quantités « À livrer » ci-dessous sortent du dépôt choisi.
                   </Alert>
 
                   <Label className="form-label fw-semibold">Dépôt de sortie *</Label>
@@ -2668,7 +2848,7 @@ const BonCommandeClientList = () => {
                     ))}
                   </Input>
 
-                  {webLinesLoading ? (
+                  {webLinesLoading && webLines.length === 0 ? (
                     <div className="text-muted small py-2">Chargement des quantités…</div>
                   ) : (
                     <Table size="sm" className="align-middle mb-0">
@@ -2677,19 +2857,37 @@ const BonCommandeClientList = () => {
                           <th>Article</th>
                           <th className="text-end">Commandé</th>
                           <th className="text-end">Déjà livré</th>
-                          <th className="text-end">Sort du stock</th>
+                          <th className="text-end">Reste</th>
+                          <th className="text-end" style={{ width: 110 }}>À livrer</th>
                           <th className="text-end">Stock du dépôt</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {webLines.map((line, i) => {
-                          const short = line.stockDepot != null && line.aLivrer > line.stockDepot;
+                        {webLines.map((line) => {
+                          const qty = webChosenQty(line);
+                          const short = line.stockDepot != null && (qty || 0) > line.stockDepot;
                           return (
-                            <tr key={i} className={short ? "table-danger" : undefined}>
+                            <tr key={line.line_id} className={short ? "table-danger" : undefined}>
                               <td>{line.designation}</td>
                               <td className="text-end">{line.quantite}</td>
                               <td className="text-end">{line.dejaLivree}</td>
-                              <td className="text-end fw-semibold">{line.aLivrer}</td>
+                              <td className="text-end">{line.aLivrer}</td>
+                              <td className="text-end">
+                                <Input
+                                  type="number"
+                                  bsSize="sm"
+                                  min={0}
+                                  max={line.aLivrer}
+                                  step={1}
+                                  className="text-end"
+                                  invalid={Number.isNaN(qty)}
+                                  disabled={line.aLivrer === 0 || webSaving}
+                                  value={webQty[line.line_id] ?? ""}
+                                  onChange={(e) =>
+                                    setWebQty((prev) => ({ ...prev, [line.line_id]: e.target.value }))
+                                  }
+                                />
+                              </td>
                               <td className="text-end">
                                 {line.stockDepot ?? "—"}
                                 {short && (
@@ -2706,17 +2904,18 @@ const BonCommandeClientList = () => {
                     </Table>
                   )}
 
-                  {!webLinesLoading && webDepotId && (
+                  {webDepotId && webLines.length > 0 && (
                     <div className="small mt-2">
-                      {webUnitsOut > 0 ? (
+                      {webInvalidLines.length > 0 ? (
+                        <span className="text-danger">
+                          Quantité invalide : un nombre entier entre 0 et le reste de la ligne.
+                        </span>
+                      ) : webUnitsOut > 0 ? (
                         <span>
-                          <strong>{webUnitsOut} unité(s)</strong> sortiront du dépôt
-                          « {depots.find((d) => d.id === webDepotId)?.nom} ».
+                          <strong>{webUnitsOut} unité(s)</strong> sortiront du dépôt « {webDepotName} ».
                         </span>
                       ) : (
-                        <span className="text-muted">
-                          Tout est déjà sorti du stock : aucun mouvement ne sera fait.
-                        </span>
+                        <span className="text-muted">Aucune quantité à livrer.</span>
                       )}
                       {webStockShort && (
                         <div className="text-danger mt-1">
@@ -2727,22 +2926,98 @@ const BonCommandeClientList = () => {
                   )}
                 </>
               )}
+
+              {/* Second screen: the same delivery, with or without a bon de livraison */}
+              {webStep.status === "Livre" && webAskBL && (
+                <>
+                  <h6 className="fw-semibold mb-3">Générer un bon de livraison ?</h6>
+                  <Alert color="warning">
+                    <i className="ri-alert-line me-1"></i>
+                    Dans les deux cas, <strong>le stock est réduit maintenant</strong> :{" "}
+                    {webUnitsOut} unité(s) sortent du dépôt « {webDepotName} ».
+                  </Alert>
+                  <div className="border rounded p-3 mb-2">
+                    <div className="fw-semibold">
+                      <i className="ri-file-list-3-line me-1"></i>Avec bon de livraison
+                    </div>
+                    <div className="text-muted small">
+                      Un BL est créé pour ces quantités, comme « Créer Bon Livraison » depuis une
+                      commande : c'est le BL qui sort le stock.
+                    </div>
+                  </div>
+                  <div className="border rounded p-3">
+                    <div className="fw-semibold">
+                      <i className="ri-truck-line me-1"></i>Sans bon de livraison
+                    </div>
+                    <div className="text-muted small">
+                      Le stock est sorti directement depuis la commande.
+                    </div>
+                  </div>
+                  {!webBLPossible && (
+                    <div className="text-danger small mt-2">
+                      Cette commande a le même article sur plusieurs lignes : le BL n'est pas
+                      possible ici, livrez sans bon de livraison.
+                    </div>
+                  )}
+                </>
+              )}
             </>
           )}
         </ModalBody>
         <ModalFooter>
-          <Button color="light" disabled={webSaving} onClick={closeWebStep}>
-            Fermer
-          </Button>
-          {webStep && (
-            <Button
-              color={WEB_STEP_UI[webStep.status].color}
-              disabled={webSaving || (webStep.status === "Livre" && (!webDepotId || webLinesLoading))}
-              onClick={confirmWebStep}
-            >
-              <i className={`${WEB_STEP_UI[webStep.status].icon} align-bottom me-1`}></i>
-              {webSaving ? "En cours…" : WEB_STEP_UI[webStep.status].action}
-            </Button>
+          {webStep?.status === "Livre" && webAskBL ? (
+            <>
+              <Button color="light" disabled={webSaving} onClick={() => setWebAskBL(false)}>
+                <i className="ri-arrow-left-line align-bottom me-1"></i>Retour
+              </Button>
+              <Button color="secondary" outline disabled={webSaving} onClick={() => executeWebDelivery(false)}>
+                {webSaving ? "En cours…" : "Sans bon de livraison"}
+              </Button>
+              <Button
+                color="success"
+                disabled={webSaving || !webBLPossible}
+                onClick={() => executeWebDelivery(true)}
+              >
+                <i className="ri-file-list-3-line align-bottom me-1"></i>
+                {webSaving ? "En cours…" : "Avec bon de livraison"}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button color="light" disabled={webSaving} onClick={closeWebStep}>
+                Fermer
+              </Button>
+              {webStep?.status === "Confirme" && (
+                <>
+                  <Button color="primary" outline disabled={webSaving} onClick={confirmWebStep}>
+                    <i className="ri-check-line align-bottom me-1"></i>
+                    {webSaving ? "En cours…" : "Confirmer seulement"}
+                  </Button>
+                  <Button
+                    color="success"
+                    disabled={webSaving}
+                    onClick={() => webStep && openWebStep(webStep.bon, "Livre", true)}
+                  >
+                    <i className="ri-truck-line align-bottom me-1"></i>Confirmer et livrer tout
+                  </Button>
+                </>
+              )}
+              {webStep?.status === "Annule" && (
+                <Button color="danger" disabled={webSaving} onClick={confirmWebStep}>
+                  <i className="ri-close-line align-bottom me-1"></i>
+                  {webSaving ? "En cours…" : "Annuler la commande"}
+                </Button>
+              )}
+              {webStep?.status === "Livre" && (
+                <Button
+                  color="success"
+                  disabled={webSaving || !webDepotId || webLinesLoading || webLines.length === 0}
+                  onClick={askWebDeliveryMode}
+                >
+                  <i className="ri-truck-line align-bottom me-1"></i>Valider la livraison
+                </Button>
+              )}
+            </>
           )}
         </ModalFooter>
       </Modal>

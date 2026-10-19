@@ -131,6 +131,8 @@ export const updateBonCommandeClient = async (id: number, bonCommande: Partial<B
 // ── Website orders: status workflow ───────────────────────────────
 /** One line of what marking a website order "Livre" takes out of a depot. */
 export interface WebDeliveryLine {
+    /** The order line (an article can appear on more than one line). */
+    line_id: number;
     article_id: number | null;
     reference: string | null;
     designation: string;
@@ -152,16 +154,21 @@ export const fetchWebOrderDeliveryPreview = async (id: number, depotId?: number 
     return data.lines || [];
 };
 
-/** Moves a website order along En Attente → Confirme → Livre, or to Annule. */
+/**
+ * Moves a website order along En Attente → Confirme → Livre, or to Annule.
+ * For "Livre", `lines` is what to deliver now per order line (everything left
+ * when omitted); the order then ends "Livre" or "Partiellement Livre".
+ */
 export const updateWebOrderStatus = async (
     id: number,
     status: WebOrderStep,
-    depotId?: number | null
+    depotId?: number | null,
+    lines?: { line_id: number; quantite: number }[]
 ): Promise<{ status: string; depot: { id: number; nom: string } | null; moved: { designation: string; quantite: number }[] }> => {
     const response = await fetch(`${API_BASE}/bons-commande-client/${id}/web-status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, depot_id: depotId ?? undefined }),
+        body: JSON.stringify({ status, depot_id: depotId ?? undefined, lines }),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.message || 'Échec du changement de statut');
