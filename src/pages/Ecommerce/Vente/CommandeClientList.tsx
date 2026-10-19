@@ -30,6 +30,7 @@ import {
   InputGroupText,
   InputGroup,
   FormGroup,
+  Alert,
 } from "reactstrap";
 import { Link } from "react-router-dom";
 import BreadCrumb from "../../../Components/Common/BreadCrumb";
@@ -50,6 +51,10 @@ import {
   updateBonCommandeClient,
   deleteBonCommandeClient,
   fetchNextCommandeNumber,
+  fetchWebOrderDeliveryPreview,
+  updateWebOrderStatus,
+  WebDeliveryLine,
+  WebOrderStep,
 } from "../../../Components/CommandeClient/CommandeClientServices";
 import {
   fetchVendeurs,
@@ -102,6 +107,49 @@ import {
   fetchPaiementsClient,
   fetchNextPaiementNumberFromAPI,
 } from "./PaiementBcClientServices";
+
+/** Buttons of the website-order workflow (En Attente → Confirme → Livre, or Annule). */
+const WEB_STEP_UI: Record<WebOrderStep, { label: string; icon: string; color: string; title: string; action: string }> = {
+  Confirme: {
+    label: "Confirmer",
+    icon: "ri-check-line",
+    color: "primary",
+    title: "Confirmer la commande — aucun mouvement de stock",
+    action: "Confirmer la commande",
+  },
+  Livre: {
+    label: "Livrée",
+    icon: "ri-truck-line",
+    color: "success",
+    title: "Marquer comme livrée — le stock est réduit à cette étape",
+    action: "Livrer et réduire le stock",
+  },
+  Annule: {
+    label: "Annuler",
+    icon: "ri-close-line",
+    color: "danger",
+    title: "Annuler la commande — aucun mouvement de stock",
+    action: "Annuler la commande",
+  },
+};
+
+/** Next steps of a website order, matching the backend's rules. */
+const webNextSteps = (bon: any): WebOrderStep[] => {
+  if (!bon?.clientWebsite) return [];
+  // Something already delivered (bon de livraison / facture): no cancelling.
+  const delivered = (bon.articles || []).some((a: any) => (Number(a.quantiteLivree) || 0) > 0);
+  switch (bon.status) {
+    case "En Attente":
+      return delivered ? ["Confirme"] : ["Confirme", "Annule"];
+    case "Confirme":
+      return delivered ? ["Livre"] : ["Livre", "Annule"];
+    case "Partiellement Livre":
+      return ["Livre"];
+    default:
+      return [];
+  }
+};
+
 const BonCommandeClientList = () => {
   const [detailModal, setDetailModal] = useState(false);
   const [selectedBonCommande, setSelectedBonCommande] =
@@ -945,6 +993,72 @@ const BonCommandeClientList = () => {
       clearTimeout(timer);
     };
   }, [searchText, searchPhone, startDate, endDate, activeTab, pageSize]);
+
+  /* ── WEBSITE ORDERS: status workflow ──────────────────────────
+     Confirmer and Annuler never touch the stock; Livrée is the one step
+     that takes it out, from the depot chosen in the dialog. */
+  const [webStep, setWebStep] = useState<{ bon: any; status: WebOrderStep } | null>(null);
+  const [webDepotId, setWebDepotId] = useState<number | null>(null);
+  const [webLines, setWebLines] = useState<WebDeliveryLine[]>([]);
+  const [webLinesLoading, setWebLinesLoading] = useState(false);
+  const [webSaving, setWebSaving] = useState(false);
+
+  const openWebStep = (bon: any, status: WebOrderStep) => {
+    setWebLines([]);
+    // Delivery starts from the order's own depot when it has one.
+    setWebDepotId(status === "Livre" ? bon.depot_id || bon.depot?.id || depots[0]?.id || null : null);
+    setWebStep({ bon, status });
+  };
+
+  const closeWebStep = () => {
+    if (!webSaving) setWebStep(null);
+  };
+
+  // What delivering would take out of the chosen depot, next to its current stock.
+  useEffect(() => {
+    if (!webStep || webStep.status !== "Livre") return;
+    let alive = true;
+    setWebLinesLoading(true);
+    fetchWebOrderDeliveryPreview(webStep.bon.id, webDepotId)
+      .then((lines) => { if (alive) setWebLines(lines); })
+      .catch((err) => { if (alive) toast.error(err.message); })
+      .finally(() => { if (alive) setWebLinesLoading(false); });
+    return () => { alive = false; };
+  }, [webStep, webDepotId]);
+
+  const webStockShort = webLines.some((l) => l.stockDepot != null && l.aLivrer > l.stockDepot);
+  const webUnitsOut = webLines.reduce((sum, l) => sum + l.aLivrer, 0);
+
+  const confirmWebStep = async () => {
+    if (!webStep) return;
+    const { bon, status } = webStep;
+    if (status === "Livre" && !webDepotId) {
+      toast.error("Choisissez le dépôt d'où sortira le stock");
+      return;
+    }
+    setWebSaving(true);
+    try {
+      const result = await updateWebOrderStatus(bon.id, status, status === "Livre" ? webDepotId : null);
+      if (status === "Confirme") {
+        toast.success(`Commande ${bon.numeroCommande} confirmée. Aucun mouvement de stock : il sera réduit à la livraison.`);
+      } else if (status === "Livre") {
+        const units = result.moved.reduce((sum, m) => sum + m.quantite, 0);
+        toast.success(
+          units > 0
+            ? `Commande ${bon.numeroCommande} livrée. Stock réduit maintenant : ${units} unité(s) sortie(s) du dépôt ${result.depot?.nom ?? ""}.`
+            : `Commande ${bon.numeroCommande} livrée. Tout était déjà sorti du stock : aucun mouvement.`
+        );
+      } else {
+        toast.info(`Commande ${bon.numeroCommande} annulée. Aucun mouvement de stock.`);
+      }
+      setWebStep(null);
+      fetchData(currentPage, pageSize, true);
+    } catch (err: any) {
+      toast.error(err.message || "Échec du changement de statut");
+    } finally {
+      setWebSaving(false);
+    }
+  };
 
   // Load articles only when needed (modal opens or search)
   const loadArticles = async (query = "", page = 1, limit = 15) => {
@@ -2489,6 +2603,150 @@ const BonCommandeClientList = () => {
         onCloseClick={() => setDeleteModal(false)}
       />
 
+      {/* ── WEBSITE ORDER: confirms a status step and says what it does to the stock ── */}
+      <Modal
+        isOpen={!!webStep}
+        toggle={closeWebStep}
+        centered
+        size={webStep?.status === "Livre" ? "lg" : undefined}
+      >
+        <ModalHeader toggle={closeWebStep}>
+          {webStep?.status === "Confirme" && "Confirmer la commande web"}
+          {webStep?.status === "Livre" && "Marquer la commande web comme livrée"}
+          {webStep?.status === "Annule" && "Annuler la commande web"}
+        </ModalHeader>
+        <ModalBody>
+          {webStep && (
+            <>
+              <div className="mb-3">
+                <div className="fw-semibold">
+                  {webStep.bon.numeroCommande}
+                  <span className="badge bg-primary ms-2">
+                    <i className="ri-global-line align-bottom me-1"></i>Web
+                  </span>
+                </div>
+                <div className="text-muted small">
+                  {webStep.bon.clientWebsite?.nomPrenom}
+                  {webStep.bon.clientWebsite?.telephone && ` · ${webStep.bon.clientWebsite.telephone}`}
+                </div>
+              </div>
+
+              {webStep.status === "Confirme" && (
+                <Alert color="info" className="mb-0">
+                  <i className="ri-information-line me-1"></i>
+                  <strong>Aucun mouvement de stock à cette étape.</strong> Le stock sera
+                  réduit uniquement quand la commande passera à « Livrée ».
+                </Alert>
+              )}
+
+              {webStep.status === "Annule" && (
+                <Alert color="danger" className="mb-0">
+                  <i className="ri-error-warning-line me-1"></i>
+                  La commande passera à « Annulée ». <strong>Aucun mouvement de stock</strong> :
+                  rien n'a encore été livré.
+                </Alert>
+              )}
+
+              {webStep.status === "Livre" && (
+                <>
+                  <Alert color="warning">
+                    <i className="ri-alert-line me-1"></i>
+                    <strong>C'est à cette étape que le stock est réduit.</strong> À la
+                    validation, les quantités « Sort du stock » ci-dessous sortent du dépôt choisi.
+                  </Alert>
+
+                  <Label className="form-label fw-semibold">Dépôt de sortie *</Label>
+                  <Input
+                    type="select"
+                    className="mb-3"
+                    value={webDepotId ?? ""}
+                    onChange={(e) => setWebDepotId(e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">Choisir un dépôt…</option>
+                    {depots.map((d) => (
+                      <option key={d.id} value={d.id}>{d.nom}</option>
+                    ))}
+                  </Input>
+
+                  {webLinesLoading ? (
+                    <div className="text-muted small py-2">Chargement des quantités…</div>
+                  ) : (
+                    <Table size="sm" className="align-middle mb-0">
+                      <thead className="table-light">
+                        <tr>
+                          <th>Article</th>
+                          <th className="text-end">Commandé</th>
+                          <th className="text-end">Déjà livré</th>
+                          <th className="text-end">Sort du stock</th>
+                          <th className="text-end">Stock du dépôt</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {webLines.map((line, i) => {
+                          const short = line.stockDepot != null && line.aLivrer > line.stockDepot;
+                          return (
+                            <tr key={i} className={short ? "table-danger" : undefined}>
+                              <td>{line.designation}</td>
+                              <td className="text-end">{line.quantite}</td>
+                              <td className="text-end">{line.dejaLivree}</td>
+                              <td className="text-end fw-semibold">{line.aLivrer}</td>
+                              <td className="text-end">
+                                {line.stockDepot ?? "—"}
+                                {short && (
+                                  <i
+                                    className="ri-error-warning-line text-danger ms-1"
+                                    title="Stock insuffisant dans ce dépôt"
+                                  ></i>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </Table>
+                  )}
+
+                  {!webLinesLoading && webDepotId && (
+                    <div className="small mt-2">
+                      {webUnitsOut > 0 ? (
+                        <span>
+                          <strong>{webUnitsOut} unité(s)</strong> sortiront du dépôt
+                          « {depots.find((d) => d.id === webDepotId)?.nom} ».
+                        </span>
+                      ) : (
+                        <span className="text-muted">
+                          Tout est déjà sorti du stock : aucun mouvement ne sera fait.
+                        </span>
+                      )}
+                      {webStockShort && (
+                        <div className="text-danger mt-1">
+                          Stock insuffisant sur les lignes en rouge : le stock de ce dépôt deviendra négatif.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button color="light" disabled={webSaving} onClick={closeWebStep}>
+            Fermer
+          </Button>
+          {webStep && (
+            <Button
+              color={WEB_STEP_UI[webStep.status].color}
+              disabled={webSaving || (webStep.status === "Livre" && (!webDepotId || webLinesLoading))}
+              onClick={confirmWebStep}
+            >
+              <i className={`${WEB_STEP_UI[webStep.status].icon} align-bottom me-1`}></i>
+              {webSaving ? "En cours…" : WEB_STEP_UI[webStep.status].action}
+            </Button>
+          )}
+        </ModalFooter>
+      </Modal>
+
       <Container fluid style={{ maxWidth: "100%" }}>
         <BreadCrumb title="Bons de Commande Client" pageTitle="Commandes" />
 
@@ -2679,13 +2937,25 @@ const BonCommandeClientList = () => {
                         accessorKey: "numeroCommande",
                         enableColumnFilter: false,
                         cell: (cell: any) => (
-                          <Link
-                            to="#"
-                            className="text-body fw-medium"
-                            onClick={() => openDetailModal(cell.row.original)}
-                          >
-                            {cell.getValue()}
-                          </Link>
+                          <div className="d-flex align-items-center gap-2">
+                            <Link
+                              to="#"
+                              className="text-body fw-medium"
+                              onClick={() => openDetailModal(cell.row.original)}
+                            >
+                              {cell.getValue()}
+                            </Link>
+                            {/* Blue badge: the order came in from the website. */}
+                            {cell.row.original.clientWebsite && (
+                              <span
+                                className="badge bg-primary"
+                                title="Commande passée depuis le site web"
+                              >
+                                <i className="ri-global-line align-bottom me-1"></i>
+                                Web
+                              </span>
+                            )}
+                          </div>
                         ),
                       },
                       {
@@ -2703,26 +2973,13 @@ const BonCommandeClientList = () => {
                         cell: (cell: any) => {
                           const bonCommande = cell.row.original;
 
-                          // Regular client
+                          // Regular client (website orders get one too; their
+                          // "Web" badge sits next to the order number).
                           if (bonCommande.client) {
                             return `${bonCommande.client.raison_sociale}`;
                           }
-
-                          // Website client: the blue globe marks, at a
-                          // glance, an order that came in from the shop.
                           if (bonCommande.clientWebsite) {
-                            return (
-                              <div>
-                                {bonCommande.clientWebsite.nomPrenom}
-                                <span
-                                  className="badge bg-primary ms-1"
-                                  title="Commande passée depuis le site web"
-                                >
-                                  <i className="ri-global-line align-bottom me-1"></i>
-                                  Web
-                                </span>
-                              </div>
-                            );
+                            return bonCommande.clientWebsite.nomPrenom;
                           }
 
                           return "-";
@@ -2798,9 +3055,30 @@ const BonCommandeClientList = () => {
                         header: "Statut",
                         accessorKey: "status",
                         enableColumnFilter: false,
-                        cell: (cell: any) => (
-                          <StatusBadge status={cell.getValue()} />
-                        ),
+                        cell: (cell: any) => {
+                          const bon = cell.row.original;
+                          // Website orders get their next steps right here.
+                          const steps = webNextSteps(bon);
+                          return (
+                            <div className="d-flex align-items-center gap-1 flex-wrap">
+                              <StatusBadge status={cell.getValue()} />
+                              {steps.map((step) => (
+                                <Button
+                                  key={step}
+                                  size="sm"
+                                  outline
+                                  color={WEB_STEP_UI[step].color}
+                                  className="py-0 px-2"
+                                  title={WEB_STEP_UI[step].title}
+                                  onClick={() => openWebStep(bon, step)}
+                                >
+                                  <i className={`${WEB_STEP_UI[step].icon} align-bottom me-1`}></i>
+                                  {WEB_STEP_UI[step].label}
+                                </Button>
+                              ))}
+                            </div>
+                          );
+                        },
                       },
                       {
                         header: "Action",

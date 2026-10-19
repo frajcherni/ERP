@@ -6,6 +6,8 @@ const API_BASE = process.env.REACT_APP_API_BASE;
 export interface CarouselSlide {
     id: number;
     image: string;
+    /** Tablet & phone image; the site uses `image` when it is empty. */
+    image_mobile?: string | null;
     title?: string;
     subtitle?: string;
     description?: string;

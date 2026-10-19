@@ -230,6 +230,10 @@ const WebsiteCarousel = () => {
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  // Optional tablet & phone image; without it the site shows the desktop one.
+  const [selectedMobileImage, setSelectedMobileImage] = useState<File | null>(null);
+  const [mobileImagePreview, setMobileImagePreview] = useState<string | null>(null);
+  const [removeMobileImage, setRemoveMobileImage] = useState(false);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -239,6 +243,26 @@ const WebsiteCarousel = () => {
     reader.onload = ev => setImagePreview(ev.target?.result as string);
     reader.readAsDataURL(file);
   };
+
+  const handleMobileImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSelectedMobileImage(file);
+    setRemoveMobileImage(false);
+    const reader = new FileReader();
+    reader.onload = ev => setMobileImagePreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+    // Lets the same file be picked again after "Retirer".
+    e.target.value = '';
+  };
+
+  const resetImages = useCallback(() => {
+    setSelectedImage(null);
+    setImagePreview(null);
+    setSelectedMobileImage(null);
+    setMobileImagePreview(null);
+    setRemoveMobileImage(false);
+  }, []);
 
   const fetchData = useCallback(async () => {
     try {
@@ -280,8 +304,13 @@ const WebsiteCarousel = () => {
     if (selectedImage) {
       fd.append('image', selectedImage);
     } else if (!isEdit) {
-      toast.error("Une image est obligatoire");
+      toast.error("L'image ordinateur est obligatoire");
       return;
+    }
+    if (selectedMobileImage) {
+      fd.append('image_mobile', selectedMobileImage);
+    } else if (removeMobileImage) {
+      fd.append('remove_image_mobile', 'true');
     }
 
     try {
@@ -293,8 +322,7 @@ const WebsiteCarousel = () => {
         toast.success("Bannière ajoutée");
       }
       setModal(false);
-      setSelectedImage(null);
-      setImagePreview(null);
+      resetImages();
       fetchData();
     } catch {
       toast.error("Échec de l'opération");
@@ -335,8 +363,15 @@ const WebsiteCarousel = () => {
     {
       header: "Image", accessorKey: "image", enableColumnFilter: false,
       cell: (cell: any) => (
-        <img src={getImageUrl(cell.getValue())} alt="slide" className="rounded"
-          style={{ width: 120, height: 60, objectFit: 'cover' }} />
+        <div className="d-flex align-items-center gap-2">
+          <img src={getImageUrl(cell.getValue())} alt="slide" className="rounded"
+            style={{ width: 120, height: 60, objectFit: 'cover' }} />
+          {cell.row.original.image_mobile && (
+            <img src={getImageUrl(cell.row.original.image_mobile)} alt="slide tablette et téléphone"
+              title="Image tablette & téléphone" className="rounded"
+              style={{ width: 34, height: 60, objectFit: 'cover' }} />
+          )}
+        </div>
       )
     },
     { header: "Titre", accessorKey: "title", enableColumnFilter: false },
@@ -363,9 +398,9 @@ const WebsiteCarousel = () => {
   ], []);
 
   const toggleModal = useCallback(() => {
-    if (modal) { setModal(false); setSlide(null); setSelectedImage(null); setImagePreview(null); }
+    if (modal) { setModal(false); setSlide(null); resetImages(); }
     else setModal(true);
-  }, [modal]);
+  }, [modal, resetImages]);
 
   return (
     <div className="page-content">
@@ -410,30 +445,75 @@ const WebsiteCarousel = () => {
           <Form onSubmit={validation.handleSubmit}>
             <ModalBody style={{ maxHeight: '78vh', overflowY: 'auto' }}>
 
-              {/* ── IMAGE ─────────────────────────────────────────── */}
+              {/* ── IMAGES ────────────────────────────────────────── */}
               <div className="mb-4">
-                <SectionHeader title="Image" />
-                <div className="border rounded p-3 text-center">
-                  {(imagePreview || slide?.image) ? (
-                    <div className="mb-2">
-                      <img src={imagePreview || getImageUrl(slide?.image)} alt="Preview"
-                        className="img-fluid rounded mb-2"
-                        style={{ maxHeight: 150, width: '100%', objectFit: 'cover' }} />
-                      <Label htmlFor="img-up" className="btn btn-sm btn-outline-primary">
-                        Changer l'image
-                      </Label>
+                <SectionHeader title="Images" />
+                <Row className="g-3">
+                  {/* Desktop */}
+                  <Col md={8}>
+                    <Label className="form-label fw-semibold mb-1">
+                      <i className="ri-computer-line me-1"></i>Ordinateur <span className="text-danger">*</span>
+                    </Label>
+                    <div className="text-muted small mb-2">Format paysage, ex. 1920 × 800 px.</div>
+                    <div className="border rounded p-3 text-center">
+                      {(imagePreview || slide?.image) ? (
+                        <div className="mb-2">
+                          <img src={imagePreview || getImageUrl(slide?.image)} alt="Aperçu ordinateur"
+                            className="img-fluid rounded mb-2"
+                            style={{ height: 170, width: '100%', objectFit: 'cover' }} />
+                          <Label htmlFor="img-up" className="btn btn-sm btn-outline-primary mb-0">
+                            Changer l'image
+                          </Label>
+                        </div>
+                      ) : (
+                        <div className="py-4">
+                          <i className="ri-image-line fs-1 text-muted mb-2 d-block"></i>
+                          <Label htmlFor="img-up" className="btn btn-outline-primary mb-0">
+                            Télécharger l'image
+                          </Label>
+                        </div>
+                      )}
+                      <Input id="img-up" name="image" type="file" accept="image/*"
+                        onChange={handleImageUpload} className="d-none" />
                     </div>
-                  ) : (
-                    <div>
-                      <i className="ri-image-line fs-1 text-muted mb-2 d-block"></i>
-                      <Label htmlFor="img-up" className="btn btn-outline-primary">
-                        Télécharger l'image
-                      </Label>
+                  </Col>
+
+                  {/* Tablet & phone — optional, the desktop image is used without it */}
+                  <Col md={4}>
+                    <Label className="form-label fw-semibold mb-1">
+                      <i className="ri-smartphone-line me-1"></i>Tablette & téléphone
+                    </Label>
+                    <div className="text-muted small mb-2">Format portrait, ex. 1080 × 1350 px. Facultatif.</div>
+                    <div className="border rounded p-3 text-center">
+                      {(mobileImagePreview || (slide?.image_mobile && !removeMobileImage)) ? (
+                        <div className="mb-2">
+                          <img src={mobileImagePreview || getImageUrl(slide?.image_mobile)} alt="Aperçu tablette et téléphone"
+                            className="img-fluid rounded mb-2"
+                            style={{ height: 170, width: '100%', objectFit: 'cover' }} />
+                          <div className="d-flex justify-content-center gap-2">
+                            <Label htmlFor="img-up-m" className="btn btn-sm btn-outline-primary mb-0">
+                              Changer
+                            </Label>
+                            <Button size="sm" color="outline-danger"
+                              onClick={() => { setSelectedMobileImage(null); setMobileImagePreview(null); setRemoveMobileImage(true); }}>
+                              Retirer
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="py-4">
+                          <i className="ri-smartphone-line fs-1 text-muted mb-2 d-block"></i>
+                          <Label htmlFor="img-up-m" className="btn btn-outline-primary mb-0">
+                            Télécharger l'image
+                          </Label>
+                          <div className="text-muted small mt-2">Sans image, celle de l'ordinateur est utilisée.</div>
+                        </div>
+                      )}
+                      <Input id="img-up-m" name="image_mobile" type="file" accept="image/*"
+                        onChange={handleMobileImageUpload} className="d-none" />
                     </div>
-                  )}
-                  <Input id="img-up" name="image" type="file" accept="image/*"
-                    onChange={handleImageUpload} className="d-none" />
-                </div>
+                  </Col>
+                </Row>
               </div>
 
               {/* ── TEXTE ─────────────────────────────────────────── */}

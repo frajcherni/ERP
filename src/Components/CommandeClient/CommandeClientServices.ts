@@ -128,6 +128,46 @@ export const updateBonCommandeClient = async (id: number, bonCommande: Partial<B
         throw error;
     }
 };
+// ── Website orders: status workflow ───────────────────────────────
+/** One line of what marking a website order "Livre" takes out of a depot. */
+export interface WebDeliveryLine {
+    article_id: number | null;
+    reference: string | null;
+    designation: string;
+    quantite: number;
+    dejaLivree: number;
+    aLivrer: number;
+    /** Current stock in the chosen depot; null when no depot was given. */
+    stockDepot: number | null;
+}
+
+export type WebOrderStep = 'Confirme' | 'Livre' | 'Annule';
+
+/** What marking a website order "Livre" would take out of that depot. */
+export const fetchWebOrderDeliveryPreview = async (id: number, depotId?: number | null): Promise<WebDeliveryLine[]> => {
+    const query = depotId ? `?depot_id=${depotId}` : '';
+    const response = await fetch(`${API_BASE}/bons-commande-client/${id}/web-livraison${query}`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || 'Échec du chargement de la livraison');
+    return data.lines || [];
+};
+
+/** Moves a website order along En Attente → Confirme → Livre, or to Annule. */
+export const updateWebOrderStatus = async (
+    id: number,
+    status: WebOrderStep,
+    depotId?: number | null
+): Promise<{ status: string; depot: { id: number; nom: string } | null; moved: { designation: string; quantite: number }[] }> => {
+    const response = await fetch(`${API_BASE}/bons-commande-client/${id}/web-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, depot_id: depotId ?? undefined }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.message || 'Échec du changement de statut');
+    return data;
+};
+
 export const deleteBonCommandeClient = async (id: number): Promise<void> => {
     try {
         const response = await fetch(`${API_BASE}/bons-commande-client/${id}`, {
