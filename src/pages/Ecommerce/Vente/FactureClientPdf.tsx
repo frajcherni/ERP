@@ -348,7 +348,6 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
     discountAmount,
     timbre,
     netAPayer,
-    retentionMontant,
     tvaBreakdown = {},
   } = totals;
 
@@ -506,12 +505,6 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Timbre Fiscal:</Text>
                 <Text style={styles.summaryValue}>{formatCurrency(timbre)} DT</Text>
-              </View>
-            )}
-            {retentionMontant > 0 && (
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Retenue à la source:</Text>
-                <Text style={styles.summaryValue}>{formatCurrency(retentionMontant)} DT</Text>
               </View>
             )}
             <View style={styles.netAPayerContainer}>
