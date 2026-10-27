@@ -2,6 +2,17 @@ import { BonReception } from "../Article/Interfaces";
 
 const API_BASE = process.env.REACT_APP_API_BASE;
 
+// Show the backend's reason (e.g. duplicate numero) instead of a generic message
+const getServerErrorMessage = (errorText: string, fallback: string): string => {
+    try {
+        const data = JSON.parse(errorText);
+        if (data?.message && data?.error) return `${data.message} : ${data.error}`;
+        return data?.message || fallback;
+    } catch {
+        return fallback;
+    }
+};
+
 // GET all bons de r�ception
 export const fetchBonsReception = async (): Promise<BonReception[]> => {
     const response = await fetch(`${API_BASE}/bons-receptions/getbonreception`);
@@ -24,12 +35,10 @@ export const createBonReception = async (
         body: JSON.stringify(bonReception),
     });
 
-    console.log(bonReception);
-
     if (!response.ok) {
         const errorText = await response.text();
         console.error("Erreur cr�ation BonReception:", errorText);
-        throw new Error("�chec de la cr�ation du bon de r�ception");
+        throw new Error(getServerErrorMessage(errorText, "Échec de la création du bon de réception"));
     }
 
     return response.json();
@@ -51,7 +60,7 @@ export const updateBonReception = async (
     if (!response.ok) {
         const errorText = await response.text();
         console.error("Erreur mise � jour BonReception:", errorText);
-        throw new Error("�chec de la mise � jour du bon de r�ception");
+        throw new Error(getServerErrorMessage(errorText, "Échec de la mise à jour du bon de réception"));
     }
 
     return response.json();
