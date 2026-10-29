@@ -124,21 +124,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   tableCol: {
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
     fontSize: 10,
     textAlign: "center",
     justifyContent: "center",
     alignItems: "center",
+    // A word wider than its column is cut there instead of being drawn over the next column
+    overflow: "hidden",
   },
-  // Widths must add up to 100%: the row hides what overflows, so the amounts got cut off
+  // Widths must add up to 100%: the row hides what overflows.
+  // ARTICLE needs 17% so codes like PLAF-DOUANE/14 stay inside it; amounts up to 99999.999
+  // still fit in 10% with the 2pt padding of the cells.
   colN: { width: "5%" },
-  colArticle: { width: "13%", textAlign: "left" },
+  colArticle: { width: "17%", textAlign: "left" },
   colDesignation: { width: "35%", textAlign: "left" },
   colQuantite: { width: "6%" },
-  colPUHT: { width: "11%", textAlign: "right" },
-  colTVA: { width: "6%" },
-  colPUTTC: { width: "11%", textAlign: "right" },
-  colMontantTTC: { width: "13%", textAlign: "right" },
+  colPUHT: { width: "10%", textAlign: "right" },
+  colTVA: { width: "5%" },
+  colPUTTC: { width: "10%", textAlign: "right" },
+  colMontantTTC: { width: "12%", textAlign: "right" },
   summaryArea: {
     position: "absolute",
     left: 20,

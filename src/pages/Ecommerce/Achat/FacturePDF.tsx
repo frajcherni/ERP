@@ -104,23 +104,26 @@ const styles = StyleSheet.create({
     minHeight: 25,
   },
   tableColHeader: {
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
     textAlign: 'center',
     fontWeight: 'bold',
     fontSize: 9,
     color: '#ffffff'
   },
   tableCol: {
-    paddingHorizontal: 4,
+    paddingHorizontal: 2,
     fontSize: 9,
-    textAlign: 'center'
+    textAlign: 'center',
+    // A word wider than its column is cut there instead of being drawn over the next column
+    overflow: 'hidden'
   },
-  // Widths add up to 100%; M.TTC needs the most room (27480.000 barely fit in 10%)
+  // Widths add up to 100%. ARTICLE needs 16% at 9pt so codes like PLAF-DOUANE/14 stay inside it;
+  // amounts up to 99999.999 still fit in 9% with the 2pt padding of the cells.
   colN: {
     width: '5%'
   },
   colArticle: {
-    width: '13%',
+    width: '16%',
     textAlign: 'left'
   },
   colDesignation: {
@@ -131,14 +134,14 @@ const styles = StyleSheet.create({
     width: '6%'
   },
   colPUHT: {
-    width: '10%',
+    width: '9%',
     textAlign: 'right'
   },
   colTVA: {
-    width: '6%'
+    width: '5%'
   },
   colPUTTC: {
-    width: '10%',
+    width: '9%',
     textAlign: 'right'
   },
   colMontantTTC: {
