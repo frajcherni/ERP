@@ -12,6 +12,7 @@ import moment from "moment";
 import { FactureClient } from "../../../Components/Article/Interfaces";
 import { formatPhoneDisplay } from "../../../helpers/phone_helper";
 import { calculateDocumentTotals, calculateLineTotals } from "../../../Utils/CalculationEngine";
+import { montantEnLettres } from "../../../Utils/montantEnLettres";
 
 Font.register({
   family: "Open Sans",
@@ -129,14 +130,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  colN: { width: "6%" },
-  colArticle: { width: "16%", textAlign: "left" },
-  colDesignation: { width: "38%", textAlign: "left" },
-  colQuantite: { width: "12%" },
-  colPUHT: { width: "10%", textAlign: "right" },
-  colTVA: { width: "8%" },
-  colPUTTC: { width: "10%", textAlign: "right" },
-  colMontantTTC: { width: "10%", textAlign: "right" },
+  // Widths must add up to 100%: the row hides what overflows, so the amounts got cut off
+  colN: { width: "5%" },
+  colArticle: { width: "13%", textAlign: "left" },
+  colDesignation: { width: "35%", textAlign: "left" },
+  colQuantite: { width: "6%" },
+  colPUHT: { width: "11%", textAlign: "right" },
+  colTVA: { width: "6%" },
+  colPUTTC: { width: "11%", textAlign: "right" },
+  colMontantTTC: { width: "13%", textAlign: "right" },
   summaryArea: {
     position: "absolute",
     left: 20,
@@ -357,51 +359,7 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
   // ─────────────────────────────────────────────
   const formatCurrency = (amount: number) => amount.toFixed(3);
 
-  const numberToWords = (num: number): string => {
-    const units = ["", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf"];
-    const teens = ["dix", "onze", "douze", "treize", "quatorze", "quinze", "seize", "dix-sept", "dix-huit", "dix-neuf"];
-    const tens = ["", "dix", "vingt", "trente", "quarante", "cinquante", "soixante", "soixante-dix", "quatre-vingt", "quatre-vingt-dix"];
-    const integerPart = Math.floor(num);
-    if (integerPart === 0) return "Zéro dinars zéro millimes uniquement";
-    let words = "";
-    if (integerPart >= 1000) {
-      const thousands = Math.floor(integerPart / 1000);
-      words += thousands === 1 ? "mille" : numberToWords(thousands).replace(" dinars zéro millimes uniquement", "") + " mille";
-      if (integerPart % 1000 > 0) words += " ";
-    }
-    const remainder = integerPart % 1000;
-    if (remainder >= 100) {
-      const hundreds = Math.floor(remainder / 100);
-      words += hundreds === 1 ? "cent" : units[hundreds] + " cent";
-      if (remainder % 100 > 0) words += " ";
-    }
-    const smallRemainder = remainder % 100;
-    if (smallRemainder > 0) {
-      if (smallRemainder < 10) {
-        words += units[smallRemainder];
-      } else if (smallRemainder < 20) {
-        words += teens[smallRemainder - 10];
-      } else {
-        const tensDigit = Math.floor(smallRemainder / 10);
-        const unitsDigit = smallRemainder % 10;
-        if (tensDigit === 7 || tensDigit === 9) {
-          words += tens[tensDigit - 1];
-          if (unitsDigit === 1) words += "-et-onze";
-          else if (unitsDigit > 1) words += "-" + teens[unitsDigit];
-          else words += "-dix";
-        } else {
-          words += tens[tensDigit];
-          if (unitsDigit > 0) {
-            words += unitsDigit === 1 && tensDigit !== 8 ? "-et-un" : "-" + units[unitsDigit];
-          }
-        }
-      }
-    }
-    words += " dinars zéro millimes";
-    return words.charAt(0).toUpperCase() + words.slice(1) + " uniquement";
-  };
-
-  const amountInWords = numberToWords(netAPayer);
+  const amountInWords = montantEnLettres(netAPayer);
 
   const wrapTextHelper = (text: string, maxCharsPerLine: number = 40): string[] => {
     if (!text || text.trim() === "") return [];

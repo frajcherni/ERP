@@ -1,4 +1,4 @@
-import React, { Fragment, useEffect, useState, useMemo, useCallback } from "react";
+import React, { Fragment, useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
     Card, CardBody, Col, Container, CardHeader, Row, Modal, ModalHeader, Nav,
     NavItem, NavLink, Form, ModalBody, ModalFooter, Label, Input, FormFeedback,
@@ -16,16 +16,32 @@ import { useFormik } from "formik";
 import moment from "moment";
 import Flatpickr from "react-flatpickr";
 import {
-    fetchBonsReception, createBonReception, updateBonReception, deleteBonReception,
+    fetchBonsReceptionPaginated, createBonReception, updateBonReception, deleteBonReception,
     fetchNextReceptionNumberFromAPI
 } from "../../../Components/BonReception/BonReceptionServices";
-import { fetchArticles, fetchFournisseurs, fetchCategories } from "../../../Components/Article/ArticleServices";
+import { fetchFournisseurs, fetchCategories, searchArticles, searchFournisseurs } from "../../../Components/Article/ArticleServices";
 import { createFacture, fetchNextFactureNumberFromAPI } from "../../../Components/Article/FactureServices";
 import { Article, Fournisseur, BonReception, Depot } from "../../../Components/Article/Interfaces";
-import { fetchDepots } from "../Stock/DepotServices";
+import { fetchDepots, findMagazinDepot } from "../Stock/DepotServices";
 import classnames from "classnames";
 import CreateArticleModal from "./CreateArticleModal";
 import EditArticleModal from "./EditArticleModal";
+import QuantiteArticleModal from "./QuantiteArticleModal";
+import AchatDocumentPDFModal from "./AchatDocumentPDFModal";
+import { AchatDocumentPDFProps } from "./AchatDocumentPDF";
+import { calculateAchatTotals, toAchatCalcLine, toSelectedArticle } from "./AchatCalculations";
+import { calculateDocumentTotals, calculateLineTotals } from "../../../Utils/CalculationEngine";
+import { useProfile } from "Components/Hooks/UserHooks";
+import logo from "../../../assets/images/imglogo.png";
+
+// Status sent to the server for each tab (same as the ventes lists)
+const statusForTab: Record<string, string> = {
+    "1": "",
+    "2": "Brouillon",
+    "3": "Recu",
+    "4": "Partiellement Recu",
+    "5": "Annule",
+};
 
 const BonReceptionList = () => {
     const [detailModal, setDetailModal] = useState(false);
@@ -34,11 +50,21 @@ const BonReceptionList = () => {
     const [activeTab, setActiveTab] = useState("1");
     const [modal, setModal] = useState(false);
     const [bonsReception, setBonsReception] = useState<BonReception[]>([]);
-    const [filteredBonsReception, setFilteredBonsReception] = useState<BonReception[]>([]);
     const [bonReception, setBonReception] = useState<BonReception | null>(null);
+    // Server-side pagination (same as the ventes lists)
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [totalCount, setTotalCount] = useState(0);
+    // Only loaded when the create/edit article modal is opened
     const [fournisseurs, setFournisseurs] = useState<Fournisseur[]>([]);
     const [categories, setCategories] = useState<any[]>([]);
-    const [articles, setArticles] = useState<Article[]>([]);
+    const articleModalDataLoaded = useRef(false);
+    const [articlesLoading, setArticlesLoading] = useState(false);
+    const [fournisseursLoading, setFournisseursLoading] = useState(false);
+    // Article picked in the search, waiting for its quantity
+    const [articleToAdd, setArticleToAdd] = useState<Article | null>(null);
+    const [pdfDocument, setPdfDocument] = useState<AchatDocumentPDFProps | null>(null);
+    const { userProfile } = useProfile();
     const [isEdit, setIsEdit] = useState(false);
     const [isCreatingFacture, setIsCreatingFacture] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false);
@@ -79,6 +105,8 @@ const [selectedArticles, setSelectedArticles] = useState<{
     const [timbreFiscal, setTimbreFiscal] = useState<boolean>(false);
     const [depots, setDepots] = useState<Depot[]>([]);
     const [selectedDepot, setSelectedDepot] = useState<Depot | null>(null);
+    // "magazin": preselected on every new bon, and for old bons saved without depot
+    const [defaultDepot, setDefaultDepot] = useState<Depot | null>(null);
 
     // Modals for article creation/edition
     const [createArticleModal, setCreateArticleModal] = useState(false);
@@ -117,21 +145,36 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
     const numericValue = parseFloat(cleanValue);
     return isNaN(numericValue) ? 0 : Math.round(numericValue * 1000) / 1000;
   };
+  // Article search on the server, debounced (same as the ventes pages)
   useEffect(() => {
-    if (articleSearch.length >= 3) {
-      const filtered = articles.filter(
-        (article) =>
-          (article.designation?.toLowerCase() || "").includes(articleSearch.toLowerCase()) ||
-          (article.reference?.toLowerCase() || "").includes(articleSearch.toLowerCase())
-      );
-      setFilteredArticles(filtered);
-    } else {
+    if (articleSearch.length < 1) {
       setFilteredArticles([]);
+      setFocusedIndex(-1);
+      setItemRefs([]);
+      return;
     }
-    // Reset keyboard focus whenever the result set changes
-    setFocusedIndex(-1);
-    setItemRefs([]);
-  }, [articleSearch, articles]);
+    let active = true;
+    const timer = setTimeout(async () => {
+      setArticlesLoading(true);
+      try {
+        const result = await searchArticles({ query: articleSearch, page: 1, limit: 20 });
+        if (active) setFilteredArticles(result.articles || []);
+      } catch (err) {
+        console.error("Failed to load articles:", err);
+      } finally {
+        if (active) {
+          setArticlesLoading(false);
+          // Reset keyboard focus whenever the result set changes
+          setFocusedIndex(-1);
+          setItemRefs([]);
+        }
+      }
+    }, 300);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [articleSearch]);
 
   // Scroll the focused item into view as the user navigates with arrow keys
   useEffect(() => {
@@ -151,61 +194,116 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
     }
   }, [focusedIndex, dropdownRef, itemRefs]);
   
-  // Update fournisseur search effect
+  // Fournisseur search on the server, debounced (same as the ventes client search)
   useEffect(() => {
-    const searchFournisseursDebounced = async () => {
-      if (fournisseurSearch.length >= 1) {
-        const filtered = fournisseurs.filter(
-          (fournisseur) =>
-            (fournisseur.raison_sociale?.toLowerCase() || "").includes(fournisseurSearch.toLowerCase())
-        );
-        setFilteredFournisseurs(filtered);
-      } else {
-        setFilteredFournisseurs([]);
+    if (fournisseurSearch.length < 1) {
+      setFilteredFournisseurs([]);
+      return;
+    }
+    let active = true;
+    const timer = setTimeout(async () => {
+      setFournisseursLoading(true);
+      try {
+        const result = await searchFournisseurs({ query: fournisseurSearch, page: 1, limit: 20 });
+        if (active) setFilteredFournisseurs(result.fournisseurs || []);
+      } catch (err) {
+        console.error("Failed to load fournisseurs:", err);
+      } finally {
+        if (active) setFournisseursLoading(false);
       }
+    }, 300);
+    return () => {
+      active = false;
+      clearTimeout(timer);
     };
+  }, [fournisseurSearch]);
 
-    const timer = setTimeout(searchFournisseursDebounced, 300);
-    return () => clearTimeout(timer);
-  }, [fournisseurSearch, fournisseurs]);
-
-    const fetchData = useCallback(async () => {
+    // One page of bons, filtered on the server (same as the ventes lists)
+    const fetchData = useCallback(async (page = currentPage, limit = pageSize) => {
         try {
             setLoading(true);
-            const [bonsData, fournisseursData, articlesData, categoriesData, depotsData] = await Promise.all([
-                fetchBonsReception(),
-                fetchFournisseurs(),
-                fetchArticles(),
-                fetchCategories(),
-                fetchDepots()
-            ]);
-    
-            setBonsReception(bonsData);
-            setFilteredBonsReception(bonsData);
-            setFournisseurs(fournisseursData);
-            setArticles(articlesData);
-            setCategories(categoriesData);
-            setDepots(depotsData);
+            const result = await fetchBonsReceptionPaginated({
+                page,
+                limit,
+                search: searchText || undefined,
+                status: statusForTab[activeTab] || undefined,
+                startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
+                endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
+            });
 
-            // Auto-select "magazin" depot
-            if (depotsData.length > 0 && !selectedDepot) {
-                const magazinDepot = depotsData.find((d: any) =>
-                  d.nom.toLowerCase().includes("magazin")
-                );
-                if (magazinDepot) {
-                  setSelectedDepot(magazinDepot);
-                }
-            }
+            setBonsReception(result.bons);
+            setTotalCount(result.pagination.totalCount);
+            setCurrentPage(result.pagination.page);
+            setPageSize(limit);
+            setError(null);
             setLoading(false);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Échec du chargement des données");
             setLoading(false);
         }
+    }, [searchText, activeTab, startDate, endDate, currentPage, pageSize]);
+
+    // Depots are few: loaded once, with the "magazin" one selected by default
+    useEffect(() => {
+        fetchDepots()
+            .then((depotsData) => {
+                setDepots(depotsData);
+                const magazinDepot = findMagazinDepot(depotsData);
+                setDefaultDepot(magazinDepot);
+                setSelectedDepot((current) => current || magazinDepot);
+            })
+            .catch((err) => console.error("Failed to load depots:", err));
     }, []);
 
+    // First load, then reload page 1 when a filter changes (debounced for the search text)
+    const isFirstRender = useRef(true);
     useEffect(() => {
-        fetchData();
-    }, [fetchData]);
+        const timer = setTimeout(() => fetchData(1, pageSize), isFirstRender.current ? 0 : 400);
+        isFirstRender.current = false;
+        return () => clearTimeout(timer);
+    }, [searchText, activeTab, startDate, endDate]);
+
+    // Fournisseurs and categories are only needed by the create/edit article modals
+    const loadArticleModalData = useCallback(async () => {
+        if (articleModalDataLoaded.current) return;
+        try {
+            const [fournisseursData, categoriesData] = await Promise.all([fetchFournisseurs(), fetchCategories()]);
+            setFournisseurs(fournisseursData);
+            setCategories(categoriesData);
+            articleModalDataLoaded.current = true;
+        } catch (err) {
+            console.error("Failed to load fournisseurs/categories:", err);
+        }
+    }, []);
+
+    const companyInfo = useMemo(() => ({
+        name: userProfile?.company_name || "Votre Société",
+        address: userProfile?.company_address || "Adresse",
+        city: userProfile?.company_city || "Ville",
+        phone: userProfile?.company_phone || "Téléphone",
+        gsm: userProfile?.company_gsm || "Téléphone",
+        email: userProfile?.company_email || "Email",
+        website: userProfile?.company_website || "Site web",
+        taxId: userProfile?.company_tax_id || "MF",
+        logo: logo,
+    }), [userProfile]);
+
+    const openPdf = (bon: BonReception) => {
+        setPdfDocument({
+            title: "BON DE RÉCEPTION",
+            documentLabel: "bon de réception",
+            numero: bon.numeroReception,
+            date: bon.dateReception,
+            dateLabel: "Date Réception",
+            fournisseur: bon.fournisseur,
+            depot: bon.depot,
+            notes: bon.notes,
+            articles: bon.articles || [],
+            remise: bon.remise,
+            remiseType: bon.remiseType,
+            companyInfo,
+        });
+    };
 
     const fetchNextFactureNumber = useCallback(async () => {
         try {
@@ -214,10 +312,10 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
         } catch (err) {
             toast.error("Échec de la récupération du numéro de facture");
             const year = moment().format('YYYY');
-            const nextNum = `FAC-${String(bonsReception.length + 1).padStart(4, '0')}/${year}`;
+            const nextNum = `FAC-${String(totalCount + 1).padStart(4, '0')}/${year}`;
             setNextNumeroFacture(nextNum);
         }
-    }, [bonsReception]);
+    }, [totalCount]);
 
     const fetchNextReceptionNumber = useCallback(async () => {
         try {
@@ -226,10 +324,10 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
         } catch (err) {
             toast.error("Échec de la récupération du numéro de réception");
             const year = moment().format('YYYY');
-            const nextNum = `REC-${String(bonsReception.length + 1).padStart(4, '0')}/${year}`;
+            const nextNum = `REC-${String(totalCount + 1).padStart(4, '0')}/${year}`;
             setNextNumeroReception(nextNum);
         }
-    }, [bonsReception]);
+    }, [totalCount]);
 
     useEffect(() => {
         if (modal && !isEdit && !isCreatingFacture) {
@@ -240,150 +338,25 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
         }
     }, [modal, factureModal, isEdit, isCreatingFacture, fetchNextReceptionNumber, fetchNextFactureNumber]);
 
-    useEffect(() => {
-        let result = [...bonsReception];
-
-        if (activeTab === "2") {
-            result = result.filter(bon => bon.status === "Brouillon");
-        } else if (activeTab === "3") {
-            result = result.filter(bon => bon.status === "Recu");
-        } else if (activeTab === "4") {
-            result = result.filter(bon => bon.status === "Partiellement Recu");
-        } else if (activeTab === "5") {
-            result = result.filter(bon => bon.status === "Annule");
-        }
-
-        if (startDate && endDate) {
-            const start = moment(startDate).startOf('day');
-            const end = moment(endDate).endOf('day');
-
-            result = result.filter(bon => {
-                const bonDate = moment(bon.dateReception);
-                return bonDate.isBetween(start, end, null, '[]');
-            });
-        }
-
-        if (searchText) {
-            const searchLower = searchText.toLowerCase();
-            result = result.filter(bon =>
-                bon.numeroReception.toLowerCase().includes(searchLower) ||
-                (bon.fournisseur?.raison_sociale && bon.fournisseur.raison_sociale.toLowerCase().includes(searchLower))
-            );
-        }
-
-        setFilteredBonsReception(result);
-    }, [activeTab, startDate, endDate, searchText, bonsReception]);
-
     const openDetailModal = (bonReception: BonReception) => {
         setSelectedBonReception(bonReception);
         setDetailModal(true);
     };
 
-    const { sousTotalHT, netHT, totalTax, grandTotal, finalTotal, discountAmount } = useMemo(() => {
-        if (selectedArticles.length === 0) {
-          return {
-            sousTotalHT: 0,
-            netHT: 0,
-            totalTax: 0, 
-            grandTotal: 0,
-            finalTotal: 0,
-            discountAmount: 0,
-          };
-        }
-      
-        let sousTotalHTValue = 0;
-        let netHTValue = 0;
-        let totalTaxValue = 0;
-        let grandTotalValue = 0;
-      
-        // Calculate initial totals with proper rounding
-        selectedArticles.forEach((article) => {
-          const qty = article.quantite === "" ? 0 : Number(article.quantite) || 0;
-          const tvaRate = Number(article.tva) || 0;
-          const remiseRate = Number(article.remise) || 0;
-          
-          let priceHT = Number(article.prixUnitaire) || 0;
-          let priceTTC = Number(article.prixTTC) || 0;
-          
-          if (editingHT[article.article_id] !== undefined) {
-            const editingValue = parseNumericInput(editingHT[article.article_id]);
-            if (!isNaN(editingValue) && editingValue >= 0) {
-              priceHT = parseFloat(editingValue.toFixed(3));
-              const tvaAmount = tvaRate > 0 ? parseFloat((priceHT * tvaRate / 100).toFixed(3)) : 0;
-              priceTTC = parseFloat((priceHT + tvaAmount).toFixed(3));
-            }
-          } else if (editingTTC[article.article_id] !== undefined) {
-            const editingValue = parseNumericInput(editingTTC[article.article_id]);
-            if (!isNaN(editingValue) && editingValue >= 0) {
-              priceTTC = parseFloat(editingValue.toFixed(3));
-              if (tvaRate > 0) {
-                const coefficient = 1 + (tvaRate / 100);
-                priceHT = parseFloat((priceTTC / coefficient).toFixed(3));
-              } else {
-                priceHT = priceTTC;
-              }
-            }
-          }
-      
-          // Calculate line amounts
-          const montantSousTotalHT = Math.round(qty * priceHT * 1000) / 1000;
-          const montantNetHT = Math.round(qty * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
-          const montantTTCLigne = Math.round(qty * priceTTC * 1000) / 1000;
-          const montantTVA = Math.round((montantTTCLigne - montantNetHT) * 1000) / 1000;
-      
-          sousTotalHTValue += montantSousTotalHT;
-          netHTValue += montantNetHT;
-          totalTaxValue += montantTVA;
-          grandTotalValue += montantTTCLigne;
-        });
-      
-        // Round accumulated values
-        sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
-        netHTValue = Math.round(netHTValue * 1000) / 1000;
-        totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-        grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
-      
-        let finalTotalValue = grandTotalValue;
-        let discountAmountValue = 0;
-        let netHTAfterDiscount = netHTValue;
-        let totalTaxAfterDiscount = totalTaxValue;
-      
-        // Apply remise logic with proper rounding
-        if (showRemise && Number(globalRemise) > 0) {
-          if (remiseType === "percentage") {
-            discountAmountValue = Math.round(netHTValue * (Number(globalRemise) / 100) * 1000) / 1000;
-            netHTAfterDiscount = Math.round((netHTValue - discountAmountValue) * 1000) / 1000;
-            
-            const discountRatio = netHTAfterDiscount / netHTValue;
-            totalTaxAfterDiscount = Math.round(totalTaxValue * discountRatio * 1000) / 1000;
-            
-            finalTotalValue = Math.round((netHTAfterDiscount + totalTaxAfterDiscount) * 1000) / 1000;
-            
-          } else if (remiseType === "fixed") {
-            finalTotalValue = Math.round(Number(globalRemise) * 1000) / 1000;
-            
-            const tvaToHtRatio = totalTaxValue / netHTValue;
-            const htAfterDiscount = Math.round(finalTotalValue / (1 + tvaToHtRatio) * 1000) / 1000;
-            
-            discountAmountValue = Math.round((netHTValue - htAfterDiscount) * 1000) / 1000;
-            netHTAfterDiscount = htAfterDiscount;
-            totalTaxAfterDiscount = Math.round(netHTAfterDiscount * tvaToHtRatio * 1000) / 1000;
-          }
-        }
-      
-        // Use discounted values for final display
-        const displayNetHT = showRemise && Number(globalRemise) > 0 ? netHTAfterDiscount : netHTValue;
-        const displayTotalTax = showRemise && Number(globalRemise) > 0 ? totalTaxAfterDiscount : totalTaxValue;
-      
-        return {
-          sousTotalHT: Math.round(sousTotalHTValue * 1000) / 1000,
-          netHT: Math.round(displayNetHT * 1000) / 1000,
-          totalTax: Math.round(displayTotalTax * 1000) / 1000,
-          grandTotal: Math.round(grandTotalValue * 1000) / 1000,
-          finalTotal: Math.round(finalTotalValue * 1000) / 1000,
-          discountAmount: Math.round(discountAmountValue * 1000) / 1000,
-        };
-      }, [selectedArticles, showRemise, globalRemise, remiseType, editingHT, editingTTC]);
+    // Same calculation engine as the ventes pages
+    const { sousTotalHT, netHT, totalTax, grandTotal, finalTotal, discountAmount, discountPercentage, netAPayer } = useMemo(
+        () =>
+            calculateDocumentTotals(
+                {
+                    articles: selectedArticles,
+                    remise: showRemise ? globalRemise : 0,
+                    remiseType,
+                    timbreFiscal: isCreatingFacture && timbreFiscal,
+                },
+                { editingHT, editingTTC }
+            ),
+        [selectedArticles, showRemise, globalRemise, remiseType, editingHT, editingTTC, isCreatingFacture, timbreFiscal]
+    );
 
     const handleDelete = async () => {
         if (!bonReception) return;
@@ -414,21 +387,21 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
       
           const receptionData = {
             ...values,
-            articles: selectedArticles.map((item) => ({
+            articles: articlesWithQuantities.map((item) => ({
               article_id: item.article_id,
               quantite: item.quantite,
               prix_unitaire: item.prixUnitaire,
-              prix_ttc: item.prixTTC, // Add TTC price
+              prix_ttc: item.prixTTC,
               tva: item.tva,
               remise: item.remise
             })),
-            remise: globalRemise,
+            remise: showRemise ? globalRemise : 0,
             remiseType: remiseType,
             totalHT: sousTotalHT,
             totalTVA: totalTax,
             totalTTC: grandTotal,
             totalTTCAfterRemise: finalTotal,
-            depot_id: values.depot_id,
+            depot_id: values.depot_id || selectedDepot?.id,
             timbreFiscal: isCreatingFacture ? timbreFiscal : false
           };
       
@@ -485,7 +458,8 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                 is: true,
                 then: (schema) => schema.required("La date de facture est requise")
             }),
-            depot_id: Yup.number().required("Le dépôt est requis"),
+            // The default depot is selected in the dropdown without going through the form value
+            depot_id: selectedDepot ? Yup.mixed() : Yup.number().required("Le dépôt est requis"),
         }),
         onSubmit: handleSubmit
     });
@@ -524,28 +498,45 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
         }
     }, [factureModal]);
 
-    const handleAddArticle = (articleId: string) => {
-        const article = articles.find(a => a.id === parseInt(articleId));
-        if (article && !selectedArticles.some(item => item.article_id === article.id)) {
-          const initialHT = article.pua_ht || 0;
-          const initialTVA = article.tva || 0;
-          const initialTTC = initialHT * (1 + (initialTVA || 0) / 100);
-      
-          setSelectedArticles([
-            ...selectedArticles,
-            {
-              article_id: article.id,
-              quantite: 1, // Default quantity to 1 on add (réception)
-              prixUnitaire: initialHT,
-              prixTTC: Math.round(initialTTC * 1000) / 1000, // Ensure proper rounding
-              tva: initialTVA,
-              remise: 0,
-              articleDetails: article,
-              designation: article.designation || ""
+    // Picking an article (click or Enter) first asks its quantity in a small modal
+    const handleAddArticle = (article: Article) => {
+        setArticleToAdd(article);
+        setArticleSearch("");
+        setFilteredArticles([]);
+        setFocusedIndex(-1);
+    };
+
+    const confirmAddArticle = (quantite: number) => {
+        const article = articleToAdd;
+        if (!article) return;
+        setArticleToAdd(null);
+        setSelectedArticles((prev) => {
+            // Already on the bon: the quantity is added to its line
+            if (prev.some((item) => item.article_id === article.id)) {
+                return prev.map((item) =>
+                    item.article_id === article.id
+                        ? { ...item, quantite: (Number(item.quantite) || 0) + quantite }
+                        : item
+                );
             }
-          ]);
-        }
-      };
+            const initialHT = Number(article.pua_ht) || 0;
+            const initialTVA = article.tva || 0;
+            const initialTTC = Number(article.pua_ttc) || initialHT * (1 + initialTVA / 100);
+            return [
+                ...prev,
+                {
+                    article_id: article.id,
+                    quantite,
+                    prixUnitaire: initialHT,
+                    prixTTC: Math.round(initialTTC * 1000) / 1000,
+                    tva: initialTVA,
+                    remise: 0,
+                    articleDetails: article,
+                    designation: article.designation || ""
+                }
+            ];
+        });
+    };
 
     // Keyboard navigation for the article search input (Arrow Up/Down, Enter, Escape)
     const handleArticleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -562,10 +553,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
             // If nothing highlighted yet, pick the first result
             const article = focusedIndex >= 0 ? filteredArticles[focusedIndex] : filteredArticles[0];
             if (article) {
-                handleAddArticle(article.id.toString());
-                setArticleSearch("");
-                setFilteredArticles([]);
-                setFocusedIndex(-1);
+                handleAddArticle(article);
             }
         } else if (e.key === "Escape") {
             e.preventDefault();
@@ -718,59 +706,15 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
             },
             {
                 header: "Total TTC",
-                accessorKey: "articles",
+                id: "totalTTC",
                 enableColumnFilter: false,
-                cell: (cell: any) => {
-                    let grandTotalValue = 0;
-    
-                    cell.getValue().forEach((item: any) => {
-                        const qty = Number(item.quantite) || 1;
-                        const price = Number(item.prixUnitaire) || 0;
-                        const tvaRate = Number(item.tva ?? 0);
-                        const remiseRate = Number(item.remise || 0);
-    
-                        const montantHTLigne = qty * price * (1 - (remiseRate / 100));
-                        const montantTTCLigne = montantHTLigne * (1 + (tvaRate / 100));
-    
-                        grandTotalValue += montantTTCLigne;
-                    });
-    
-                    return `${grandTotalValue.toFixed(2)} DT`;
-                },
+                cell: (cell: any) => `${calculateAchatTotals(cell.row.original).grandTotal.toFixed(3)} DT`,
             },
             {
                 header: "Total TTC Après Remise",
-                accessorKey: "articles",
+                id: "totalTTCAfterRemise",
                 enableColumnFilter: false,
-                cell: (cell: any) => {
-                    let grandTotalValue = 0;
-    
-                    cell.getValue().forEach((item: any) => {
-                        const qty = Number(item.quantite) || 1;
-                        const price = Number(item.prixUnitaire) || 0;
-                        const tvaRate = Number(item.tva ?? 0);
-                        const remiseRate = Number(item.remise || 0);
-    
-                        const montantHTLigne = qty * price * (1 - (remiseRate / 100));
-                        const montantTTCLigne = montantHTLigne * (1 + (tvaRate / 100));
-    
-                        grandTotalValue += montantTTCLigne;
-                    });
-    
-                    const globalDiscount = Number(cell.row.original.remise) || 0;
-                    const discountType = cell.row.original.remiseType || "percentage";
-                    let finalTotal = grandTotalValue;
-    
-                    if (globalDiscount > 0) {
-                        if (discountType === "percentage") {
-                            finalTotal = grandTotalValue * (1 - globalDiscount / 100);
-                        } else {
-                            finalTotal = Number(globalDiscount);
-                        }
-                    }
-    
-                    return finalTotal > 0 ? `${finalTotal.toFixed(2)} DT` : "-";
-                },
+                cell: (cell: any) => `${calculateAchatTotals(cell.row.original).finalTotal.toFixed(3)} DT`,
             },
             {
                 header: "Statut",
@@ -789,22 +733,12 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                     className="text-primary d-inline-block edit-item-btn"
                                     onClick={() => {
                                         setBonReception(cellProps.row.original);
-                                        setSelectedArticles(cellProps.row.original.articles.map((item: any) => ({
-                                            article_id: item.article.id,
-                                            quantite: item.quantite,
-                                            quantiteRecue: item.quantiteRecue,
-                                            prixUnitaire: parseFloat(item.prixUnitaire),
-                                            prixTTC: (parseFloat(item.prixUnitaire) || 0) * (1 + ((item.tva != null ? parseFloat(item.tva) : 0) / 100)),
-                                            tva: item.tva != null ? parseFloat(item.tva) : null,
-                                            remise: item.remise != null ? parseFloat(item.remise) : null,
-                                            articleDetails: item.article,
-                                            designation: item.designation || item.article?.designation || ""
-                                        })));
+                                        setSelectedArticles(cellProps.row.original.articles.map(toSelectedArticle));
                                         setGlobalRemise(cellProps.row.original.remise || 0);
                                         setRemiseType(cellProps.row.original.remiseType || "percentage");
                                         setShowRemise((cellProps.row.original.remise || 0) > 0);
                                         setSelectedFournisseur(cellProps.row.original.fournisseur || null);
-                                        setSelectedDepot(cellProps.row.original.depot || null);
+                                        setSelectedDepot(cellProps.row.original.depot || defaultDepot);
                                         setIsEdit(true);
                                         setModal(true);
                                     }}
@@ -833,12 +767,22 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                     <i className="ri-eye-line fs-16"></i>
                                 </Link>
                             </li>
+                            <li className="list-inline-item">
+                                <Link
+                                    to="#"
+                                    className="text-success d-inline-block"
+                                    title="Imprimer PDF"
+                                    onClick={() => openPdf(cellProps.row.original)}
+                                >
+                                    <i className="ri-printer-line fs-16"></i>
+                                </Link>
+                            </li>
                         </ul>
                     );
                 },
             },
         ],
-        []
+        [companyInfo, defaultDepot]
     );
 
     return (
@@ -867,6 +811,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                                 onClick={() => {
                                                     setIsEdit(false);
                                                     setBonReception(null);
+                                                    setSelectedDepot(defaultDepot);
                                                     toggleModal();
                                                 }}
                                             >
@@ -961,9 +906,14 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                 ) : (
                                     <TableContainer
                                         columns={columns}
-                                        data={filteredBonsReception}
+                                        data={bonsReception}
                                         isGlobalFilter={false}
-                                        customPageSize={10}
+                                        isPagination={true}
+                                        totalDataCount={totalCount}
+                                        currentPage={currentPage - 1}
+                                        onPageChange={(page) => fetchData(page + 1, pageSize)}
+                                        onPageSizeChange={(size) => fetchData(1, size)}
+                                        customPageSize={pageSize}
                                         divClass="table-responsive table-card mb-1 mt-0"
                                         tableClass="align-middle table-nowrap"
                                         theadClass="table-light text-muted text-uppercase"
@@ -1077,16 +1027,13 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                 </thead>
                 <tbody>
                   {selectedBonReception.articles.map((item, index) => {
+                    const line = calculateLineTotals(toAchatCalcLine(item), index);
                     const quantite = Number(item.quantite) || 0;
-                    const priceHT = Number(item.prixUnitaire) || 0;
+                    const priceHT = line.unitHT;
+                    const priceTTC = line.unitTTC;
                     const tvaRate = Number(item.tva || 0);
-                    const remiseRate = Number(item.remise || 0);
-
-                    const priceTTC = priceHT * (1 + (tvaRate / 100));
-                    
-                    const montantSousTotalHT = Math.round(quantite * priceHT * 1000) / 1000;
-                    const montantNetHT = Math.round(quantite * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
-                    const montantTTCLigne = Math.round(quantite * priceTTC * 1000) / 1000;
+                    const montantNetHT = line.netHT;
+                    const montantTTCLigne = line.ttc;
 
                     return (
                       <tr key={index} className={index % 2 === 0 ? "bg-light" : ""}>
@@ -1119,70 +1066,17 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
               <Row className="justify-content-end">
                 <Col xs={8} sm={6} md={5} lg={4}>
                   {(() => {
-                    let sousTotalHTValue = 0;
-                    let netHTValue = 0;
-                    let totalTaxValue = 0;
-                    let grandTotalValue = 0;
-
-                    selectedBonReception.articles.forEach((article) => {
-                      const qty = Number(article.quantite) || 0;
-                      const tvaRate = Number(article.tva || 0);
-                      const remiseRate = Number(article.remise || 0);
-                      
-                      const priceHT = Number(article.prixUnitaire) || 0;
-                      const priceTTC = priceHT * (1 + (tvaRate / 100));
-
-                      const montantSousTotalHT = Math.round(qty * priceHT * 1000) / 1000;
-                      const montantNetHT = Math.round(qty * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
-                      const montantTTCLigne = Math.round(qty * priceTTC * 1000) / 1000;
-                      const montantTVA = Math.round((montantTTCLigne - montantNetHT) * 1000) / 1000;
-
-                      sousTotalHTValue += montantSousTotalHT;
-                      netHTValue += montantNetHT;
-                      totalTaxValue += montantTVA;
-                      grandTotalValue += montantTTCLigne;
-                    });
-
-                    sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
-                    netHTValue = Math.round(netHTValue * 1000) / 1000;
-                    totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-                    grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
-
+                    // Same calculation engine as the ventes pages
+                    const totals = calculateAchatTotals(selectedBonReception);
+                    const sousTotalHTValue = totals.sousTotalHT;
+                    const displayNetHT = totals.netHT;
+                    const displayTotalTax = totals.totalTax;
+                    const grandTotalValue = totals.grandTotal;
+                    const finalTotalValue = totals.finalTotal;
+                    const discountAmountValue = totals.discountAmount;
+                    const discountPercentage = totals.discountPercentage.toFixed(2);
                     const remiseValue = Number(selectedBonReception.remise) || 0;
                     const remiseTypeValue = selectedBonReception.remiseType || "percentage";
-                    
-                    let finalTotalValue = grandTotalValue;
-                    let discountAmountValue = 0;
-                    let netHTAfterDiscount = netHTValue;
-                    let totalTaxAfterDiscount = totalTaxValue;
-                    let discountPercentage = 0;
-
-                    if (remiseValue > 0) {
-                      if (remiseTypeValue === "percentage") {
-                        discountAmountValue = Math.round(netHTValue * (remiseValue / 100) * 1000) / 1000;
-                        netHTAfterDiscount = Math.round((netHTValue - discountAmountValue) * 1000) / 1000;
-                        
-                        const discountRatio = netHTAfterDiscount / netHTValue;
-                        totalTaxAfterDiscount = Math.round(totalTaxValue * discountRatio * 1000) / 1000;
-                        
-                        finalTotalValue = Math.round((netHTAfterDiscount + totalTaxAfterDiscount) * 1000) / 1000;
-                        
-                      } else if (remiseTypeValue === "fixed") {
-                        finalTotalValue = Math.round(Number(remiseValue) * 1000) / 1000;
-                        
-                        const tvaToHtRatio = totalTaxValue / netHTValue;
-                        const htAfterDiscount = Math.round(finalTotalValue / (1 + tvaToHtRatio) * 1000) / 1000;
-                        
-                        discountAmountValue = Math.round((netHTValue - htAfterDiscount) * 1000) / 1000;
-                        netHTAfterDiscount = htAfterDiscount;
-                        totalTaxAfterDiscount = Math.round(netHTAfterDiscount * tvaToHtRatio * 1000) / 1000;
-                        
-                        discountPercentage = Math.round((discountAmountValue / netHTValue) * 100 * 100) / 100;
-                      }
-                    }
-
-                    const displayNetHT = remiseValue > 0 ? netHTAfterDiscount : netHTValue;
-                    const displayTotalTax = remiseValue > 0 ? totalTaxAfterDiscount : totalTaxValue;
 
                     return (
                       <Table className="table-sm table-borderless mb-0">
@@ -1253,20 +1147,12 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
       onClick={() => {
         setDetailModal(false);
         setBonReception(selectedBonReception);
-        setSelectedArticles((selectedBonReception?.articles || []).map(item => ({
-          article_id: item.article.id,
-          quantite: item.quantite,
-          prixUnitaire: Number(item.prixUnitaire) || 0,
-          prixTTC: (Number(item.prixUnitaire) || 0) * (1 + ((Number(item.tva) || 0) / 100)),
-          tva: item.tva,
-          remise: item.remise,
-          articleDetails: item.article
-        })) || []);
+        setSelectedArticles((selectedBonReception?.articles || []).map(toSelectedArticle));
         setGlobalRemise(selectedBonReception?.remise || 0);
         setRemiseType((selectedBonReception?.remiseType as "percentage" | "fixed" | undefined) ?? "percentage");
         setShowRemise((selectedBonReception?.remise || 0) > 0);
         setSelectedFournisseur(selectedBonReception?.fournisseur || null);
-        setSelectedDepot(selectedBonReception?.depot || null);
+        setSelectedDepot(selectedBonReception?.depot || defaultDepot);
         setIsEdit(true);
         setModal(true);
       }}
@@ -1281,16 +1167,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
         if (selectedBonReception) {
           setBonReception(selectedBonReception);
           setSelectedFournisseur(selectedBonReception.fournisseur || null);
-          setSelectedArticles(selectedBonReception.articles.map((item: any) => ({
-            article_id: item.article.id,
-            quantite: item.quantite,
-            prixUnitaire: Number(item.prixUnitaire) || 0,
-            prixTTC: (Number(item.prixUnitaire) || 0) * (1 + ((Number(item.tva) || 0) / 100)),
-            tva: item.tva != null ? Number(item.tva) : null,
-            remise: item.remise != null ? Number(item.remise) : null,
-            articleDetails: item.article,
-            designation: item.designation || item.article?.designation || ""
-          })));
+          setSelectedArticles(selectedBonReception.articles.map(toSelectedArticle));
           setGlobalRemise(selectedBonReception.remise || 0);
           setRemiseType((selectedBonReception.remiseType as "percentage" | "fixed" | undefined) ?? "percentage");
           setShowRemise((selectedBonReception.remise || 0) > 0);
@@ -1314,9 +1191,17 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
     >
       <i className="ri-file-text-line me-2"></i> Créer Facture
     </Button>
-    
-    <Button 
-      color="light" 
+
+    <Button
+      color="info"
+      onClick={() => selectedBonReception && openPdf(selectedBonReception)}
+      className="btn-invoice me-2"
+    >
+      <i className="ri-printer-line me-2"></i> Imprimer PDF
+    </Button>
+
+    <Button
+      color="light"
       onClick={() => setDetailModal(false)}
       className="btn-invoice"
     >
@@ -1430,11 +1315,6 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                       }
                       setFournisseurSearch(e.target.value);
                     }}
-                    onFocus={() => {
-                      if (fournisseurSearch.length >= 1) {
-                        setFilteredFournisseurs(fournisseurs);
-                      }
-                    }}
                     readOnly={!!selectedFournisseur}
                     className="form-control-lg"
                   />
@@ -1467,7 +1347,12 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                       backgroundColor: "white"
                     }}
                   >
-                    {filteredFournisseurs.length > 0 ? (
+                    {fournisseursLoading && filteredFournisseurs.length === 0 ? (
+                      <div className="text-muted p-3 text-center">
+                        <span className="spinner-border spinner-border-sm me-2"></span>
+                        Recherche...
+                      </div>
+                    ) : filteredFournisseurs.length > 0 ? (
                       <ul className="list-group list-group-flush">
                         {filteredFournisseurs.map((f) => (
                           <li
@@ -1588,7 +1473,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                 />
                 <i className="ri-search-line search-icon position-absolute top-50 start-0 translate-middle-y ms-3 fs-5 text-muted"></i>
               </div>
-              <Button color="secondary" className="btn-icon" onClick={() => setCreateArticleModal(true)}>
+              <Button color="secondary" className="btn-icon" onClick={() => { loadArticleModalData(); setCreateArticleModal(true); }}>
                 <i className="ri-add-line fs-5"></i>
               </Button>
             </div>
@@ -1607,7 +1492,12 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                 }}
                 onKeyDown={(e) => e.stopPropagation()}
               >
-                {filteredArticles.length > 0 ? (
+                {articlesLoading && filteredArticles.length === 0 ? (
+                  <div className="text-muted p-3 text-center">
+                    <span className="spinner-border spinner-border-sm me-2"></span>
+                    Recherche...
+                  </div>
+                ) : filteredArticles.length > 0 ? (
                   <ul className="list-group list-group-flush">
                     {filteredArticles.map((article, index) => {
                       if (!itemRefs[index]) {
@@ -1618,12 +1508,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                         key={article.id}
                         ref={itemRefs[index]}
                         className="list-group-item list-group-item-action"
-                        onClick={() => {
-                          handleAddArticle(article.id.toString());
-                          setArticleSearch("");
-                          setFilteredArticles([]);
-                          setFocusedIndex(-1);
-                        }}
+                        onClick={() => handleAddArticle(article)}
                         onMouseEnter={() => setFocusedIndex(index)}
                         style={{
                           cursor: "pointer",
@@ -1669,6 +1554,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setArticleToEdit(article);
+                                loadArticleModalData();
                                 setEditArticleModal(true);
                               }}
                             >
@@ -1711,39 +1597,12 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                   </thead>
                   <tbody>
                     {selectedArticles.map((item, index) => {
-                      const article = articles.find((a) => a.id === item.article_id) || item.articleDetails;
+                      const article = item.articleDetails;
                       
-                      const qty = item.quantite === "" ? 0 : Number(item.quantite) || 0;
-                      
-                      let priceHT = Number(item.prixUnitaire) || 0;
-                      let priceTTC = Number(item.prixTTC) || 0;
-                      
-                      if (editingHT[item.article_id] !== undefined) {
-                        const editingValue = parseNumericInput(editingHT[item.article_id]);
-                        if (!isNaN(editingValue) && editingValue >= 0) {
-                          priceHT = parseFloat(editingValue.toFixed(3));
-                          const tvaRate = Number(item.tva) || 0;
-                          const tvaAmount = tvaRate > 0 ? parseFloat((priceHT * tvaRate / 100).toFixed(3)) : 0;
-                          priceTTC = parseFloat((priceHT + tvaAmount).toFixed(3));
-                        }
-                      } else if (editingTTC[item.article_id] !== undefined) {
-                        const editingValue = parseNumericInput(editingTTC[item.article_id]);
-                        if (!isNaN(editingValue) && editingValue >= 0) {
-                          priceTTC = parseFloat(editingValue.toFixed(3));
-                          const tvaRate = Number(item.tva) || 0;
-                          if (tvaRate > 0) {
-                            const coefficient = 1 + (tvaRate / 100);
-                            priceHT = parseFloat((priceTTC / coefficient).toFixed(3));
-                          } else {
-                            priceHT = priceTTC;
-                          }
-                        }
-                      }
-
-                      const remiseRate = Number(item.remise) || 0;
-
-                      const montantHTLigne = (qty * priceHT * (1 - remiseRate / 100)).toFixed(3);
-                      const montantTTCLigne = (qty * priceTTC).toFixed(3);
+                      // Same line calculation as the ventes pages
+                      const line = calculateLineTotals(item, index, { editingHT, editingTTC });
+                      const montantHTLigne = line.netHT.toFixed(3);
+                      const montantTTCLigne = line.ttc.toFixed(3);
 
                       return (
                         <tr key={`${item.article_id}-${index}`} className="align-middle article-row">
@@ -1903,6 +1762,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                                 onClick={() => {
                                   if (article) {
                                     setArticleToEdit(article);
+                                    loadArticleModalData();
                                     setEditArticleModal(true);
                                   }
                                 }}
@@ -2038,7 +1898,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                             <th className="text-end text-muted fs-6">
                               {remiseType === "percentage" 
                                 ? `Remise (${globalRemise}%)` 
-                                : `Remise (Montant fixe) ${((discountAmount / netHT) * 100).toFixed(1)}%`}
+                                : `Remise (Montant fixe) ${discountPercentage.toFixed(2)}%`}
                             </th>
                             <td className="text-end text-danger fw-bold fs-6">
                               - {discountAmount.toFixed(3)} DT
@@ -2049,7 +1909,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                         <tr className="final-total real-time-update border-top">
                           <th className="text-end fs-5">NET À PAYER:</th>
                           <td className="text-end fw-bold fs-5 text-primary">
-                            {finalTotal.toFixed(3)} DT
+                            {netAPayer.toFixed(3)} DT
                           </td>
                         </tr>
                       </tbody>
@@ -2253,11 +2113,6 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                       }
                       setFournisseurSearch(e.target.value);
                     }}
-                    onFocus={() => {
-                      if (fournisseurSearch.length >= 1) {
-                        setFilteredFournisseurs(fournisseurs);
-                      }
-                    }}
                     readOnly={!!selectedFournisseur}
                     className="form-control-lg"
                   />
@@ -2290,7 +2145,12 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                       backgroundColor: "white"
                     }}
                   >
-                    {filteredFournisseurs.length > 0 ? (
+                    {fournisseursLoading && filteredFournisseurs.length === 0 ? (
+                      <div className="text-muted p-3 text-center">
+                        <span className="spinner-border spinner-border-sm me-2"></span>
+                        Recherche...
+                      </div>
+                    ) : filteredFournisseurs.length > 0 ? (
                       <ul className="list-group list-group-flush">
                         {filteredFournisseurs.map((f) => (
                           <li
@@ -2377,7 +2237,12 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                 }}
                 onKeyDown={(e) => e.stopPropagation()}
               >
-                {filteredArticles.length > 0 ? (
+                {articlesLoading && filteredArticles.length === 0 ? (
+                  <div className="text-muted p-3 text-center">
+                    <span className="spinner-border spinner-border-sm me-2"></span>
+                    Recherche...
+                  </div>
+                ) : filteredArticles.length > 0 ? (
                   <ul className="list-group list-group-flush">
                     {filteredArticles.map((article, index) => {
                       if (!itemRefs[index]) {
@@ -2388,12 +2253,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                         key={article.id}
                         ref={itemRefs[index]}
                         className="list-group-item list-group-item-action"
-                        onClick={() => {
-                          handleAddArticle(article.id.toString());
-                          setArticleSearch("");
-                          setFilteredArticles([]);
-                          setFocusedIndex(-1);
-                        }}
+                        onClick={() => handleAddArticle(article)}
                         onMouseEnter={() => setFocusedIndex(index)}
                         style={{
                           cursor: "pointer",
@@ -2467,37 +2327,12 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                   </thead>
                   <tbody>
                     {selectedArticles.map((item, index) => {
-                      const article = articles.find((a) => a.id === item.article_id) || item.articleDetails;
+                      const article = item.articleDetails;
                       
-                      const qty = item.quantite === "" ? 0 : Number(item.quantite) || 0;
-                      
-                      let priceHT = Number(item.prixUnitaire) || 0;
-                      let priceTTC = Number(item.prixTTC) || 0;
-                      
-                      if (editingHT[item.article_id] !== undefined) {
-                        const editingValue = parseNumericInput(editingHT[item.article_id]);
-                        if (!isNaN(editingValue) && editingValue >= 0) {
-                          priceHT = parseFloat(editingValue.toFixed(3));
-                          const tvaRate = Number(item.tva) || 0;
-                          const tvaAmount = tvaRate > 0 ? parseFloat((priceHT * tvaRate / 100).toFixed(3)) : 0;
-                          priceTTC = parseFloat((priceHT + tvaAmount).toFixed(3));
-                        }
-                      } else if (editingTTC[item.article_id] !== undefined) {
-                        const editingValue = parseNumericInput(editingTTC[item.article_id]);
-                        if (!isNaN(editingValue) && editingValue >= 0) {
-                          priceTTC = parseFloat(editingValue.toFixed(3));
-                          const tvaRate = Number(item.tva) || 0;
-                          if (tvaRate > 0) {
-                            const coefficient = 1 + (tvaRate / 100);
-                            priceHT = parseFloat((priceTTC / coefficient).toFixed(3));
-                          } else {
-                            priceHT = priceTTC;
-                          }
-                        }
-                      }
-
-                      const montantHTLigne = (qty * priceHT).toFixed(3);
-                      const montantTTCLigne = (qty * priceTTC).toFixed(3);
+                      // Same line calculation as the ventes pages
+                      const line = calculateLineTotals(item, index, { editingHT, editingTTC });
+                      const montantHTLigne = line.netHT.toFixed(3);
+                      const montantTTCLigne = line.ttc.toFixed(3);
 
                       return (
                         <tr key={`${item.article_id}-${index}`} className="align-middle">
@@ -2742,7 +2577,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                             <th className="text-end text-muted fs-6">
                               {remiseType === "percentage" 
                                 ? `Remise (${globalRemise}%)` 
-                                : `Remise (Montant fixe) ${((discountAmount / netHT) * 100).toFixed(1)}%`}
+                                : `Remise (Montant fixe) ${discountPercentage.toFixed(2)}%`}
                             </th>
                             <td className="text-end text-danger fw-bold fs-6">
                               - {discountAmount.toFixed(3)} DT
@@ -2761,7 +2596,7 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                         <tr className="final-total real-time-update border-top">
                           <th className="text-end fs-5">NET À PAYER:</th>
                           <td className="text-end fw-bold fs-5 text-primary">
-                            {finalTotal.toFixed(3)} DT
+                            {netAPayer.toFixed(3)} DT
                           </td>
                         </tr>
                       </tbody>
@@ -2830,20 +2665,16 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                 toggle={() => setCreateArticleModal(!createArticleModal)} 
                 fournisseurs={fournisseurs}
                 categories={categories}
-                onSuccess={(newArticle) => {
-                    setArticles(prev => [...prev, newArticle]);
-                    handleAddArticle(newArticle.id.toString());
-                }}
+                onSuccess={(newArticle) => handleAddArticle(newArticle)}
             />
 
-            <EditArticleModal 
-                isOpen={editArticleModal} 
-                toggle={() => { setEditArticleModal(!editArticleModal); if (editArticleModal) setArticleToEdit(null); }} 
+            <EditArticleModal
+                isOpen={editArticleModal}
+                toggle={() => { setEditArticleModal(!editArticleModal); if (editArticleModal) setArticleToEdit(null); }}
                 fournisseurs={fournisseurs}
                 categories={categories}
                 article={articleToEdit}
                 onSuccess={(updatedArticle) => {
-                    setArticles(prev => prev.map(a => a.id === updatedArticle.id ? updatedArticle : a));
                     setFilteredArticles(prev => prev.map(a => a.id === updatedArticle.id ? updatedArticle : a));
                     setSelectedArticles(prev => prev.map(item => item.article_id === updatedArticle.id ? {
                         ...item,
@@ -2853,6 +2684,23 @@ const formatForDisplay = (value: number | string | undefined | null): string => 
                         tva: updatedArticle.tva || item.tva
                     } : item));
                 }}
+            />
+
+            <QuantiteArticleModal
+                article={articleToAdd}
+                existingQuantity={
+                    articleToAdd
+                        ? Number(selectedArticles.find((item) => item.article_id === articleToAdd.id)?.quantite) || 0
+                        : 0
+                }
+                onConfirm={confirmAddArticle}
+                onCancel={() => setArticleToAdd(null)}
+            />
+
+            <AchatDocumentPDFModal
+                isOpen={!!pdfDocument}
+                toggle={() => setPdfDocument(null)}
+                document={pdfDocument}
             />
         </div>
     );

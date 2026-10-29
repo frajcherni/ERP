@@ -3,6 +3,7 @@ import React from "react";
 import { Document, Page, Text, View, StyleSheet, Font, Image } from '@react-pdf/renderer';
 import moment from "moment";
 import { FactureFournisseur } from "../../../Components/Article/Interfaces";
+import { montantEnLettres } from "../../../Utils/montantEnLettres";
 
 Font.register({
   family: 'Helvetica',
@@ -114,33 +115,34 @@ const styles = StyleSheet.create({
     fontSize: 9,
     textAlign: 'center'
   },
+  // Widths add up to 100%; M.TTC needs the most room (27480.000 barely fit in 10%)
   colN: {
     width: '5%'
   },
   colArticle: {
-    width: '15%',
+    width: '13%',
     textAlign: 'left'
   },
   colDesignation: {
-    width: '30%',
+    width: '38%',
     textAlign: 'left'
   },
   colQuantite: {
-    width: '8%'
+    width: '6%'
   },
   colPUHT: {
-    width: '12%',
+    width: '10%',
     textAlign: 'right'
   },
   colTVA: {
-    width: '8%'
+    width: '6%'
   },
   colPUTTC: {
-    width: '12%',
+    width: '10%',
     textAlign: 'right'
   },
   colMontantTTC: {
-    width: '10%',
+    width: '12%',
     textAlign: 'right'
   },
   summarySection: {
@@ -335,91 +337,7 @@ const FacturePDF: React.FC<FacturePDFProps> = ({ facture, companyInfo }) => {
     return amount.toFixed(3);
   };
 
-  // Fixed number to words conversion
-  const numberToWords = (num: number): string => {
-    const units = ['', 'un', 'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'neuf'];
-    const teens = ['dix', 'onze', 'douze', 'treize', 'quatorze', 'quinze', 'seize', 'dix-sept', 'dix-huit', 'dix-neuf'];
-    const tens = ['', 'dix', 'vingt', 'trente', 'quarante', 'cinquante', 'soixante', 'soixante-dix', 'quatre-vingt', 'quatre-vingt-dix'];
-    
-    const integerPart = Math.floor(num);
-    
-    if (integerPart === 0) {
-      return 'Zéro dinars zéro millime uniquement';
-    }
-    
-    let words = '';
-    
-    // Handle thousands
-    if (integerPart >= 1000) {
-      const thousands = Math.floor(integerPart / 1000);
-      if (thousands === 1) {
-        words += 'mille';
-      } else if (thousands < 10) {
-        words += units[thousands] + ' mille';
-      } else if (thousands < 20) {
-        words += teens[thousands - 10] + ' mille';
-      } else if (thousands < 100) {
-        const ten = Math.floor(thousands / 10);
-        const unit = thousands % 10;
-        words += tens[ten];
-        if (unit > 0) {
-          if (ten === 7 || ten === 9) {
-            words += '-' + teens[unit];
-          } else {
-            words += '-' + units[unit];
-          }
-        }
-        words += ' mille';
-      }
-      
-      const remainder = integerPart % 1000;
-      if (remainder > 0) {
-        words += ' ';
-      }
-    }
-    
-    // Handle hundreds for the remainder
-    const remainder = integerPart % 1000;
-    if (remainder >= 100) {
-      const hundreds = Math.floor(remainder / 100);
-      if (hundreds === 1) {
-        words += 'cent';
-      } else {
-        words += units[hundreds] + ' cent';
-      }
-      const smallRemainder = remainder % 100;
-      if (smallRemainder > 0) {
-        words += ' ';
-      }
-    }
-    
-    // Handle tens and units for the small remainder
-    const smallRemainder = remainder % 100;
-    if (smallRemainder > 0) {
-      if (smallRemainder < 10) {
-        words += units[smallRemainder];
-      } else if (smallRemainder < 20) {
-        words += teens[smallRemainder - 10];
-      } else {
-        const ten = Math.floor(smallRemainder / 10);
-        const unit = smallRemainder % 10;
-        words += tens[ten];
-        if (unit > 0) {
-          if (ten === 7 || ten === 9) {
-            words += '-' + teens[unit];
-          } else {
-            words += '-' + units[unit];
-          }
-        }
-      }
-    }
-    
-    words += ' dinars zéro millime';
-    
-    return words.charAt(0).toUpperCase() + words.slice(1) + ' uniquement';
-  };
-
-  const amountInWords = numberToWords(finalTotal);
+  const amountInWords = montantEnLettres(finalTotal);
 
   return (
     <Document>

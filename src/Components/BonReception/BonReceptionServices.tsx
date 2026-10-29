@@ -22,6 +22,33 @@ export const fetchBonsReception = async (): Promise<BonReception[]> => {
     return response.json();
 };
 
+// GET - one page of bons de réception, filtered on the server (same API shape as the ventes lists)
+export const fetchBonsReceptionPaginated = async (params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+}): Promise<{
+    bons: BonReception[];
+    pagination: { totalCount: number; page: number; limit: number; totalPages: number };
+}> => {
+    const queryParams = new URLSearchParams();
+    if (params.page != null) queryParams.append("page", params.page.toString());
+    if (params.limit != null) queryParams.append("limit", params.limit.toString());
+    if (params.search) queryParams.append("search", params.search);
+    if (params.status) queryParams.append("status", params.status);
+    if (params.startDate) queryParams.append("startDate", params.startDate);
+    if (params.endDate) queryParams.append("endDate", params.endDate);
+
+    const response = await fetch(`${API_BASE}/bons-receptions/paginated?${queryParams.toString()}`);
+    if (!response.ok) {
+        throw new Error(getServerErrorMessage(await response.text(), "Échec du chargement des bons de réception"));
+    }
+    return response.json();
+};
+
 // POST - create a new bon de r�ception
 export const createBonReception = async (
     bonReception: Omit<BonReception, "id" | "createdAt" | "updatedAt">

@@ -3,6 +3,7 @@ import { Modal, ModalHeader, ModalBody, Button } from "reactstrap";
 import { FactureClient } from "../../../Components/Article/Interfaces";
 import { formatPhoneDisplay } from "../../../helpers/phone_helper";
 import moment from "moment";
+import { montantEnLettres } from "../../../Utils/montantEnLettres";
 import './FactureClientPreview.css'
 
 interface FactureClientPreviewProps {
@@ -273,69 +274,7 @@ const FactureClientPreview: React.FC<FactureClientPreviewProps> = ({
         return amount.toFixed(3);
     };
 
-    const numberToWords = (num: number): string => {
-        try {
-            const units = ["", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf"];
-            const teens = ["dix", "onze", "douze", "treize", "quatorze", "quinze", "seize", "dix-sept", "dix-huit", "dix-neuf"];
-            const tens = ["", "dix", "vingt", "trente", "quarante", "cinquante", "soixante", "soixante-dix", "quatre-vingt", "quatre-vingt-dix"];
-
-            const integerPart = Math.floor(num);
-            if (integerPart === 0) return "Zéro dinars zéro millime uniquement";
-
-            let words = "";
-
-            if (integerPart >= 1000) {
-                const thousands = Math.floor(integerPart / 1000);
-                if (thousands === 1) words += "mille";
-                else if (thousands < 10) words += units[thousands] + " mille";
-                else if (thousands < 20) words += teens[thousands - 10] + " mille";
-                else if (thousands < 100) {
-                    const ten = Math.floor(thousands / 10);
-                    const unit = thousands % 10;
-                    words += tens[ten];
-                    if (unit > 0) {
-                        if (ten === 7 || ten === 9) words += "-" + teens[unit];
-                        else words += "-" + units[unit];
-                    }
-                    words += " mille";
-                }
-                const remainder = integerPart % 1000;
-                if (remainder > 0) words += " ";
-            }
-
-            const remainder = integerPart % 1000;
-            if (remainder >= 100) {
-                const hundreds = Math.floor(remainder / 100);
-                if (hundreds === 1) words += "cent";
-                else words += units[hundreds] + " cent";
-                const smallRemainder = remainder % 100;
-                if (smallRemainder > 0) words += " ";
-            }
-
-            const smallRemainder = remainder % 100;
-            if (smallRemainder > 0) {
-                if (smallRemainder < 10) words += units[smallRemainder];
-                else if (smallRemainder < 20) words += teens[smallRemainder - 10];
-                else {
-                    const ten = Math.floor(smallRemainder / 10);
-                    const unit = smallRemainder % 10;
-                    words += tens[ten];
-                    if (unit > 0) {
-                        if (ten === 7 || ten === 9) words += "-" + teens[unit];
-                        else words += "-" + units[unit];
-                    }
-                }
-            }
-
-            words += " dinars zéro millime";
-            return words.charAt(0).toUpperCase() + words.slice(1) + " uniquement";
-        } catch (error) {
-            console.error("Error converting number to words:", error);
-            return "Montant en dinars uniquement";
-        }
-    };
-
-    const amountInWords = numberToWords(finalTotal);
+    const amountInWords = montantEnLettres(finalTotal);
 
     const formatPhoneNumber = (phone: string | null | undefined): string =>
         formatPhoneDisplay(phone, "");

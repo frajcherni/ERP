@@ -3,6 +3,17 @@ import { BonCommande } from "../Article/Interfaces";
 
 const API_BASE = process.env.REACT_APP_API_BASE;
 
+// Show the backend's reason instead of a generic message
+const getServerErrorMessage = (errorText: string, fallback: string): string => {
+  try {
+    const data = JSON.parse(errorText);
+    if (data?.message && data?.error) return `${data.message} : ${data.error}`;
+    return data?.message || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 // ✅ GET all bons de commande
 export const fetchBonsCommande = async (): Promise<BonCommande[]> => {
    
@@ -10,6 +21,33 @@ export const fetchBonsCommande = async (): Promise<BonCommande[]> => {
   if (!response.ok) {
     throw new Error("Échec du chargement des bons de commande");
     }
+  return response.json();
+};
+
+// ✅ GET one page of bons de commande, filtered on the server (same API shape as the ventes lists)
+export const fetchBonsCommandePaginated = async (params: {
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: string;
+  startDate?: string;
+  endDate?: string;
+}): Promise<{
+  bons: BonCommande[];
+  pagination: { totalCount: number; page: number; limit: number; totalPages: number };
+}> => {
+  const queryParams = new URLSearchParams();
+  if (params.page != null) queryParams.append("page", params.page.toString());
+  if (params.limit != null) queryParams.append("limit", params.limit.toString());
+  if (params.search) queryParams.append("search", params.search);
+  if (params.status) queryParams.append("status", params.status);
+  if (params.startDate) queryParams.append("startDate", params.startDate);
+  if (params.endDate) queryParams.append("endDate", params.endDate);
+
+  const response = await fetch(`${API_BASE}/bons-commandes/paginated?${queryParams.toString()}`);
+  if (!response.ok) {
+    throw new Error(getServerErrorMessage(await response.text(), "Échec du chargement des bons de commande"));
+  }
   return response.json();
 };
 
@@ -24,12 +62,10 @@ export const createBonCommande = async (
     body: JSON.stringify(bonCommande),
   });
 
-    console.log(bonCommande)
-
   if (!response.ok) {
     const errorText = await response.text();
     console.error("Erreur création BonCommande:", errorText);
-    throw new Error("Échec de la création du bon de commande");
+    throw new Error(getServerErrorMessage(errorText, "Échec de la création du bon de commande"));
   }
 
   return response.json();
@@ -51,7 +87,7 @@ export const updateBonCommande = async (
     if (!response.ok) {
     const errorText = await response.text();
     console.error("Erreur mise à jour BonCommande:", errorText);
-    throw new Error("Échec de la mise à jour du bon de commande");
+    throw new Error(getServerErrorMessage(errorText, "Échec de la mise à jour du bon de commande"));
   }
 
   return response.json();

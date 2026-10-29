@@ -11,6 +11,8 @@ import {
 import moment from "moment";
 import { BonCommandeClient } from "../../../Components/Article/Interfaces";
 import { formatPhoneDisplay } from "../../../helpers/phone_helper";
+import { montantEnLettres } from "../../../Utils/montantEnLettres";
+import { calculateDocumentTotals } from "../../../Utils/CalculationEngine";
 
 Font.register({
   family: "Open Sans",
@@ -128,14 +130,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+  // Widths must add up to 100%: the row hides what overflows, so the amounts got cut off
   colN: { width: "5%" },
-  colArticle: { width: "15%", textAlign: "left" },
-  colDesignation: { width: "34%", textAlign: "left" },
-  colQteC: { width: "7%" },
-  colQteLiv: { width: "7%" },
-  colPUHT: { width: "9%", textAlign: "right" },
-  colTVA: { width: "7%" },
-  colPUTTC: { width: "9%", textAlign: "right" },
+  colArticle: { width: "13%", textAlign: "left" },
+  colDesignation: { width: "32%", textAlign: "left" },
+  colQteC: { width: "6%" },
+  colQteLiv: { width: "6%" },
+  colPUHT: { width: "10%", textAlign: "right" },
+  colTVA: { width: "6%" },
+  colPUTTC: { width: "10%", textAlign: "right" },
   colMontantTTC: { width: "12%", textAlign: "right" },
   summaryArea: {
     position: "absolute",
@@ -386,7 +389,7 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
 }) => {
 
   // ─────────────────────────────────────────────
-  // TOTALS CALCULATION (unchanged)
+  // TOTALS CALCULATION
   // ─────────────────────────────────────────────
   const calculateTotals = () => {
     if (!bonCommande?.articles || bonCommande.articles.length === 0) {
@@ -407,114 +410,9 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
       };
     }
 
-    let sousTotalHTValue = 0;
-    let totalTaxValue = 0;
-    let grandTotalValue = 0;
-
-    const tvaBreakdownOriginal: { [key: number]: { base: number; montant: number } } = {};
-
-    bonCommande.articles.forEach((article) => {
-      const qty = Number(article.quantite) || 0;
-      const articleRemise = Number(article.remise) || 0;
-      const tvaRate = Number(article.tva) || 0;
-      let unitHT = Number(article.prixUnitaire) || 0;
-      let unitTTC = Number(article.prix_ttc) || unitHT * (1 + tvaRate / 100);
-
-      const lineHT = Math.round(unitHT * 1000) / 1000;
-      const lineTTC = Math.round(unitTTC * 1000) / 1000;
-      const montantSousTotalHT = Math.round(qty * lineHT * 1000) / 1000;
-      const montantNetHTLigne = Math.round(qty * lineHT * (1 - articleRemise / 100) * 1000) / 1000;
-      const montantTTCLigne = Math.round(qty * lineTTC * 1000) / 1000;
-      const montantTVALigne = Math.round((montantTTCLigne - montantNetHTLigne) * 1000) / 1000;
-
-      sousTotalHTValue += montantSousTotalHT;
-      totalTaxValue += montantTVALigne;
-      grandTotalValue += montantTTCLigne;
-
-      if (tvaRate > 0) {
-        if (!tvaBreakdownOriginal[tvaRate]) {
-          tvaBreakdownOriginal[tvaRate] = { base: 0, montant: 0 };
-        }
-        tvaBreakdownOriginal[tvaRate].base += montantNetHTLigne;
-        tvaBreakdownOriginal[tvaRate].montant += montantTVALigne;
-      }
-    });
-
-    sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
-    totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-    grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
-
-    let finalTotalValue = grandTotalValue;
-    let discountAmountValue = 0;
-    let netHTValue = sousTotalHTValue;
-    let tvaBreakdownFinal: { [key: number]: { base: number; montant: number } } = {};
-
-    const remiseValue = Number(bonCommande.remise) || 0;
-    const remiseTypeValue = bonCommande.remiseType || "percentage";
-
-    if (remiseValue > 0) {
-      if (remiseTypeValue === "percentage") {
-        discountAmountValue = Math.round((sousTotalHTValue * remiseValue / 100) * 1000) / 1000;
-        netHTValue = sousTotalHTValue - discountAmountValue;
-        const tvaToHtRatio = sousTotalHTValue > 0 ? totalTaxValue / sousTotalHTValue : 0;
-        const newTVA = Math.round((netHTValue * tvaToHtRatio) * 1000) / 1000;
-        totalTaxValue = newTVA;
-        finalTotalValue = Math.round((netHTValue + newTVA) * 1000) / 1000;
-        const discountRatio = netHTValue / sousTotalHTValue;
-        Object.keys(tvaBreakdownOriginal).forEach(rate => {
-          const tvaRate = parseFloat(rate);
-          tvaBreakdownFinal[tvaRate] = {
-            base: Math.round((tvaBreakdownOriginal[tvaRate].base * discountRatio) * 1000) / 1000,
-            montant: Math.round((tvaBreakdownOriginal[tvaRate].montant * discountRatio) * 1000) / 1000,
-          };
-        });
-
-      } else if (remiseTypeValue === "fixed") {
-        finalTotalValue = Math.round(Number(remiseValue) * 1000) / 1000;
-        const tvaRates = Array.from(new Set(bonCommande.articles.map((a: any) => Number(a.tva) || 0)));
-
-        if (tvaRates.length === 1 && tvaRates[0] > 0) {
-          const tvaRate = tvaRates[0];
-          netHTValue = Math.round((finalTotalValue / (1 + tvaRate / 100)) * 1000) / 1000;
-          totalTaxValue = Math.round((finalTotalValue - netHTValue) * 1000) / 1000;
-          tvaBreakdownFinal[tvaRate] = { base: netHTValue, montant: totalTaxValue };
-        } else {
-          const discountCoefficient = grandTotalValue > 0 ? finalTotalValue / grandTotalValue : 0;
-          netHTValue = 0;
-          totalTaxValue = 0;
-          bonCommande.articles.forEach((article: any) => {
-            const qty = Number(article.quantite) || 0;
-            const articleRemise = Number(article.remise) || 0;
-            const tvaRate = Number(article.tva) || 0;
-            const unitHT = Number(article.prixUnitaire) || 0;
-            const montantNetHTLigne = Math.round(qty * unitHT * (1 - articleRemise / 100) * 1000) / 1000;
-            const newLineHT = Math.round((montantNetHTLigne * discountCoefficient) * 1000) / 1000;
-            const newLineTVA = Math.round((newLineHT * (tvaRate / 100)) * 1000) / 1000;
-            netHTValue += newLineHT;
-            totalTaxValue += newLineTVA;
-            if (tvaRate > 0) {
-              if (!tvaBreakdownFinal[tvaRate]) {
-                tvaBreakdownFinal[tvaRate] = { base: 0, montant: 0 };
-              }
-              tvaBreakdownFinal[tvaRate].base += newLineHT;
-              tvaBreakdownFinal[tvaRate].montant += newLineTVA;
-            }
-          });
-          netHTValue = Math.round(netHTValue * 1000) / 1000;
-          totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-        }
-        discountAmountValue = Math.round((sousTotalHTValue - netHTValue) * 1000) / 1000;
-      }
-
-      netHTValue = Math.round(netHTValue * 1000) / 1000;
-      totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-      finalTotalValue = Math.round(finalTotalValue * 1000) / 1000;
-      discountAmountValue = Math.round(discountAmountValue * 1000) / 1000;
-
-    } else {
-      netHTValue = sousTotalHTValue;
-      tvaBreakdownFinal = { ...tvaBreakdownOriginal };
-    }
+    // Same engine as the bon de commande list, so the PDF prints the same amounts
+    const totals = calculateDocumentTotals(bonCommande);
+    const finalTotalValue = totals.finalTotal;
 
     const retentionAmountValue = Number(bonCommande.montantRetenue) || 0;
     const netAPayerValue = finalTotalValue;
@@ -544,17 +442,17 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
     const resteAPayerValue = Math.max(0, netAPayerValue - totalRegularPayments);
 
     return {
-      sousTotalHT: Math.round(sousTotalHTValue * 1000) / 1000,
-      netHT: Math.round(netHTValue * 1000) / 1000,
-      totalTax: Math.round(totalTaxValue * 1000) / 1000,
-      grandTotal: Math.round(grandTotalValue * 1000) / 1000,
-      finalTotal: Math.round(finalTotalValue * 1000) / 1000,
-      discountAmount: Math.round(discountAmountValue * 1000) / 1000,
+      sousTotalHT: totals.sousTotalHT,
+      netHT: totals.netHT,
+      totalTax: totals.totalTax,
+      grandTotal: totals.grandTotal,
+      finalTotal: finalTotalValue,
+      discountAmount: totals.discountAmount,
       retentionAmount: Math.round(retentionAmountValue * 1000) / 1000,
       netAPayer: Math.round(netAPayerValue * 1000) / 1000,
       acompteTotal: Math.round(acompteTotal * 1000) / 1000,
       resteAPayer: Math.round(resteAPayerValue * 1000) / 1000,
-      tvaBreakdown: tvaBreakdownFinal,
+      tvaBreakdown: totals.tvaBreakdown,
       hasRetention: bonCommande.hasRetenue || false,
     };
   };
@@ -586,51 +484,7 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
   // ─────────────────────────────────────────────
   const formatCurrency = (amount: number) => amount.toFixed(3);
 
-  const numberToWords = (num: number): string => {
-    const units = ["", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf"];
-    const teens = ["dix", "onze", "douze", "treize", "quatorze", "quinze", "seize", "dix-sept", "dix-huit", "dix-neuf"];
-    const tens = ["", "dix", "vingt", "trente", "quarante", "cinquante", "soixante", "soixante-dix", "quatre-vingt", "quatre-vingt-dix"];
-    const integerPart = Math.floor(num);
-    if (integerPart === 0) return "Zéro dinars zéro millimes uniquement";
-    let words = "";
-    if (integerPart >= 1000) {
-      const thousands = Math.floor(integerPart / 1000);
-      words += thousands === 1 ? "mille" : numberToWords(thousands).replace(" dinars zéro millimes uniquement", "") + " mille";
-      if (integerPart % 1000 > 0) words += " ";
-    }
-    const remainder = integerPart % 1000;
-    if (remainder >= 100) {
-      const hundreds = Math.floor(remainder / 100);
-      words += hundreds === 1 ? "cent" : units[hundreds] + " cent";
-      if (remainder % 100 > 0) words += " ";
-    }
-    const smallRemainder = remainder % 100;
-    if (smallRemainder > 0) {
-      if (smallRemainder < 10) {
-        words += units[smallRemainder];
-      } else if (smallRemainder < 20) {
-        words += teens[smallRemainder - 10];
-      } else {
-        const tensDigit = Math.floor(smallRemainder / 10);
-        const unitsDigit = smallRemainder % 10;
-        if (tensDigit === 7 || tensDigit === 9) {
-          words += tens[tensDigit - 1];
-          if (unitsDigit === 1) words += "-et-onze";
-          else if (unitsDigit > 1) words += "-" + teens[unitsDigit];
-          else words += "-dix";
-        } else {
-          words += tens[tensDigit];
-          if (unitsDigit > 0) {
-            words += unitsDigit === 1 && tensDigit !== 8 ? "-et-un" : "-" + units[unitsDigit];
-          }
-        }
-      }
-    }
-    words += " dinars zéro millimes";
-    return words.charAt(0).toUpperCase() + words.slice(1) + " uniquement";
-  };
-
-  const amountInWords = numberToWords(netAPayer);
+  const amountInWords = montantEnLettres(netAPayer);
 
   const wrapTextHelper = (text: string, maxCharsPerLine: number = 45): string[] => {
     if (!text || text.trim() === "") return [];

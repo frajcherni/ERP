@@ -34,6 +34,10 @@ export interface StockResponse {
   };
 }
 
+/** Default depot for réceptions: the one whose name contains magazin/magasin (same rule as the backend). */
+export const findMagazinDepot = (depots: Depot[]): Depot | null =>
+  depots.find((d) => /magaz|magasin/i.test(d.nom || "")) || null;
+
 // Fetch all depots
 export const fetchDepots = async (): Promise<Depot[]> => {
   try {

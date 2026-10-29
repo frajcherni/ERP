@@ -1,4 +1,4 @@
-import React, { Fragment, useEffect, useState, useMemo, useCallback } from "react";
+import React, { Fragment, useEffect, useState, useMemo, useCallback, useRef } from "react";
 import {
     Card, CardBody, Col, Container, CardHeader, Row, Modal, ModalHeader, Nav,
     NavItem, NavLink, Form, ModalBody, ModalFooter, Label, Input, FormFeedback, Badge, Table, Button, InputGroupText, InputGroup, FormGroup
@@ -15,12 +15,30 @@ import { useFormik } from "formik";
 import moment from "moment";
 import Flatpickr from "react-flatpickr";
 import {
-    fetchBonsCommande, createBonCommande, updateBonCommande, deleteBonCommande, fetchNextCommandeNumberFromAPI
+    fetchBonsCommandePaginated, createBonCommande, updateBonCommande, deleteBonCommande, fetchNextCommandeNumberFromAPI
 } from "../../../Components/BonCommande/BonCommandeServices";
-import { fetchArticles, fetchFournisseurs } from "../../../Components/Article/ArticleServices";
-import { Article, Fournisseur, BonCommande } from "../../../Components/Article/Interfaces";
+import { searchArticles, searchFournisseurs } from "../../../Components/Article/ArticleServices";
+import { Article, Fournisseur, BonCommande, Depot } from "../../../Components/Article/Interfaces";
+import { fetchDepots, findMagazinDepot } from "../Stock/DepotServices";
 import classnames from "classnames";
 import { createBonReception, fetchNextReceptionNumberFromAPI } from "../../../Components/BonReception/BonReceptionServices";
+import QuantiteArticleModal from "./QuantiteArticleModal";
+import AchatDocumentPDFModal from "./AchatDocumentPDFModal";
+import { AchatDocumentPDFProps } from "./AchatDocumentPDF";
+import { calculateAchatTotals, toAchatCalcLine, toSelectedArticle } from "./AchatCalculations";
+import { calculateDocumentTotals, calculateLineTotals } from "../../../Utils/CalculationEngine";
+import { useProfile } from "Components/Hooks/UserHooks";
+import logo from "../../../assets/images/imglogo.png";
+
+// Status sent to the server for each tab (same as the ventes lists)
+const statusForTab: Record<string, string> = {
+    "1": "",
+    "2": "Brouillon",
+    "3": "Confirme",
+    "4": "Recu",
+    "5": "Partiellement Recu",
+    "6": "Annule",
+};
 
 const BonCommandeList = () => {
     const [detailModal, setDetailModal] = useState(false);
@@ -30,10 +48,21 @@ const BonCommandeList = () => {
     const [activeTab, setActiveTab] = useState("1");
     const [modal, setModal] = useState(false);
     const [bonsCommande, setBonsCommande] = useState<BonCommande[]>([]);
-    const [filteredBonsCommande, setFilteredBonsCommande] = useState<BonCommande[]>([]);
     const [bonCommande, setBonCommande] = useState<BonCommande | null>(null);
-    const [fournisseurs, setFournisseurs] = useState<Fournisseur[]>([]);
-    const [articles, setArticles] = useState<Article[]>([]);
+    // Server-side pagination (same as the ventes lists)
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [totalCount, setTotalCount] = useState(0);
+    const [articlesLoading, setArticlesLoading] = useState(false);
+    const [fournisseursLoading, setFournisseursLoading] = useState(false);
+    // Article picked in the search, waiting for its quantity
+    const [articleToAdd, setArticleToAdd] = useState<Article | null>(null);
+    const [pdfDocument, setPdfDocument] = useState<AchatDocumentPDFProps | null>(null);
+    const { userProfile } = useProfile();
+    // Depot receiving the stock when a bon de réception is created from the commande ("magazin" by default)
+    const [depots, setDepots] = useState<Depot[]>([]);
+    const [defaultDepot, setDefaultDepot] = useState<Depot | null>(null);
+    const [selectedDepot, setSelectedDepot] = useState<Depot | null>(null);
     const [isEdit, setIsEdit] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -48,12 +77,13 @@ const BonCommandeList = () => {
     const [filteredFournisseurs, setFilteredFournisseurs] = useState<Fournisseur[]>([]);
     const [selectedArticles, setSelectedArticles] = useState<{
         article_id: number;
-        quantite: number;
+        quantite: number | "";
         prixUnitaire: number;
         prixTTC: number; // Add this field
         tva?: number | null;
         remise?: number | null;
         articleDetails?: Article;
+        designation?: string;
     }[]>([]);
     
     // Add editing states for TTC
@@ -91,76 +121,124 @@ const parseNumericInput = (value: string): number => {
     return isNaN(numericValue) ? 0 : Math.round(numericValue * 1000) / 1000;
 };
 
+    // Article search on the server, debounced (same as the ventes pages)
     useEffect(() => {
-        if (articleSearch.length >= 3) {
-            const filtered = articles.filter(article =>
-                article.designation.toLowerCase().includes(articleSearch.toLowerCase()) ||
-                article.reference.toLowerCase().includes(articleSearch.toLowerCase())
-            );
-            setFilteredArticles(filtered);
-        } else {
+        if (articleSearch.length < 1) {
             setFilteredArticles([]);
+            return;
         }
-    }, [articleSearch, articles]);
+        let active = true;
+        const timer = setTimeout(async () => {
+            setArticlesLoading(true);
+            try {
+                const result = await searchArticles({ query: articleSearch, page: 1, limit: 20 });
+                if (active) setFilteredArticles(result.articles || []);
+            } catch (err) {
+                console.error("Failed to load articles:", err);
+            } finally {
+                if (active) setArticlesLoading(false);
+            }
+        }, 300);
+        return () => {
+            active = false;
+            clearTimeout(timer);
+        };
+    }, [articleSearch]);
 
+    // Fournisseur search on the server, debounced (same as the ventes client search)
     useEffect(() => {
-        if (fournisseurSearch.length >= 1) {
-            const filtered = fournisseurs.filter(fournisseur =>
-                fournisseur.raison_sociale.toLowerCase().includes(fournisseurSearch.toLowerCase())
-            );
-            setFilteredFournisseurs(filtered);
-        } else {
+        if (fournisseurSearch.length < 1) {
             setFilteredFournisseurs([]);
+            return;
         }
-    }, [fournisseurSearch, fournisseurs]);
+        let active = true;
+        const timer = setTimeout(async () => {
+            setFournisseursLoading(true);
+            try {
+                const result = await searchFournisseurs({ query: fournisseurSearch, page: 1, limit: 20 });
+                if (active) setFilteredFournisseurs(result.fournisseurs || []);
+            } catch (err) {
+                console.error("Failed to load fournisseurs:", err);
+            } finally {
+                if (active) setFournisseursLoading(false);
+            }
+        }, 300);
+        return () => {
+            active = false;
+            clearTimeout(timer);
+        };
+    }, [fournisseurSearch]);
 
-    const fetchData = useCallback(async () => {
+    // One page of bons, filtered on the server (same as the ventes lists)
+    const fetchData = useCallback(async (page = currentPage, limit = pageSize) => {
         try {
             setLoading(true);
-            const [bonsData, fournisseursData, articlesData] = await Promise.all([
-                fetchBonsCommande(),
-                fetchFournisseurs(),
-                fetchArticles()
-            ]);
+            const result = await fetchBonsCommandePaginated({
+                page,
+                limit,
+                search: searchText || undefined,
+                status: statusForTab[activeTab] || undefined,
+                startDate: startDate ? moment(startDate).format("YYYY-MM-DD") : undefined,
+                endDate: endDate ? moment(endDate).format("YYYY-MM-DD") : undefined,
+            });
 
-            setBonsCommande(bonsData);
-            setFilteredBonsCommande(bonsData);
-            setFournisseurs(fournisseursData);
-            setArticles(articlesData);
+            setBonsCommande(result.bons);
+            setTotalCount(result.pagination.totalCount);
+            setCurrentPage(result.pagination.page);
+            setPageSize(limit);
+            setError(null);
             setLoading(false);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Échec du chargement des données");
             setLoading(false);
         }
+    }, [searchText, activeTab, startDate, endDate, currentPage, pageSize]);
+
+    // Depots are few: loaded once
+    useEffect(() => {
+        fetchDepots()
+            .then((depotsData) => {
+                setDepots(depotsData);
+                setDefaultDepot(findMagazinDepot(depotsData));
+            })
+            .catch((err) => console.error("Failed to load depots:", err));
     }, []);
 
+    // First load, then reload page 1 when a filter changes (debounced for the search text)
+    const isFirstRender = useRef(true);
     useEffect(() => {
-        fetchData();
-    }, [fetchData]);
+        const timer = setTimeout(() => fetchData(1, pageSize), isFirstRender.current ? 0 : 400);
+        isFirstRender.current = false;
+        return () => clearTimeout(timer);
+    }, [searchText, activeTab, startDate, endDate]);
 
-    useEffect(() => {
-        let result = [...bonsCommande];
+    const companyInfo = useMemo(() => ({
+        name: userProfile?.company_name || "Votre Société",
+        address: userProfile?.company_address || "Adresse",
+        city: userProfile?.company_city || "Ville",
+        phone: userProfile?.company_phone || "Téléphone",
+        gsm: userProfile?.company_gsm || "Téléphone",
+        email: userProfile?.company_email || "Email",
+        website: userProfile?.company_website || "Site web",
+        taxId: userProfile?.company_tax_id || "MF",
+        logo: logo,
+    }), [userProfile]);
 
-        if (startDate && endDate) {
-            const start = moment(startDate).startOf('day');
-            const end = moment(endDate).endOf('day');
-
-            result = result.filter(bon => {
-                const bonDate = moment(bon.dateCommande);
-                return bonDate.isBetween(start, end, null, '[]');
-            });
-        }
-
-        if (searchText) {
-            const searchLower = searchText.toLowerCase();
-            result = result.filter(bon =>
-                bon.numeroCommande.toLowerCase().includes(searchLower) ||
-                (bon.fournisseur?.raison_sociale && bon.fournisseur.raison_sociale.toLowerCase().includes(searchLower))
-            );
-        }
-
-        setFilteredBonsCommande(result);
-    }, [startDate, endDate, searchText, bonsCommande]);
+    const openPdf = (bon: BonCommande) => {
+        setPdfDocument({
+            title: "BON DE COMMANDE",
+            documentLabel: "bon de commande",
+            numero: bon.numeroCommande,
+            date: bon.dateCommande,
+            dateLabel: "Date Commande",
+            fournisseur: bon.fournisseur,
+            notes: bon.notes,
+            articles: bon.articles || [],
+            remise: bon.remise,
+            remiseType: bon.remiseType,
+            companyInfo,
+        });
+    };
 
     const openDetailModal = (bonCommande: BonCommande) => {
         setSelectedBonCommande(bonCommande);
@@ -174,10 +252,10 @@ const parseNumericInput = (value: string): number => {
         } catch (err) {
             toast.error("Échec de la récupération du numéro de commande");
             const year = moment().format('YYYY');
-            const nextNum = `BC-${String(bonsCommande.length + 1).padStart(4, '0')}/${year}`;
+            const nextNum = `BC-${String(totalCount + 1).padStart(4, '0')}/${year}`;
             setNextNumeroCommande(nextNum);
         }
-    }, [bonsCommande]);
+    }, [totalCount]);
 
     const fetchNextReceptionNumber = useCallback(async () => {
         try {
@@ -186,10 +264,10 @@ const parseNumericInput = (value: string): number => {
         } catch (err) {
             toast.error("Échec de la récupération du numéro de réception");
             const year = moment().format('YYYY');
-            const nextNum = `REC-${String(bonsCommande.length + 1).padStart(4, '0')}/${year}`;
+            const nextNum = `REC-${String(totalCount + 1).padStart(4, '0')}/${year}`;
             setNextNumeroReception(nextNum);
         }
-    }, [bonsCommande]);
+    }, [totalCount]);
 
     useEffect(() => {
         if (modal && !isEdit) {
@@ -201,111 +279,19 @@ const parseNumericInput = (value: string): number => {
         }
     }, [modal, isEdit, isCreatingReception, fetchNextCommandeNumber, fetchNextReceptionNumber]);
 
-    const { sousTotalHT, netHT, totalTax, grandTotal, finalTotal, discountAmount } = useMemo(() => {
-        if (selectedArticles.length === 0) {
-            return {
-                sousTotalHT: 0,
-                netHT: 0,
-                totalTax: 0,
-                grandTotal: 0,
-                finalTotal: 0,
-                discountAmount: 0,
-            };
-        }
-    
-        let sousTotalHTValue = 0;
-        let netHTValue = 0;
-        let totalTaxValue = 0;
-        let grandTotalValue = 0;
-    
-        // Calculate initial totals with proper rounding
-        selectedArticles.forEach((article) => {
-            const qty = Number(article.quantite) || 0;
-            const tvaRate = Number(article.tva) || 0;
-            const remiseRate = Number(article.remise) || 0;
-            
-            let priceHT = Number(article.prixUnitaire) || 0;
-            let priceTTC = Number(article.prixTTC) || 0;
-            
-            if (editingHT[article.article_id] !== undefined) {
-                const editingValue = parseNumericInput(editingHT[article.article_id]);
-                if (!isNaN(editingValue) && editingValue >= 0) {
-                    priceHT = parseFloat(editingValue.toFixed(3));
-                    const tvaAmount = tvaRate > 0 ? parseFloat((priceHT * tvaRate / 100).toFixed(3)) : 0;
-                    priceTTC = parseFloat((priceHT + tvaAmount).toFixed(3));
-                }
-            } else if (editingTTC[article.article_id] !== undefined) {
-                const editingValue = parseNumericInput(editingTTC[article.article_id]);
-                if (!isNaN(editingValue) && editingValue >= 0) {
-                    priceTTC = parseFloat(editingValue.toFixed(3));
-                    if (tvaRate > 0) {
-                        const coefficient = 1 + (tvaRate / 100);
-                        priceHT = parseFloat((priceTTC / coefficient).toFixed(3));
-                    } else {
-                        priceHT = priceTTC;
-                    }
-                }
-            }
-    
-            // Calculate line amounts
-            const montantSousTotalHT = Math.round(qty * priceHT * 1000) / 1000;
-            const montantNetHT = Math.round(qty * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
-            const montantTTCLigne = Math.round(qty * priceTTC * 1000) / 1000;
-            const montantTVA = Math.round((montantTTCLigne - montantNetHT) * 1000) / 1000;
-    
-            sousTotalHTValue += montantSousTotalHT;
-            netHTValue += montantNetHT;
-            totalTaxValue += montantTVA;
-            grandTotalValue += montantTTCLigne;
-        });
-    
-        // Round accumulated values
-        sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
-        netHTValue = Math.round(netHTValue * 1000) / 1000;
-        totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-        grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
-    
-        let finalTotalValue = grandTotalValue;
-        let discountAmountValue = 0;
-        let netHTAfterDiscount = netHTValue;
-        let totalTaxAfterDiscount = totalTaxValue;
-    
-        // Apply remise logic with proper rounding
-        if (showRemise && Number(globalRemise) > 0) {
-            if (remiseType === "percentage") {
-                discountAmountValue = Math.round(netHTValue * (Number(globalRemise) / 100) * 1000) / 1000;
-                netHTAfterDiscount = Math.round((netHTValue - discountAmountValue) * 1000) / 1000;
-                
-                const discountRatio = netHTAfterDiscount / netHTValue;
-                totalTaxAfterDiscount = Math.round(totalTaxValue * discountRatio * 1000) / 1000;
-                
-                finalTotalValue = Math.round((netHTAfterDiscount + totalTaxAfterDiscount) * 1000) / 1000;
-                
-            } else if (remiseType === "fixed") {
-                finalTotalValue = Math.round(Number(globalRemise) * 1000) / 1000;
-                
-                const tvaToHtRatio = totalTaxValue / netHTValue;
-                const htAfterDiscount = Math.round(finalTotalValue / (1 + tvaToHtRatio) * 1000) / 1000;
-                
-                discountAmountValue = Math.round((netHTValue - htAfterDiscount) * 1000) / 1000;
-                netHTAfterDiscount = htAfterDiscount;
-                totalTaxAfterDiscount = Math.round(netHTAfterDiscount * tvaToHtRatio * 1000) / 1000;
-            }
-        }
-    
-        // Use discounted values for final display
-        const displayNetHT = showRemise && Number(globalRemise) > 0 ? netHTAfterDiscount : netHTValue;
-        const displayTotalTax = showRemise && Number(globalRemise) > 0 ? totalTaxAfterDiscount : totalTaxValue;
-    
-        return {
-            sousTotalHT: Math.round(sousTotalHTValue * 1000) / 1000,
-            netHT: Math.round(displayNetHT * 1000) / 1000,
-            totalTax: Math.round(displayTotalTax * 1000) / 1000,
-            grandTotal: Math.round(grandTotalValue * 1000) / 1000,
-            finalTotal: Math.round(finalTotalValue * 1000) / 1000,
-            discountAmount: Math.round(discountAmountValue * 1000) / 1000,
-        };
-    }, [selectedArticles, showRemise, globalRemise, remiseType, editingHT, editingTTC]);
+    // Same calculation engine as the ventes pages
+    const { sousTotalHT, netHT, totalTax, grandTotal, finalTotal, discountAmount, discountPercentage, netAPayer } = useMemo(
+        () =>
+            calculateDocumentTotals(
+                {
+                    articles: selectedArticles,
+                    remise: showRemise ? globalRemise : 0,
+                    remiseType,
+                },
+                { editingHT, editingTTC }
+            ),
+        [selectedArticles, showRemise, globalRemise, remiseType, editingHT, editingTTC]
+    );
 
     const handleDelete = async () => {
         if (!bonCommande) return;
@@ -322,27 +308,34 @@ const parseNumericInput = (value: string): number => {
 
     const handleSubmit = async (values: any) => {
         try {
+            if (selectedArticles.some(item => item.quantite === "" || Number(item.quantite) <= 0)) {
+                toast.error("Tous les articles doivent avoir une quantité supérieure à 0");
+                return;
+            }
+
             const commandeData = {
                 ...values,
                 taxMode,
                 articles: selectedArticles.map(item => ({
                     article_id: item.article_id,
-                    quantite: item.quantite,
+                    quantite: Number(item.quantite),
                     prix_unitaire: item.prixUnitaire,
-                    prix_ttc: item.prixTTC, // Add TTC price
+                    prix_ttc: item.prixTTC,
                     tva: item.tva,
                     remise: item.remise
                 })),
-                remise: globalRemise,
+                remise: showRemise ? globalRemise : 0,
                 remiseType: remiseType,
-                totalHT: sousTotalHT,
+                // Saved as computed here, with the ventes engine (3 decimals)
+                totalHT: netHT,
                 totalTVA: totalTax,
-                totalTTC: grandTotal,
+                totalTTC: finalTotal,
                 totalTTCAfterRemise: finalTotal
             };
     
             if (isCreatingReception) {
                 commandeData.bonCommande_id = bonCommande?.id;
+                commandeData.depot_id = selectedDepot?.id;
                 await createBonReception(commandeData);
                 toast.success("Bon de réception créé avec succès");
             } else {
@@ -414,26 +407,43 @@ const parseNumericInput = (value: string): number => {
         }
     }, [modal]);
 
-    const handleAddArticle = (articleId: string) => {
-        const article = articles.find(a => a.id === parseInt(articleId));
-        if (article && !selectedArticles.some(item => item.article_id === article.id)) {
-            const initialHT = article.pua_ht || 0;
+    // Picking an article first asks its quantity in a small modal
+    const handleAddArticle = (article: Article) => {
+        setArticleToAdd(article);
+        setArticleSearch("");
+        setFilteredArticles([]);
+    };
+
+    const confirmAddArticle = (quantite: number) => {
+        const article = articleToAdd;
+        if (!article) return;
+        setArticleToAdd(null);
+        setSelectedArticles((prev) => {
+            // Already on the bon: the quantity is added to its line
+            if (prev.some((item) => item.article_id === article.id)) {
+                return prev.map((item) =>
+                    item.article_id === article.id
+                        ? { ...item, quantite: (Number(item.quantite) || 0) + quantite }
+                        : item
+                );
+            }
+            const initialHT = Number(article.pua_ht) || 0;
             const initialTVA = article.tva || 0;
-            const initialTTC = initialHT * (1 + (initialTVA || 0) / 100);
-    
-            setSelectedArticles([
-                ...selectedArticles,
+            const initialTTC = Number(article.pua_ttc) || initialHT * (1 + initialTVA / 100);
+            return [
+                ...prev,
                 {
                     article_id: article.id,
-                    quantite: 1,
+                    quantite,
                     prixUnitaire: initialHT,
                     prixTTC: Math.round(initialTTC * 1000) / 1000,
-                    tva: isCreatingReception ? null : article.tva || null,
+                    tva: initialTVA,
                     remise: 0,
-                    articleDetails: article
+                    articleDetails: article,
+                    designation: article.designation || ""
                 }
-            ]);
-        }
+            ];
+        });
     };
     
     const handleArticleChange = (articleId: number, field: string, value: any) => {
@@ -600,57 +610,15 @@ const parseNumericInput = (value: string): number => {
             },
             {
                 header: "Total Après Remise",
-                accessorKey: "articles",
+                id: "totalTTCAfterRemise",
                 enableColumnFilter: false,
-                cell: (cell: any) => {
-                    let subTotalValue = 0;
-                    let totalTaxValue = 0;
-                    let grandTotalValue = 0;
-
-                    cell.getValue().forEach((item: any) => {
-                        const qty = Number(item.quantite) || 1;
-                        const price = Number(item.prixUnitaire) || 0;
-                        const tvaRate = Number(item.tva ?? 0);
-                        const remiseRate = Number(item.remise || 0);
-
-                        const montantHTLigne = qty * price * (1 - (remiseRate / 100));
-                        const montantTTCLigne = montantHTLigne * (1 + (tvaRate / 100));
-                        const taxAmount = montantTTCLigne - montantHTLigne;
-
-                        subTotalValue += montantHTLigne;
-                        totalTaxValue += taxAmount;
-                        grandTotalValue += montantTTCLigne;
-                    });
-
-                    const globalDiscount = Number(cell.row.original.remise) || 0;
-                    const discountType = cell.row.original.remiseType || "percentage";
-                    let finalTotal = grandTotalValue;
-
-                    if (globalDiscount > 0) {
-                        if (discountType === "percentage") {
-                            finalTotal = grandTotalValue * (1 - globalDiscount / 100);
-                        } else {
-                            finalTotal = Number(globalDiscount);
-                        }
-                    }
-
-                    return `${finalTotal.toFixed(2)} DT`;
-                },
+                cell: (cell: any) => `${calculateAchatTotals(cell.row.original).finalTotal.toFixed(3)} DT`,
             },
             {
                 header: "Total TTC",
-                accessorKey: "articles",
+                id: "totalTTC",
                 enableColumnFilter: false,
-                cell: (cell: any) => {
-                    const total = cell.getValue().reduce((sum: number, item: any) => {
-                        const itemTotal = item.quantite * item.prixUnitaire;
-                        const itemDiscount = item.remise ? itemTotal * (item.remise / 100) : 0;
-                        const taxableAmount = itemTotal - itemDiscount;
-                        const itemTax = item.tva ? taxableAmount * (item.tva / 100) : 0;
-                        return sum + taxableAmount + itemTax;
-                    }, 0);
-                    return `${total.toFixed(2)} DT`;
-                },
+                cell: (cell: any) => `${calculateAchatTotals(cell.row.original).grandTotal.toFixed(3)} DT`,
             },
             {
                 header: "Statut",
@@ -669,14 +637,7 @@ const parseNumericInput = (value: string): number => {
                                     className="text-primary d-inline-block edit-item-btn"
                                     onClick={() => {
                                         setBonCommande(cellProps.row.original);
-                                        setSelectedArticles(cellProps.row.original.articles.map((item: any) => ({
-                                            article_id: item.article.id,
-                                            quantite: item.quantite,
-                                            prixUnitaire: parseFloat(item.prixUnitaire),
-                                            tva: item.tva != null ? parseFloat(item.tva) : (item.article.tva || null),
-                                            remise: item.remise != null ? parseFloat(item.remise) : null,
-                                            articleDetails: item.article
-                                        })));
+                                        setSelectedArticles(cellProps.row.original.articles.map(toSelectedArticle));
                                         setGlobalRemise(cellProps.row.original.remise || 0);
                                         setRemiseType(cellProps.row.original.remiseType || "percentage");
                                         setShowRemise((cellProps.row.original.remise || 0) > 0);
@@ -709,12 +670,22 @@ const parseNumericInput = (value: string): number => {
                                     <i className="ri-eye-line fs-16"></i>
                                 </Link>
                             </li>
+                            <li className="list-inline-item">
+                                <Link
+                                    to="#"
+                                    className="text-success d-inline-block"
+                                    title="Imprimer PDF"
+                                    onClick={() => openPdf(cellProps.row.original)}
+                                >
+                                    <i className="ri-printer-line fs-16"></i>
+                                </Link>
+                            </li>
                         </ul>
                     );
                 },
             },
         ],
-        []
+        [companyInfo]
     );
 
     return (
@@ -869,9 +840,14 @@ const parseNumericInput = (value: string): number => {
                                 ) : (
                                     <TableContainer
                                         columns={columns}
-                                        data={filteredBonsCommande}
+                                        data={bonsCommande}
                                         isGlobalFilter={false}
-                                        customPageSize={10}
+                                        isPagination={true}
+                                        totalDataCount={totalCount}
+                                        currentPage={currentPage - 1}
+                                        onPageChange={(page) => fetchData(page + 1, pageSize)}
+                                        onPageSizeChange={(size) => fetchData(1, size)}
+                                        customPageSize={pageSize}
                                         divClass="table-responsive table-card mb-1 mt-0"
                                         tableClass="align-middle table-nowrap"
                                         theadClass="table-light text-muted text-uppercase"
@@ -985,16 +961,13 @@ const parseNumericInput = (value: string): number => {
                                 </thead>
                                 <tbody>
                                     {selectedBonCommande.articles.map((item, index) => {
+                                        const line = calculateLineTotals(toAchatCalcLine(item), index);
                                         const quantite = Number(item.quantite) || 0;
-                                        const priceHT = Number(item.prixUnitaire) || 0;
+                                        const priceHT = line.unitHT;
+                                        const priceTTC = line.unitTTC;
                                         const tvaRate = Number(item.tva || 0);
-                                        const remiseRate = Number(item.remise || 0);
-
-                                        const priceTTC = priceHT * (1 + (tvaRate / 100));
-                                        
-                                        const montantSousTotalHT = Math.round(quantite * priceHT * 1000) / 1000;
-                                        const montantNetHT = Math.round(quantite * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
-                                        const montantTTCLigne = Math.round(quantite * priceTTC * 1000) / 1000;
+                                        const montantNetHT = line.netHT;
+                                        const montantTTCLigne = line.ttc;
 
                                         return (
                                             <tr key={index} className={index % 2 === 0 ? "bg-light" : ""}>
@@ -1027,70 +1000,17 @@ const parseNumericInput = (value: string): number => {
                             <Row className="justify-content-end">
                                 <Col xs={8} sm={6} md={5} lg={4}>
                                     {(() => {
-                                        let sousTotalHTValue = 0;
-                                        let netHTValue = 0;
-                                        let totalTaxValue = 0;
-                                        let grandTotalValue = 0;
-
-                                        selectedBonCommande.articles.forEach((article) => {
-                                            const qty = Number(article.quantite) || 0;
-                                            const tvaRate = Number(article.tva || 0);
-                                            const remiseRate = Number(article.remise || 0);
-                                            
-                                            const priceHT = Number(article.prixUnitaire) || 0;
-                                            const priceTTC = priceHT * (1 + (tvaRate / 100));
-
-                                            const montantSousTotalHT = Math.round(qty * priceHT * 1000) / 1000;
-                                            const montantNetHT = Math.round(qty * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
-                                            const montantTTCLigne = Math.round(qty * priceTTC * 1000) / 1000;
-                                            const montantTVA = Math.round((montantTTCLigne - montantNetHT) * 1000) / 1000;
-
-                                            sousTotalHTValue += montantSousTotalHT;
-                                            netHTValue += montantNetHT;
-                                            totalTaxValue += montantTVA;
-                                            grandTotalValue += montantTTCLigne;
-                                        });
-
-                                        sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
-                                        netHTValue = Math.round(netHTValue * 1000) / 1000;
-                                        totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-                                        grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
-
+                                        // Same calculation engine as the ventes pages
+                                        const totals = calculateAchatTotals(selectedBonCommande);
+                                        const sousTotalHTValue = totals.sousTotalHT;
+                                        const displayNetHT = totals.netHT;
+                                        const displayTotalTax = totals.totalTax;
+                                        const grandTotalValue = totals.grandTotal;
+                                        const finalTotalValue = totals.finalTotal;
+                                        const discountAmountValue = totals.discountAmount;
+                                        const discountPercentage = totals.discountPercentage.toFixed(2);
                                         const remiseValue = Number(selectedBonCommande.remise) || 0;
                                         const remiseTypeValue = selectedBonCommande.remiseType || "percentage";
-                                        
-                                        let finalTotalValue = grandTotalValue;
-                                        let discountAmountValue = 0;
-                                        let netHTAfterDiscount = netHTValue;
-                                        let totalTaxAfterDiscount = totalTaxValue;
-                                        let discountPercentage = 0;
-
-                                        if (remiseValue > 0) {
-                                            if (remiseTypeValue === "percentage") {
-                                                discountAmountValue = Math.round(netHTValue * (remiseValue / 100) * 1000) / 1000;
-                                                netHTAfterDiscount = Math.round((netHTValue - discountAmountValue) * 1000) / 1000;
-                                                
-                                                const discountRatio = netHTAfterDiscount / netHTValue;
-                                                totalTaxAfterDiscount = Math.round(totalTaxValue * discountRatio * 1000) / 1000;
-                                                
-                                                finalTotalValue = Math.round((netHTAfterDiscount + totalTaxAfterDiscount) * 1000) / 1000;
-                                                
-                                            } else if (remiseTypeValue === "fixed") {
-                                                finalTotalValue = Math.round(Number(remiseValue) * 1000) / 1000;
-                                                
-                                                const tvaToHtRatio = totalTaxValue / netHTValue;
-                                                const htAfterDiscount = Math.round(finalTotalValue / (1 + tvaToHtRatio) * 1000) / 1000;
-                                                
-                                                discountAmountValue = Math.round((netHTValue - htAfterDiscount) * 1000) / 1000;
-                                                netHTAfterDiscount = htAfterDiscount;
-                                                totalTaxAfterDiscount = Math.round(netHTAfterDiscount * tvaToHtRatio * 1000) / 1000;
-                                                
-                                                discountPercentage = Math.round((discountAmountValue / netHTValue) * 100 * 100) / 100;
-                                            }
-                                        }
-
-                                        const displayNetHT = remiseValue > 0 ? netHTAfterDiscount : netHTValue;
-                                        const displayTotalTax = remiseValue > 0 ? totalTaxAfterDiscount : totalTaxValue;
 
                                         return (
                                             <Table className="table-sm table-borderless mb-0">
@@ -1162,20 +1082,13 @@ const parseNumericInput = (value: string): number => {
                 if (selectedBonCommande) {
                     setBonCommande(selectedBonCommande);
                     setSelectedFournisseur(selectedBonCommande.fournisseur || null);
-                    setSelectedArticles(selectedBonCommande.articles.map((item: any) => ({
-                        article_id: item.article.id,
-                        quantite: item.quantite,
-                        prixUnitaire: Number(item.prixUnitaire) || 0,
-                        prixTTC: (Number(item.prixUnitaire) || 0) * (1 + ((Number(item.tva) || 0) / 100)),
-                        tva: item.tva != null ? Number(item.tva) : null,
-                        remise: item.remise != null ? Number(item.remise) : null,
-                        articleDetails: item.article
-                    })));
+                    setSelectedArticles(selectedBonCommande.articles.map(toSelectedArticle));
                     setGlobalRemise(selectedBonCommande.remise || 0);
                     setRemiseType((selectedBonCommande.remiseType as "percentage" | "fixed" | undefined) ?? "percentage");
                     setShowRemise((selectedBonCommande.remise || 0) > 0);
                     setIsCreatingReception(true);
                     setIsEdit(false);
+                    setSelectedDepot(defaultDepot);
 
                     validation.setValues({
                         ...validation.values,
@@ -1193,7 +1106,15 @@ const parseNumericInput = (value: string): number => {
         >
             <i className="ri-truck-line me-2"></i> Créer Bon Réception
         </Button>
-        
+
+        <Button
+            color="info"
+            onClick={() => selectedBonCommande && openPdf(selectedBonCommande)}
+            className="btn-invoice me-2"
+        >
+            <i className="ri-printer-line me-2"></i> Imprimer PDF
+        </Button>
+
         <Button 
             color="light" 
             onClick={() => setDetailModal(false)}
@@ -1317,6 +1238,29 @@ const parseNumericInput = (value: string): number => {
                                 )}
                             </div>
                         </Col>
+                        {isCreatingReception && (
+                            <Col md={6}>
+                                <div className="mb-3">
+                                    <Label className="form-label-lg fw-semibold">Dépôt de Réception*</Label>
+                                    <Input
+                                        type="select"
+                                        value={selectedDepot?.id || ""}
+                                        onChange={(e) => {
+                                            const id = parseInt(e.target.value);
+                                            setSelectedDepot(depots.find(d => d.id === id) || null);
+                                        }}
+                                        className="form-control-lg"
+                                    >
+                                        <option value="">Sélectionner un dépôt</option>
+                                        {depots.map((depot) => (
+                                            <option key={depot.id} value={depot.id}>
+                                                {depot.nom}
+                                            </option>
+                                        ))}
+                                    </Input>
+                                </div>
+                            </Col>
+                        )}
                     </Row>
                 </CardBody>
             </Card>
@@ -1343,11 +1287,6 @@ const parseNumericInput = (value: string): number => {
                                                 validation.setFieldValue("fournisseur_id", "");
                                             }
                                             setFournisseurSearch(e.target.value);
-                                        }}
-                                        onFocus={() => {
-                                            if (fournisseurSearch.length >= 1) {
-                                                setFilteredFournisseurs(fournisseurs);
-                                            }
                                         }}
                                         readOnly={!!selectedFournisseur}
                                         className="form-control-lg"
@@ -1381,7 +1320,12 @@ const parseNumericInput = (value: string): number => {
                                             backgroundColor: "white"
                                         }}
                                     >
-                                        {filteredFournisseurs.length > 0 ? (
+                                        {fournisseursLoading && filteredFournisseurs.length === 0 ? (
+                                            <div className="text-muted p-3 text-center">
+                                                <span className="spinner-border spinner-border-sm me-2"></span>
+                                                Recherche...
+                                            </div>
+                                        ) : filteredFournisseurs.length > 0 ? (
                                             <ul className="list-group list-group-flush">
                                                 {filteredFournisseurs.map((f) => (
                                                     <li
@@ -1552,17 +1496,18 @@ const parseNumericInput = (value: string): number => {
                                     backgroundColor: "white"
                                 }}
                             >
-                                {filteredArticles.length > 0 ? (
+                                {articlesLoading && filteredArticles.length === 0 ? (
+                                    <div className="text-muted p-3 text-center">
+                                        <span className="spinner-border spinner-border-sm me-2"></span>
+                                        Recherche...
+                                    </div>
+                                ) : filteredArticles.length > 0 ? (
                                     <ul className="list-group list-group-flush">
                                         {filteredArticles.map((article) => (
                                             <li
                                                 key={article.id}
                                                 className="list-group-item list-group-item-action"
-                                                onClick={() => {
-                                                    handleAddArticle(article.id.toString());
-                                                    setArticleSearch("");
-                                                    setFilteredArticles([]);
-                                                }}
+                                                onClick={() => handleAddArticle(article)}
                                                 style={{ 
                                                     cursor: "pointer", 
                                                     padding: "12px 15px",
@@ -1622,37 +1567,12 @@ const parseNumericInput = (value: string): number => {
                                     </thead>
                                     <tbody>
                                         {selectedArticles.map((item, index) => {
-                                            const article = articles.find((a) => a.id === item.article_id) || item.articleDetails;
-                                            
-                                            const qty = Number(item.quantite) || 0;
-                                            
-                                            let priceHT = Number(item.prixUnitaire) || 0;
-                                            let priceTTC = Number(item.prixTTC) || 0;
-                                            
-                                            if (editingHT[item.article_id] !== undefined) {
-                                                const editingValue = parseNumericInput(editingHT[item.article_id]);
-                                                if (!isNaN(editingValue) && editingValue >= 0) {
-                                                    priceHT = parseFloat(editingValue.toFixed(3));
-                                                    const tvaRate = Number(item.tva) || 0;
-                                                    const tvaAmount = tvaRate > 0 ? parseFloat((priceHT * tvaRate / 100).toFixed(3)) : 0;
-                                                    priceTTC = parseFloat((priceHT + tvaAmount).toFixed(3));
-                                                }
-                                            } else if (editingTTC[item.article_id] !== undefined) {
-                                                const editingValue = parseNumericInput(editingTTC[item.article_id]);
-                                                if (!isNaN(editingValue) && editingValue >= 0) {
-                                                    priceTTC = parseFloat(editingValue.toFixed(3));
-                                                    const tvaRate = Number(item.tva) || 0;
-                                                    if (tvaRate > 0) {
-                                                        const coefficient = 1 + (tvaRate / 100);
-                                                        priceHT = parseFloat((priceTTC / coefficient).toFixed(3));
-                                                    } else {
-                                                        priceHT = priceTTC;
-                                                    }
-                                                }
-                                            }
+                                            const article = item.articleDetails;
 
-                                            const montantHTLigne = (qty * priceHT).toFixed(3);
-                                            const montantTTCLigne = (qty * priceTTC).toFixed(3);
+                                            // Same line calculation as the ventes pages
+                                            const line = calculateLineTotals(item, index, { editingHT, editingTTC });
+                                            const montantHTLigne = line.netHT.toFixed(3);
+                                            const montantTTCLigne = line.ttc.toFixed(3);
 
                                             return (
                                                 <tr key={`${item.article_id}-${index}`} className="align-middle">
@@ -1897,7 +1817,7 @@ const parseNumericInput = (value: string): number => {
                                                         <th className="text-end text-muted fs-6">
                                                             {remiseType === "percentage" 
                                                                 ? `Remise (${globalRemise}%)` 
-                                                                : `Remise (Montant fixe) ${((discountAmount / netHT) * 100).toFixed(1)}%`}
+                                                                : `Remise (Montant fixe) ${discountPercentage.toFixed(2)}%`}
                                                         </th>
                                                         <td className="text-end text-danger fw-bold fs-6">
                                                             - {discountAmount.toFixed(3)} DT
@@ -1908,7 +1828,7 @@ const parseNumericInput = (value: string): number => {
                                                 <tr className="final-total real-time-update border-top">
                                                     <th className="text-end fs-5">NET À PAYER:</th>
                                                     <td className="text-end fw-bold fs-5 text-primary">
-                                                        {finalTotal.toFixed(3)} DT
+                                                        {netAPayer.toFixed(3)} DT
                                                     </td>
                                                 </tr>
                                             </tbody>
@@ -1971,6 +1891,23 @@ const parseNumericInput = (value: string): number => {
                     </Col>
                 </Row>
             </Container>
+
+            <QuantiteArticleModal
+                article={articleToAdd}
+                existingQuantity={
+                    articleToAdd
+                        ? Number(selectedArticles.find((item) => item.article_id === articleToAdd.id)?.quantite) || 0
+                        : 0
+                }
+                onConfirm={confirmAddArticle}
+                onCancel={() => setArticleToAdd(null)}
+            />
+
+            <AchatDocumentPDFModal
+                isOpen={!!pdfDocument}
+                toggle={() => setPdfDocument(null)}
+                document={pdfDocument}
+            />
         </div>
     );
 };
