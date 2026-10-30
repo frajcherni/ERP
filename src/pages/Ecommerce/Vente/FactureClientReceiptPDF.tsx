@@ -10,6 +10,7 @@ import {
 } from "@react-pdf/renderer";
 import moment from "moment";
 import { FactureClient } from "../../../Components/Article/Interfaces";
+import { calculateDocumentTotals, remiseLine } from "../../../Utils/CalculationEngine";
 
 const styles = StyleSheet.create({
   page: {
@@ -219,173 +220,30 @@ const FactureClientReceiptPDF: React.FC<FactureClientReceiptPDFProps> = ({
   const exoneration = facture?.exoneration || false;
   const timbreFiscal = facture?.timbreFiscal || false;
 
-  // Calculate totals EXACTLY like in FactureClient PDF
+  // Same totals as the A4 invoice (shared engine), so the receipt prints the same amounts
   const calculateTotals = (): Totals => {
-    if (!facture?.articles || facture.articles.length === 0) {
-      return {
-        sousTotalHT: 0,
-        netHT: 0,
-        totalTax: 0,
-        grandTotal: 0,
-        finalTotal: 0,
-        discountAmount: 0,
-        globalRemise: 0,
-        remiseType: "fixed",
-        retentionAmount: 0,
-        netAPayer: 0,
-      };
-    }
-
-    // Step 1: Calculate original totals (without document-level discount)
-    let sousTotalHTValue = 0;
-    let netHTBeforeGlobalRemise = 0;
-    let totalTaxValue = 0;
-    let grandTotalValue = 0;
-
-    // Calculate original line amounts (with line-level discounts only)
-    facture.articles.forEach((article) => {
-      const qty = Number(article.quantite) || 0;
-      const articleRemise = Number(article.remise) || 0;
-      const tvaRate = exoneration ? 0 : Number(article.tva) || 0;
-
-      let unitHT = Number(article.prixUnitaire) || 0;
-      let unitTTC = Number(article.prix_ttc) || unitHT * (1 + tvaRate / 100);
-
-      const montantSousTotalHT = Math.round(qty * unitHT * 1000) / 1000;
-      const montantNetHTLigne = Math.round(
-        qty * unitHT * (1 - articleRemise / 100) * 1000
-      ) / 1000;
-      const montantTTCLigne = Math.round(qty * unitTTC * 1000) / 1000;
-      const montantTVALigne = Math.round(
-        (montantTTCLigne - montantNetHTLigne) * 1000
-      ) / 1000;
-
-      sousTotalHTValue = Math.round((sousTotalHTValue + montantSousTotalHT) * 1000) / 1000;
-      netHTBeforeGlobalRemise = Math.round((netHTBeforeGlobalRemise + montantNetHTLigne) * 1000) / 1000;
-      totalTaxValue = Math.round((totalTaxValue + montantTVALigne) * 1000) / 1000;
-      grandTotalValue = Math.round((grandTotalValue + montantTTCLigne) * 1000) / 1000;
-    });
-
-    // Step 2: Apply global remise according to principle
-    let netHTAfterGlobalRemise = netHTBeforeGlobalRemise;
-    let totalTaxAfterGlobalRemise = totalTaxValue;
-    let finalTotalValue = grandTotalValue;
-    let discountAmountValue = 0;
-
-    const globalRemise = Number(facture.remise) || 0;
-    const remiseType = facture.remiseType || "fixed";
-
-    if (globalRemise > 0) {
-      if (remiseType === "percentage") {
-        // Percentage remise: Apply on HT base
-        discountAmountValue = Math.round(
-          (netHTBeforeGlobalRemise * (globalRemise / 100)) * 1000
-        ) / 1000;
-        netHTAfterGlobalRemise = Math.round(
-          (netHTBeforeGlobalRemise - discountAmountValue) * 1000
-        ) / 1000;
-
-        if (netHTBeforeGlobalRemise > 0) {
-          const tvaToHtRatio = Math.round(
-            (totalTaxValue / netHTBeforeGlobalRemise) * 1000
-          ) / 1000;
-          totalTaxAfterGlobalRemise = Math.round(
-            (netHTAfterGlobalRemise * tvaToHtRatio) * 1000
-          ) / 1000;
-        } else {
-          totalTaxAfterGlobalRemise = 0;
-        }
-
-        finalTotalValue = Math.round(
-          (netHTAfterGlobalRemise + totalTaxAfterGlobalRemise) * 1000
-        ) / 1000;
-      } else if (remiseType === "fixed") {
-        // Fixed remise: User enters the final TTC amount
-        finalTotalValue = Math.round(Number(globalRemise) * 1000) / 1000;
-
-        // Check if single or multiple TVA rates
-        const uniqueTvaRates = Array.from(
-          new Set(facture.articles.map((a) => Number(a.tva) || 0))
-        );
-
-        if (uniqueTvaRates.length === 1 && uniqueTvaRates[0] > 0) {
-          // SINGLE TVA RATE FORMULA: Net HT = TTC / (1 + TVA rate)
-          const tvaRate = uniqueTvaRates[0] / 100;
-          netHTAfterGlobalRemise = Math.round((finalTotalValue / (1 + tvaRate)) * 1000) / 1000;
-          totalTaxAfterGlobalRemise = Math.round((finalTotalValue - netHTAfterGlobalRemise) * 1000) / 1000;
-        } else {
-          // MULTIPLE TVA RATES: Use proportional method
-          const discountCoefficient = finalTotalValue / grandTotalValue;
-
-          let newTotalHT = 0;
-          let newTotalTVA = 0;
-
-          facture.articles.forEach((article) => {
-            const qty = Number(article.quantite) || 0;
-            const articleRemise = Number(article.remise) || 0;
-            const unitHT = Number(article.prixUnitaire) || 0;
-            const tvaRate = exoneration ? 0 : Number(article.tva) || 0;
-
-            const lineHTAfterDiscount = qty * unitHT * (1 - articleRemise / 100);
-            const newLineHT = lineHTAfterDiscount * discountCoefficient;
-            const newLineTVA = newLineHT * (tvaRate / 100);
-
-            newTotalHT += newLineHT;
-            newTotalTVA += newLineTVA;
-          });
-
-          netHTAfterGlobalRemise = Math.round(newTotalHT * 1000) / 1000;
-          totalTaxAfterGlobalRemise = Math.round(newTotalTVA * 1000) / 1000;
-        }
-
-        discountAmountValue = Math.round(
-          (netHTBeforeGlobalRemise - netHTAfterGlobalRemise) * 1000
-        ) / 1000;
-      }
-    }
-
-    // Step 3: Apply exoneration
-    if (exoneration) {
-      totalTaxAfterGlobalRemise = 0;
-      finalTotalValue = netHTAfterGlobalRemise;
-    }
-
-    // Step 4: Add timbre fiscal
-    if (timbreFiscal) {
-      finalTotalValue = Math.round((finalTotalValue + 1) * 1000) / 1000;
-    }
-
-    // Step 5: Calculate retention
-    let retentionAmount = 0;
-    if (facture.paymentMethods) {
-      facture.paymentMethods.forEach((pm: any) => {
-        if (pm.method === "retenue") {
-          const tauxRetention = pm.tauxRetention || 1;
-          retentionAmount = Math.round(
-            (finalTotalValue * tauxRetention) / 100 * 1000
-          ) / 1000;
-        }
-      });
-    }
-
-    // Step 6: Net à payer (the retenue à la source is not subtracted)
-    const netAPayer = Math.max(0, finalTotalValue);
-
+    const t = calculateDocumentTotals(facture);
+    // The retenue stays computed on the net à payer, like the backend does
+    const retenue: any = (facture?.paymentMethods || []).find((pm: any) => pm.method === "retenue");
+    const retentionAmount = retenue
+      ? Math.round(((t.netAPayer * (Number(retenue.tauxRetention) || 1)) / 100) * 1000) / 1000
+      : 0;
     return {
-      sousTotalHT: sousTotalHTValue,
-      netHT: globalRemise > 0 ? netHTAfterGlobalRemise : netHTBeforeGlobalRemise,
-      totalTax: exoneration ? 0 : (globalRemise > 0 ? totalTaxAfterGlobalRemise : totalTaxValue),
-      grandTotal: grandTotalValue,
-      finalTotal: finalTotalValue,
-      discountAmount: discountAmountValue,
-      globalRemise,
-      remiseType,
+      sousTotalHT: t.sousTotalHT,
+      netHT: t.netHT,
+      totalTax: t.totalTax,
+      grandTotal: t.grandTotal,
+      finalTotal: t.netAPayer,
+      discountAmount: t.discountAmount,
+      globalRemise: Number(facture?.remise) || 0,
+      remiseType: facture?.remiseType || "fixed",
       retentionAmount,
-      netAPayer,
+      netAPayer: t.netAPayer,
     };
   };
 
   const totals = calculateTotals();
+  const remiseRow = remiseLine(totals.discountAmount);
 
   return (
     <Document>
@@ -498,13 +356,13 @@ const FactureClientReceiptPDF: React.FC<FactureClientReceiptPDFProps> = ({
           </View>
 
           {/* Show Remise if applicable */}
-          {totals.globalRemise > 0 && (
+          {remiseRow && (
             <View style={styles.totalRow}>
               <Text style={[styles.totalLabel, styles.discountRow]}>
-                Remise:
+                {remiseRow.label}:
               </Text>
               <Text style={[styles.totalValue, styles.discountRow]}>
-                - {totals.discountAmount.toFixed(3)} DT
+                {remiseRow.sign} {remiseRow.amount.toFixed(3)} DT
               </Text>
             </View>
           )}

@@ -12,7 +12,7 @@ import moment from "moment";
 import { BonCommandeClient } from "../../../Components/Article/Interfaces";
 import { formatPhoneDisplay } from "../../../helpers/phone_helper";
 import { montantEnLettres } from "../../../Utils/montantEnLettres";
-import { calculateDocumentTotals } from "../../../Utils/CalculationEngine";
+import { calculateDocumentTotals, remiseLine } from "../../../Utils/CalculationEngine";
 
 Font.register({
   family: "Open Sans",
@@ -475,6 +475,7 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
     tvaBreakdown,
     hasRetention,
   } = calculateTotals();
+  const remiseRow = remiseLine(discountAmount);
 
   // ─────────────────────────────────────────────
   // PAGINATION  ← the only structural change
@@ -704,10 +705,10 @@ const BonCommandePDF: React.FC<BonCommandePDFProps> = ({
               <Text style={styles.summaryLabel}>Total H.T.:</Text>
               <Text style={styles.summaryValue}>{formatCurrency(sousTotalHT)} DT</Text>
             </View>
-            {Number(bonCommande.remise) > 0 && (
+            {remiseRow && (
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Remise sur HT:</Text>
-                <Text style={styles.summaryValue}>- {formatCurrency(discountAmount)} DT</Text>
+                <Text style={styles.summaryLabel}>{remiseRow.label} sur HT:</Text>
+                <Text style={styles.summaryValue}>{remiseRow.sign} {formatCurrency(remiseRow.amount)} DT</Text>
               </View>
             )}
             <View style={styles.summaryRow}>

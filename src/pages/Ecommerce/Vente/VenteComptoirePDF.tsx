@@ -10,7 +10,7 @@ import {
 } from "@react-pdf/renderer";
 import moment from "moment";
 import { BonCommandeClient } from "../../../Components/Article/Interfaces";
-import { calculateDocumentTotals } from "../../../Utils/CalculationEngine";
+import { calculateDocumentTotals, remiseLine } from "../../../Utils/CalculationEngine";
 import { montantEnLettres } from "../../../Utils/montantEnLettres";
 
 Font.register({
@@ -341,6 +341,7 @@ const FactureVentePDF: React.FC<FactureVentePDFProps> = ({
     discountAmount,
     tvaBreakdown = {},
   } = totals as any;
+  const remiseRow = remiseLine(discountAmount);
 
 
   // ─────────────────────────────────────────────
@@ -417,10 +418,10 @@ const FactureVentePDF: React.FC<FactureVentePDFProps> = ({
               <Text style={styles.summaryLabel}>Total H.T.:</Text>
               <Text style={styles.summaryValue}>{formatCurrency(sousTotalHT)} DT</Text>
             </View>
-            {Number(bonCommande.remise) > 0 && (
+            {remiseRow && (
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Remise sur HT:</Text>
-                <Text style={styles.summaryValue}>- {formatCurrency(discountAmount)} DT</Text>
+                <Text style={styles.summaryLabel}>{remiseRow.label} sur HT:</Text>
+                <Text style={styles.summaryValue}>{remiseRow.sign} {formatCurrency(remiseRow.amount)} DT</Text>
               </View>
             )}
             <View style={styles.summaryRow}>

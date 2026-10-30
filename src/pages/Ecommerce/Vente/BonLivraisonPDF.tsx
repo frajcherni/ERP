@@ -11,7 +11,7 @@ import {
 } from "@react-pdf/renderer";
 import moment from "moment";
 import { BonLivraison } from "../../../Components/Article/Interfaces";
-import { calculateDocumentTotals } from "../../../Utils/CalculationEngine";
+import { calculateDocumentTotals, remiseLine } from "../../../Utils/CalculationEngine";
 import { montantEnLettres } from "../../../Utils/montantEnLettres";
 
 Font.register({
@@ -328,6 +328,7 @@ const BonLivraisonPDF: React.FC<BonLivraisonPDFProps> = ({
 
   const totals = calculateDocumentTotals(bonLivraison);
   const { sousTotalHT, netHT, totalTax, finalTotal, discountAmount } = totals;
+  const remiseRow = remiseLine(discountAmount);
   const formatCurrency = (amount: number) => amount.toFixed(3);
 
   const amountInWords = montantEnLettres(finalTotal);
@@ -391,7 +392,7 @@ const BonLivraisonPDF: React.FC<BonLivraisonPDFProps> = ({
         <View style={styles.totalsContainer}>
           <View style={styles.totalsBox}>
             <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Total H.T.:</Text><Text style={styles.summaryValue}>{formatCurrency(sousTotalHT)} DT</Text></View>
-            {Number(bonLivraison.remise) > 0 && (<View style={styles.summaryRow}><Text style={styles.summaryLabel}>Remise sur HT:</Text><Text style={styles.summaryValue}>- {formatCurrency(discountAmount)} DT</Text></View>)}
+            {remiseRow && (<View style={styles.summaryRow}><Text style={styles.summaryLabel}>{remiseRow.label} sur HT:</Text><Text style={styles.summaryValue}>{remiseRow.sign} {formatCurrency(remiseRow.amount)} DT</Text></View>)}
             <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Net H.T.:</Text><Text style={styles.summaryValue}>{formatCurrency(netHT)} DT</Text></View>
             <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Total TVA:</Text><Text style={styles.summaryValue}>{formatCurrency(totalTax)} DT</Text></View>
             <View style={styles.summaryRow}><Text style={styles.summaryLabel}>Total TTC:</Text><Text style={styles.summaryValue}>{formatCurrency(finalTotal)} DT</Text></View>

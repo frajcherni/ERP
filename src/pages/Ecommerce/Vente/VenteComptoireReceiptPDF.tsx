@@ -9,6 +9,7 @@ import {
 } from "@react-pdf/renderer";
 import moment from "moment";
 import { BonCommandeClient } from "../../../Components/Article/Interfaces";
+import { calculateDocumentTotals, remiseLine } from "../../../Utils/CalculationEngine";
 
 const styles = StyleSheet.create({
   page: {
@@ -199,99 +200,23 @@ const VenteComptoireReceiptPDF: React.FC<VenteComptoireReceiptPDFProps> = ({
   bonCommande,
   companyInfo,
 }) => {
-  // Calculate totals exactly like in FactureVentePDF
+  // Same totals as the A4 document (shared engine), so the receipt prints the same amounts
   const calculateTotals = (): Totals => {
-    if (!bonCommande?.articles || bonCommande.articles.length === 0) {
-      return {
-        sousTotalHT: 0,
-        netHT: 0,
-        totalTax: 0,
-        grandTotal: 0,
-        finalTotal: 0,
-        discountAmount: 0,
-        globalRemise: 0,
-        remiseType: "percentage",
-      };
-    }
-
-    let sousTotalHTValue = 0;
-    let netHTValue = 0;
-    let totalTaxValue = 0;
-    let grandTotalValue = 0;
-
-    // Calculate initial totals using prix_ttc from articles
-    bonCommande.articles.forEach((article) => {
-      const qty = Number(article.quantite) || 0;
-      const tvaRate = Number(article.tva) || 0;
-      const remiseRate = Number(article.remise) || 0;
-
-      // Use prix_ttc if available, otherwise calculate from prixUnitaire
-      const priceHT = Number(article.prixUnitaire) || 0;
-      const priceTTC = Number(article.prix_ttc) || priceHT * (1 + tvaRate / 100);
-
-      // Calculate line amounts exactly like FactureVentePDF
-      const montantSousTotalHT = Math.round(qty * priceHT * 1000) / 1000;
-      const montantNetHT = Math.round(qty * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
-      const montantTTCLigne = Math.round(qty * priceTTC * 1000) / 1000;
-      const montantTVA = Math.round((montantTTCLigne - montantNetHT) * 1000) / 1000;
-
-      sousTotalHTValue += montantSousTotalHT;
-      netHTValue += montantNetHT;
-      totalTaxValue += montantTVA;
-      grandTotalValue += montantTTCLigne;
-    });
-
-    sousTotalHTValue = Math.round(sousTotalHTValue * 1000) / 1000;
-    netHTValue = Math.round(netHTValue * 1000) / 1000;
-    totalTaxValue = Math.round(totalTaxValue * 1000) / 1000;
-    grandTotalValue = Math.round(grandTotalValue * 1000) / 1000;
-
-    let finalTotalValue = grandTotalValue;
-    let discountAmountValue = 0;
-    let netHTAfterDiscount = netHTValue;
-    let totalTaxAfterDiscount = totalTaxValue;
-
-    const globalRemise = Number(bonCommande.remise) || 0;
-    const remiseType = bonCommande.remiseType || "percentage";
-
-    if (globalRemise > 0) {
-      if (remiseType === "percentage") {
-        discountAmountValue = Math.round(netHTValue * (globalRemise / 100) * 1000) / 1000;
-        netHTAfterDiscount = Math.round((netHTValue - discountAmountValue) * 1000) / 1000;
-
-        const discountRatio = netHTAfterDiscount / netHTValue;
-        totalTaxAfterDiscount = Math.round(totalTaxValue * discountRatio * 1000) / 1000;
-
-        finalTotalValue = Math.round((netHTAfterDiscount + totalTaxAfterDiscount) * 1000) / 1000;
-
-      } else if (remiseType === "fixed") {
-        finalTotalValue = Math.round(Number(globalRemise) * 1000) / 1000;
-
-        const tvaToHtRatio = totalTaxValue / netHTValue;
-        const htAfterDiscount = Math.round(finalTotalValue / (1 + tvaToHtRatio) * 1000) / 1000;
-
-        discountAmountValue = Math.round((netHTValue - htAfterDiscount) * 1000) / 1000;
-        netHTAfterDiscount = htAfterDiscount;
-        totalTaxAfterDiscount = Math.round(netHTAfterDiscount * tvaToHtRatio * 1000) / 1000;
-      }
-    }
-
-    const displayNetHT = globalRemise > 0 ? netHTAfterDiscount : netHTValue;
-    const displayTotalTax = globalRemise > 0 ? totalTaxAfterDiscount : totalTaxValue;
-
+    const t = calculateDocumentTotals(bonCommande);
     return {
-      sousTotalHT: Math.round(sousTotalHTValue * 1000) / 1000,
-      netHT: Math.round(displayNetHT * 1000) / 1000,
-      totalTax: Math.round(displayTotalTax * 1000) / 1000,
-      grandTotal: Math.round(grandTotalValue * 1000) / 1000,
-      finalTotal: Math.round(finalTotalValue * 1000) / 1000,
-      discountAmount: Math.round(discountAmountValue * 1000) / 1000,
-      globalRemise,
-      remiseType,
+      sousTotalHT: t.sousTotalHT,
+      netHT: t.netHT,
+      totalTax: t.totalTax,
+      grandTotal: t.grandTotal,
+      finalTotal: t.finalTotal,
+      discountAmount: t.discountAmount,
+      globalRemise: Number(bonCommande?.remise) || 0,
+      remiseType: bonCommande?.remiseType || "percentage",
     };
   };
 
   const totals = calculateTotals();
+  const remiseRow = remiseLine(totals.discountAmount);
 
   return (
     <Document>
@@ -385,13 +310,13 @@ const VenteComptoireReceiptPDF: React.FC<VenteComptoireReceiptPDFProps> = ({
           </View>
 
           {/* Show Remise if applicable */}
-          {totals.globalRemise > 0 && (
+          {remiseRow && (
             <View style={styles.totalRow}>
               <Text style={[styles.totalLabel, styles.discountRow]}>
-                Remise:
+                {remiseRow.label}:
               </Text>
               <Text style={[styles.totalValue, styles.discountRow]}>
-                - {totals.discountAmount.toFixed(3)} DT
+                {remiseRow.sign} {remiseRow.amount.toFixed(3)} DT
               </Text>
             </View>
           )}

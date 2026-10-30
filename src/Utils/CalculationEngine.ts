@@ -178,8 +178,21 @@ const splitDocumentTTC = (ttc: number, weights: AmountsByRate) => {
 };
 
 /**
+ * The remise line of a totals block: none when nothing was taken off (a fixed TTC target equal
+ * to the lines total), and a "Majoration" when the TTC target is above the lines total — the
+ * remise is then negative, which printed "Remise - -0.840".
+ */
+export const remiseLine = (discountAmount: number) => {
+  const millimes = toMillimes(discountAmount);
+  if (millimes === 0) return null;
+  return millimes > 0
+    ? { label: "Remise", sign: "-", amount: millimes / 1000 }
+    : { label: "Majoration", sign: "+", amount: -millimes / 1000 };
+};
+
+/**
  * calculateDocumentTotals
- * 
+ *
  * Central calculation function for Order, Delivery, Invoice, and Counter Sale.
  */
 export const calculateDocumentTotals = (
@@ -219,8 +232,10 @@ export const calculateDocumentTotals = (
   let sousTotalHTAcc = 0;
   let netHTBeforeAcc = 0;
   let grandTTCAcc = 0;
+  let printedHTAcc = 0;
   const ttcByRate: AmountsByRate = {};
   const netHTByRate: AmountsByRate = {};
+  const printedHTByRate: AmountsByRate = {};
 
   articles.forEach((art: any, index: number) => {
     // Do NOT pass isExonerated here — the real TTC is needed to turn a fixed remise
@@ -233,6 +248,17 @@ export const calculateDocumentTotals = (
     grandTTCAcc += line.ttc;
     ttcByRate[tvaRate] = (ttcByRate[tvaRate] || 0) + line.ttc;
     netHTByRate[tvaRate] = (netHTByRate[tvaRate] || 0) + line.netHT;
+
+    // The HT an accountant recomputes from the printed line (qty × P.U.HT), unless P.U.HT
+    // does not match P.U.TTC at this rate (a P.U.TTC including the 1% FODEC): that line's
+    // HT then comes out of its TTC, like what the client pays.
+    const coef = 1 + tvaRate / 100;
+    const priceMatches =
+      toMillimes(line.unitHT * coef) === toMillimes(line.unitTTC) ||
+      toMillimes(line.unitTTC / coef) === toMillimes(line.unitHT);
+    const lineHT = priceMatches ? line.grossHT : line.ttc / coef;
+    printedHTAcc += lineHT;
+    printedHTByRate[tvaRate] = (printedHTByRate[tvaRate] || 0) + lineHT * (1 - (Number(art.remise) || 0) / 100);
   });
 
   // STEP 2: Global remise — the ratio it applies to every amount of the document
@@ -284,7 +310,7 @@ export const calculateDocumentTotals = (
     const hasRemise = finalTTCMil !== toMillimes(grandTTCAcc);
     const weights: AmountsByRate = {};
     ratesOf(ttcByRate).forEach((rate) => {
-      weights[rate] = toMillimes(hasRemise ? netHTByRate[rate] * (1 + rate / 100) : ttcByRate[rate]);
+      weights[rate] = toMillimes(hasRemise ? printedHTByRate[rate] * (1 + rate / 100) : ttcByRate[rate]);
     });
 
     const split = splitDocumentTTC(finalTTCMil, weights);
@@ -295,7 +321,7 @@ export const calculateDocumentTotals = (
         tvaBreakdownAcc[rate] = { base: split[rate].base / 1000, montant: split[rate].tva / 1000 };
       }
     });
-    sousTotalHTMil = hasRemise ? toMillimes(sousTotalHTAcc) : netHTMil;
+    sousTotalHTMil = hasRemise ? toMillimes(printedHTAcc) : netHTMil;
   }
 
   // STEP 4: Retention (WITHHOLDING TAX) — informational only, it is NOT deducted

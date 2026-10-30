@@ -11,7 +11,7 @@ import {
 import moment from "moment";
 import { FactureClient } from "../../../Components/Article/Interfaces";
 import { formatPhoneDisplay } from "../../../helpers/phone_helper";
-import { calculateDocumentTotals, calculateLineTotals } from "../../../Utils/CalculationEngine";
+import { calculateDocumentTotals, calculateLineTotals, remiseLine } from "../../../Utils/CalculationEngine";
 import { montantEnLettres } from "../../../Utils/montantEnLettres";
 
 Font.register({
@@ -356,6 +356,7 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
     netAPayer,
     tvaBreakdown = {},
   } = totals;
+  const remiseRow = remiseLine(discountAmount);
 
 
   // ─────────────────────────────────────────────
@@ -445,10 +446,10 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
               <Text style={styles.summaryLabel}>Total H.T.:</Text>
               <Text style={styles.summaryValue}>{formatCurrency(sousTotalHT)} DT</Text>
             </View>
-            {Number(facture.remise) > 0 && (
+            {remiseRow && (
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Remise sur HT:</Text>
-                <Text style={styles.summaryValue}>- {formatCurrency(discountAmount)} DT</Text>
+                <Text style={styles.summaryLabel}>{remiseRow.label} sur HT:</Text>
+                <Text style={styles.summaryValue}>{remiseRow.sign} {formatCurrency(remiseRow.amount)} DT</Text>
               </View>
             )}
             <View style={styles.summaryRow}>
@@ -461,7 +462,8 @@ const FacturePDF: React.FC<FacturePDFProps> = ({
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Total TTC:</Text>
-              <Text style={styles.summaryValue}>{isExonerated ? "0.000" : formatCurrency(finalTotal)} DT</Text>
+              {/* Exonerated: no TVA, so the TTC is the Net HT (finalTotal), not 0 */}
+              <Text style={styles.summaryValue}>{formatCurrency(finalTotal)} DT</Text>
             </View>
             {timbre > 0 && (
               <View style={styles.summaryRow}>
