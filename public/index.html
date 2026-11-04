@@ -1,7 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
+<!--
+  The app is in French. A wrong lang makes Chrome offer (or silently run)
+  translation, and a translated page crashes React (blank page).
+  translate="no" keeps translators off.
+-->
+<html lang="fr" translate="no">
   <head>
     <meta charset="utf-8" />
+    <meta name="google" content="notranslate" />
     <link rel="icon" href="%PUBLIC_URL%/imglogo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />

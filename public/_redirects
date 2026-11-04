@@ -1,3 +1,4 @@
 /api/*      http://54.37.159.225:5000/api/:splat      200
 /uploads/*  http://54.37.159.225:5000/uploads/:splat  200
+/sw.js      /service-worker.js   200
 /*          /index.html   200

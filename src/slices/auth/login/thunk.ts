@@ -6,36 +6,44 @@ import {
 } from "../../../helpers/fakebackend_helper";
 
 import { loginSuccess, logoutUserSuccess, apiError, reset_login_flag } from './reducer';
+import { setAuthorization } from "../../../helpers/api_helper";
 
 // const fireBaseBackend = getFirebaseBackend();
 
-import axios from "axios";
-
 const API_BASE = process.env.REACT_APP_API_BASE;
 
+// The login page shows `payload.data` as the error and re-enables the button a few seconds later.
+const loginFailed = (message: string) => apiError({ data: message });
+
 export const loginUser = (user: any, history: any) => async (dispatch: any) => {
+  let response: Response;
   try {
-debugger
-    const response : any = await axios.post(`${API_BASE}/auth/login`, {
-      username: user.username,
-      password: user.password,
+    response = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: user.username, password: user.password }),
     });
-
-    const data = response.user;
-
-    if (data) {
-      // Save user data in sessionStorage
-      sessionStorage.setItem("authUser", JSON.stringify(data));
-
-      // Dispatch login success
-      dispatch(loginSuccess(data));
-
-      // Redirect to dashboard
-      history("/dashboard");
-    } 
-  } catch (error: any) {
-    dispatch(apiError(error.response?.data || { message: error.message }));
+  } catch {
+    dispatch(loginFailed("Serveur injoignable. Vérifiez votre connexion internet."));
+    return;
   }
+
+  const body = await response.json().catch(() => null);
+  const data = body?.user;
+
+  if (!response.ok || !data) {
+    // The API answers 404 for an unknown username and 401 for a wrong password.
+    const wrongCredentials = response.status === 401 || response.status === 404;
+    dispatch(loginFailed(wrongCredentials
+      ? "Nom d'utilisateur ou mot de passe incorrect."
+      : "Connexion impossible. Réessayez dans un instant."));
+    return;
+  }
+
+  sessionStorage.setItem("authUser", JSON.stringify(data));
+  setAuthorization(data.token);
+  dispatch(loginSuccess(data));
+  history("/dashboard");
 };
 
 

@@ -9,8 +9,7 @@ axios.defaults.baseURL = api.API_URL;
 axios.defaults.headers.post["Content-Type"] = "application/json";
 
 // content type
-const authUser: any = sessionStorage.getItem("authUser")
-const token = JSON.parse(authUser) ? JSON.parse(authUser).token : null;
+const token = getLoggedinUser()?.token;
 if (token)
   axios.defaults.headers.common["Authorization"] = "Bearer " + token;
 
@@ -96,13 +95,18 @@ class APIClient {
     return axios.delete(url, { ...config });
   };
 }
-const getLoggedinUser = () => {
+// A function declaration (hoisted) because the token setup above runs first.
+function getLoggedinUser() {
   const user = sessionStorage.getItem("authUser");
-  if (!user) {
-    return null;
-  } else {
+  if (!user) return null;
+  try {
     return JSON.parse(user);
+  } catch {
+    // A damaged value (e.g. the text "undefined") would crash the app on
+    // startup (blank page). Drop it so the login page shows instead.
+    sessionStorage.removeItem("authUser");
+    return null;
   }
-};
+}
 
 export { APIClient, setAuthorization, getLoggedinUser };

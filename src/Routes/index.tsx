@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useLocation } from "react-router-dom";
 
 //Layouts
 import NonAuthLayout from "../Layouts/NonAuthLayout";
@@ -8,8 +8,10 @@ import VerticalLayout from "../Layouts/index";
 //routes
 import { authProtectedRoutes, publicRoutes } from "./allRoutes";
 import  AuthProtected  from './AuthProtected';
+import ErrorBoundary from "../Components/Common/ErrorBoundary";
 
 const Index = () => {
+    const { pathname } = useLocation();
     return (
         <React.Fragment>
             <Routes>
@@ -34,7 +36,11 @@ const Index = () => {
                             path={route.path}
                             element={
                                 <AuthProtected>
-                                    <VerticalLayout>{route.component}</VerticalLayout>
+                                    <VerticalLayout>
+                                        {/* A crash in one page shows an error card; the menu keeps working.
+                                            The key resets it when the user opens another page. */}
+                                        <ErrorBoundary key={pathname}>{route.component}</ErrorBoundary>
+                                    </VerticalLayout>
                                 </AuthProtected>}
                             key={idx}
                             // exact={true}

@@ -1,4 +1,4 @@
-import { createSlice } from "@reduxjs/toolkit";
+import { createSlice, PayloadAction } from "@reduxjs/toolkit";
 
 export const initialState = {
   user: {},
@@ -15,7 +15,7 @@ const loginSlice = createSlice({
     loginBegin(state, action) {
       state.loading = true;
     },
-    apiError(state:any, action:any) {
+    apiError(state:any, action: PayloadAction<any>) {
       state.errorMsg = action.payload.data;
       state.error = action.payload.data;
       state.loading = true;
