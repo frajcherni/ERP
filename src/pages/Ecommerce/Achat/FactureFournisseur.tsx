@@ -94,6 +94,7 @@ const [editingHT, setEditingHT] = useState<{ [key: number]: string }>({});
         address: userProfile?.company_address ,
         city: userProfile?.company_city ,
         phone: userProfile?.company_phone ,
+        gsm: userProfile?.company_gsm,
         email: userProfile?.company_email ,
         website: userProfile?.company_website ,
         taxId: userProfile?.company_tax_id,

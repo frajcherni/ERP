@@ -1,43 +1,31 @@
-// Client phone numbers for the two supported countries, plus a free "Autre"
-// mode for everything else.
-//   Tunisia : 8 digits, never starts with 0          -> "22 222 222"
-//   Algeria : national format, always starts with 0
-//             mobile (05 / 06 / 07) 10 digits        -> "0555 12 34 56"
-//             landline 9 digits                      -> "021 23 45 67"
-//   Autre   : typed and stored exactly as given, no formatting at all —
-//             for a foreign number, a landline extension, anything that
-//             doesn't fit the two shapes above.
-// A Tunisian number never starts with 0 and an Algerian one always does, so the
-// country is read from the number itself: nothing extra is stored, and the backend
-// search (digits compared without spaces) finds both formats. A number longer
-// than either shape falls back to "Autre" on its own, so typing never truncates it.
+// Client phone numbers: Tunisian numbers are formatted, any other number ("Autre",
+// the globe button) is typed and stored exactly as given.
+//   Tunisia : 8 digits, never starts with 0     -> "22 222 222"
+//   Autre   : no formatting at all — a foreign number, a landline extension,
+//             anything that doesn't fit the Tunisian shape.
+// A Tunisian number never starts with 0, so the country is read from the number
+// itself: nothing extra is stored, and the backend search (spaces removed on both
+// sides) finds both kinds. A number that is not Tunisian-shaped (leading 0, longer
+// than 8 digits) falls back to "Autre" on its own, so typing never truncates it.
 
-export type PhoneCountry = "TN" | "DZ" | "OT";
+export type PhoneCountry = "TN" | "OT";
 
 export const PHONE_COUNTRIES: Record<
   PhoneCountry,
   { label: string; dialCode: string; placeholder: string }
 > = {
   TN: { label: "Tunisie", dialCode: "+216", placeholder: "22 222 222" },
-  DZ: { label: "Algérie", dialCode: "+213", placeholder: "0555 12 34 56" },
   OT: { label: "Autre", dialCode: "", placeholder: "Numéro de téléphone" },
 };
 
-export const PHONE_FORMAT_HINT = "Tunisie : XX XXX XXX · Algérie : 0XXX XX XX XX · Autre : tel quel";
+export const PHONE_FORMAT_HINT = "Tunisie : XX XXX XXX · Autre : tel quel";
 
 const TN_GROUPS = [2, 3, 3];
-const DZ_MOBILE_GROUPS = [4, 2, 2, 2];
-const DZ_LANDLINE_GROUPS = [3, 2, 2, 2];
 
 // A free-form ("Autre") number still lands in a varchar(20) column.
 const FREE_MAX_LEN = 20;
 
-const sum = (groups: number[]) => groups.reduce((total, size) => total + size, 0);
-const TN_LEN = sum(TN_GROUPS);
-const DZ_MAX_LEN = Math.max(sum(DZ_MOBILE_GROUPS), sum(DZ_LANDLINE_GROUPS));
-
-const dzGroups = (local: string) =>
-  /^0[5-7]/.test(local) ? DZ_MOBILE_GROUPS : DZ_LANDLINE_GROUPS;
+const TN_LEN = TN_GROUPS.reduce((total, size) => total + size, 0);
 
 export const phoneDigits = (value?: string | null): string =>
   (value || "").replace(/\D/g, "");
@@ -53,39 +41,27 @@ const groupDigits = (digits: string, groups: number[]): string => {
   return parts.join(" ");
 };
 
-// "+216 22 222 222", "0021622222222", "+213 555 12 34 56", "+213 0555 12 34 56"
-const parseInternational = (
-  digits: string
-): { country: "TN" | "DZ"; local: string } | null => {
-  const tn = digits.match(/^(?:00)?216(\d{8})$/);
-  if (tn) return { country: "TN", local: tn[1] };
-  const dz = digits.match(/^(?:00)?2130?(\d{8,9})$/);
-  if (dz) return { country: "DZ", local: `0${dz[1]}` };
-  return null;
-};
+// "+216 22 222 222", "0021622222222" or "21622222222": the 8-digit local number, else null.
+const parseTunisianInternational = (digits: string): string | null =>
+  digits.match(/^(?:00)?216(\d{8})$/)?.[1] ?? null;
 
-const formatLocal = (digits: string, country: "TN" | "DZ"): string => {
-  if (!digits) return "";
-  if (country === "TN") {
-    return groupDigits(digits.slice(0, sum(TN_GROUPS)), TN_GROUPS);
-  }
-  const local = digits.startsWith("0") ? digits : `0${digits}`;
-  const groups = dzGroups(local);
-  return groupDigits(local.slice(0, sum(groups)), groups);
-};
+const formatTunisian = (digits: string): string =>
+  digits ? groupDigits(digits.slice(0, TN_LEN), TN_GROUPS) : "";
+
+/** A number that can be a Tunisian local number: at most 8 digits, never a leading 0. */
+const looksTunisian = (digits: string): boolean =>
+  digits.length <= TN_LEN && !digits.startsWith("0");
 
 /**
- * Country of a stored or typed number: "OT" once it is longer than any
- * Tunisian or Algerian shape (so it is left alone rather than mangled), or
- * null while it has no digits at all.
+ * Country of a stored or typed number: "OT" as soon as it cannot be a Tunisian
+ * number (so it is left alone rather than mangled), or null while it has no
+ * digits at all.
  */
 export const detectPhoneCountry = (value?: string | null): PhoneCountry | null => {
   const digits = phoneDigits(value);
   if (!digits) return null;
-  const international = parseInternational(digits);
-  if (international) return international.country;
-  if (digits.startsWith("0")) return digits.length <= DZ_MAX_LEN ? "DZ" : "OT";
-  return digits.length <= TN_LEN ? "TN" : "OT";
+  if (parseTunisianInternational(digits)) return "TN";
+  return looksTunisian(digits) ? "TN" : "OT";
 };
 
 /** Formats a phone field as the user types, in the selected country's format. */
@@ -94,15 +70,13 @@ export const formatPhoneInput = (value: string, country: PhoneCountry): string =
   if (country === "OT") return value.slice(0, FREE_MAX_LEN);
 
   const digits = phoneDigits(value);
-  const international = parseInternational(digits);
-  if (international) return formatLocal(international.local, international.country);
+  const local = parseTunisianInternational(digits);
+  if (local) return formatTunisian(local);
 
-  // A leading 0 can only be Algerian: switch format instead of swallowing digits.
-  const asCountry = digits.startsWith("0") ? "DZ" : country;
-  const maxLen = asCountry === "TN" ? TN_LEN : DZ_MAX_LEN;
-  // Longer than either shape: this isn't a Tunisian or Algerian number after
-  // all, so stop reshaping it — truncating here would just eat digits.
-  return digits.length > maxLen ? digits : formatLocal(digits, asCountry);
+  // Not a Tunisian number after all: stop reshaping it — truncating would just eat digits.
+  // The field then switches to "Autre" by itself (see PhoneInput).
+  if (digits.startsWith("0")) return value.slice(0, FREE_MAX_LEN);
+  return digits.length > TN_LEN ? digits : formatTunisian(digits);
 };
 
 /** Re-formats an existing number after the user picked another country. */
@@ -112,32 +86,29 @@ export const convertPhoneCountry = (
 ): string => {
   if (country === "OT") return (value || "").slice(0, FREE_MAX_LEN);
   const digits = phoneDigits(value);
-  const local = parseInternational(digits)?.local ?? digits;
-  return formatLocal(country === "TN" ? local.replace(/^0+/, "") : local, country);
+  const local = parseTunisianInternational(digits) ?? digits;
+  return formatTunisian(local.replace(/^0+/, ""));
 };
 
 /**
- * Formats a search box without ever truncating, so a Tunisian or an Algerian
- * number can be typed in full. Text that is not a phone number is left untouched.
+ * Formats a search box without ever truncating, so any number can be typed in full.
+ * A Tunisian number (with or without +216) is grouped like it is stored; a foreign
+ * number keeps all its digits, and spaces and punctuation are dropped, because the
+ * backend compares the digits only. Text that is not a phone number is left untouched.
  */
 export const formatPhoneSearch = (value: string): string => {
   if (!/^[\d\s+().-]*$/.test(value)) return value;
+
   const digits = phoneDigits(value);
-  const international = parseInternational(digits);
-  if (international) return formatLocal(international.local, international.country);
-  const country = digits.startsWith("0") ? "DZ" : "TN";
-  const localLength = country === "TN" ? sum(TN_GROUPS) : sum(dzGroups(digits));
-  // Longer than a local number (e.g. "+216…" still being typed): keep every digit.
-  return digits.length > localLength ? digits : formatLocal(digits, country);
+  const local = parseTunisianInternational(digits);
+  if (local) return formatTunisian(local);
+  return looksTunisian(digits) ? formatTunisian(digits) : digits;
 };
 
 /** Formats a stored number for display; anything unrecognised is shown as stored. */
 export const formatPhoneDisplay = (phone?: string | null, fallback = "N/A"): string => {
   if (!phone) return fallback;
   const digits = phoneDigits(phone);
-  const international = parseInternational(digits);
-  const local = international?.local ?? digits;
-  const country = international?.country ?? (local.startsWith("0") ? "DZ" : "TN");
-  const expectedLength = country === "TN" ? sum(TN_GROUPS) : sum(dzGroups(local));
-  return local.length === expectedLength ? formatLocal(local, country) : phone;
+  const local = parseTunisianInternational(digits) ?? digits;
+  return local.length === TN_LEN && !local.startsWith("0") ? formatTunisian(local) : phone;
 };

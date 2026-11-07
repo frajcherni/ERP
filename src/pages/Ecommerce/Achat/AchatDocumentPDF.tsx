@@ -12,7 +12,7 @@ import moment from "moment";
 import { Depot, Fournisseur } from "../../../Components/Article/Interfaces";
 import { formatPhoneDisplay } from "../../../helpers/phone_helper";
 import { calculateAchatTotals, toAchatCalcLine } from "./AchatCalculations";
-import { calculateLineTotals } from "../../../Utils/CalculationEngine";
+import { calculateLineTotals, remiseLine } from "../../../Utils/CalculationEngine";
 import { montantEnLettres } from "../../../Utils/montantEnLettres";
 
 Font.register({
@@ -34,7 +34,12 @@ Font.register({
   ],
 });
 
-// Same layout as the ventes BonCommandePDF, with the fournisseur in place of the client.
+// Same layout as the ventes PDFs (BonCommandePDF, FactureClientPdf…), with the fournisseur in
+// place of the client. On the last page everything is pinned to the bottom of the page, from
+// the footer up: footer (5) → signatures (115) → "Arrêté" box (155) → summary (SUMMARY_BOTTOM).
+// The summary must stay above the "Arrêté" box, which is 28pt tall (40pt on two lines).
+const SUMMARY_BOTTOM = 205;
+
 const styles = StyleSheet.create({
   page: {
     flexDirection: "column",
@@ -110,7 +115,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 20,
     right: 20,
-    bottom: 160,
+    bottom: SUMMARY_BOTTOM,
     flexDirection: "row",
     justifyContent: "space-between",
   },
@@ -224,10 +229,12 @@ const styles = StyleSheet.create({
 });
 
 export interface AchatDocumentPDFProps {
-  /** "BON DE COMMANDE" / "BON DE RÉCEPTION" */
+  /** "BON DE COMMANDE" / "BON DE RÉCEPTION" / "FACTURE FOURNISSEUR" */
   title: string;
-  /** "bon de commande" / "bon de réception", used in the amount-in-words sentence */
+  /** "bon de commande" / "bon de réception" / "facture", used in the amount-in-words sentence */
   documentLabel: string;
+  /** "Arrêtée la présente facture…" instead of "Arrêté le présent bon…" */
+  feminine?: boolean;
   numero: string;
   date?: string | null;
   dateLabel: string;
@@ -237,6 +244,10 @@ export interface AchatDocumentPDFProps {
   articles: any[];
   remise?: number | string | null;
   remiseType?: string | null;
+  /** Adds 1.000 DT to the net à payer (factures) */
+  timbreFiscal?: boolean | null;
+  /** Factures: what was already paid and what is left, printed above the net à payer */
+  payment?: { montantPaye: number; resteAPayer: number } | null;
   companyInfo: {
     name: string;
     address: string;
@@ -246,7 +257,7 @@ export interface AchatDocumentPDFProps {
     website: string;
     logo?: string;
     taxId: string;
-    gsm: string;
+    gsm?: string;
   };
 }
 
@@ -262,11 +273,37 @@ interface PageGroup {
   startIndex: number;
 }
 
-function buildPageGroups(articles: any[]): PageGroup[] {
+/**
+ * How many articles the last page can hold above the summary: 6 like the ventes PDFs, fewer when
+ * a tall summary (remise, timbre, payments…) or a long fournisseur block pushes the summary up
+ * or the table down — they would otherwise be drawn over each other.
+ * Sizes in pt, measured on the rendered PDF (A4 = 841.89pt tall).
+ */
+function lastPageCapacity(opts: {
+  fournisseurLines: number;
+  hasDepot: boolean;
+  summaryRows: number; // rows of the totals box, without the NET À PAYER band
+  tvaRates: number;
+  notes?: string | null;
+}): number {
+  const PAGE_HEIGHT = 841.89;
+  const detailsLeft = 66 + (opts.hasDepot ? 24 : 0);          // title, number, date, depot
+  const detailsRight = 36.3 + 14.6 * opts.fournisseurLines;   // fournisseur box
+  const tableTop = 95 + Math.max(detailsLeft, detailsRight) + 14;
+  const totalsHeight = 48 + 18 * opts.summaryRows;
+  const notesHeight = opts.notes ? 20 + 12.2 * Math.ceil((opts.notes.length + 8) / 55) : 0;
+  const tvaHeight = 20.6 + 24.6 * Math.max(1, opts.tvaRates) + notesHeight;
+  const summaryHeight = Math.max(totalsHeight, tvaHeight);
+  const TABLE_HEADER = 23, ROW = 32, MARGIN = 8;
+  const room = PAGE_HEIGHT - SUMMARY_BOTTOM - summaryHeight - tableTop - TABLE_HEADER - MARGIN;
+  return Math.max(0, Math.min(LAST_PAGE_MAX, Math.floor(room / ROW)));
+}
+
+function buildPageGroups(articles: any[], lastPageMax: number = LAST_PAGE_MAX): PageGroup[] {
   if (!articles || articles.length === 0) {
     return [{ articles: [], isLast: true, startIndex: 0 }];
   }
-  if (articles.length <= LAST_PAGE_MAX) {
+  if (articles.length <= lastPageMax) {
     return [{ articles, isLast: true, startIndex: 0 }];
   }
 
@@ -274,7 +311,7 @@ function buildPageGroups(articles: any[]): PageGroup[] {
   let cursor = 0;
   while (cursor < articles.length) {
     const remaining = articles.length - cursor;
-    if (remaining <= LAST_PAGE_MAX) {
+    if (remaining <= lastPageMax) {
       groups.push({ articles: articles.slice(cursor), isLast: true, startIndex: cursor });
       cursor = articles.length;
     } else {
@@ -311,6 +348,18 @@ const wrapTextHelper = (text: string, maxCharsPerLine: number = 45): string[] =>
 
 const formatCurrency = (amount: number) => amount.toFixed(3);
 
+const fournisseurBoxLines = (f?: Fournisseur | null): string[] => {
+  if (!f) return [];
+  return [
+    ...wrapTextHelper(f.raison_sociale || "", 45),
+    ...(f.matricule_fiscal ? [`MF: ${f.matricule_fiscal}`] : []),
+    ...wrapTextHelper([f.adresse, f.ville].filter(Boolean).join(" - "), 45),
+    ...(f.telephone1 ? [`Tél: ${formatPhoneDisplay(f.telephone1, "")}`] : []),
+    ...(f.telephone2 ? [`Tél: ${formatPhoneDisplay(f.telephone2, "")}`] : []),
+    ...(f.email ? [`Email: ${f.email}`] : []),
+  ];
+};
+
 const AchatDocumentPDF: React.FC<AchatDocumentPDFProps> = ({
   title,
   documentLabel,
@@ -323,13 +372,26 @@ const AchatDocumentPDF: React.FC<AchatDocumentPDFProps> = ({
   articles,
   remise,
   remiseType,
+  timbreFiscal,
+  payment,
+  feminine,
   companyInfo,
 }) => {
   const lines = (articles || []).map(toAchatCalcLine);
-  const { sousTotalHT, netHT, totalTax, finalTotal, discountAmount, netAPayer, tvaBreakdown } =
-    calculateAchatTotals({ articles, remise, remiseType });
+  const { sousTotalHT, netHT, totalTax, finalTotal, discountAmount, timbre, netAPayer, tvaBreakdown } =
+    calculateAchatTotals({ articles, remise, remiseType, timbreFiscal });
+  const remiseRow = remiseLine(discountAmount);
 
-  const pageGroups = buildPageGroups(lines);
+  const fournisseurLines = fournisseurBoxLines(fournisseur);
+  const hasPaid = !!payment && Number(payment.montantPaye) > 0;
+  const lastPageMax = lastPageCapacity({
+    fournisseurLines: fournisseurLines.length,
+    hasDepot: !!depot?.nom,
+    summaryRows: 4 + (remiseRow ? 1 : 0) + (timbre > 0 ? 1 : 0) + (hasPaid ? 1 : 0) + (payment ? 1 : 0),
+    tvaRates: Object.keys(tvaBreakdown).length,
+    notes,
+  });
+  const pageGroups = buildPageGroups(lines, lastPageMax);
   const totalPages = pageGroups.length;
   const amountInWords = montantEnLettres(netAPayer);
 
@@ -382,10 +444,10 @@ const AchatDocumentPDF: React.FC<AchatDocumentPDFProps> = ({
               <Text style={styles.summaryLabel}>Total H.T.:</Text>
               <Text style={styles.summaryValue}>{formatCurrency(sousTotalHT)} DT</Text>
             </View>
-            {Number(remise) > 0 && (
+            {remiseRow && (
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Remise sur HT:</Text>
-                <Text style={styles.summaryValue}>- {formatCurrency(discountAmount)} DT</Text>
+                <Text style={styles.summaryLabel}>{remiseRow.label} sur HT:</Text>
+                <Text style={styles.summaryValue}>{remiseRow.sign} {formatCurrency(remiseRow.amount)} DT</Text>
               </View>
             )}
             <View style={styles.summaryRow}>
@@ -400,6 +462,24 @@ const AchatDocumentPDF: React.FC<AchatDocumentPDFProps> = ({
               <Text style={styles.summaryLabel}>Total TTC:</Text>
               <Text style={styles.summaryValue}>{formatCurrency(finalTotal)} DT</Text>
             </View>
+            {timbre > 0 && (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Timbre Fiscal:</Text>
+                <Text style={styles.summaryValue}>{formatCurrency(timbre)} DT</Text>
+              </View>
+            )}
+            {hasPaid && payment && (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Montant payé:</Text>
+                <Text style={styles.summaryValue}>{formatCurrency(Number(payment.montantPaye))} DT</Text>
+              </View>
+            )}
+            {payment && (
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Reste à payer:</Text>
+                <Text style={styles.summaryValue}>{formatCurrency(Number(payment.resteAPayer) || 0)} DT</Text>
+              </View>
+            )}
             <View style={styles.netAPayerContainer}>
               <Text style={styles.netAPayerLabel}>NET À PAYER:</Text>
               <Text style={styles.netAPayerValue}>{formatCurrency(netAPayer)} DT</Text>
@@ -455,7 +535,7 @@ const AchatDocumentPDF: React.FC<AchatDocumentPDFProps> = ({
       {renderSummarySection(floated)}
       <View style={styles.amountInWords}>
         <Text style={styles.amountText}>
-          Arrêté le présent {documentLabel} à la somme de : {amountInWords}
+          {feminine ? "Arrêtée la présente" : "Arrêté le présent"} {documentLabel} à la somme de : {amountInWords}
         </Text>
       </View>
       <View style={styles.cachetSignatureSection}>
@@ -491,42 +571,21 @@ const AchatDocumentPDF: React.FC<AchatDocumentPDFProps> = ({
                 <Text style={styles.boldText}>{date ? moment(date).format("DD/MM/YYYY") : "N/A"}</Text>
               </Text>
             </View>
-            {depot?.nom && (
+            {depot?.nom ? (
               <View style={[styles.documentDetailItem, { marginTop: 4 }]}>
                 <Text style={styles.documentDetailLabel}>
                   Dépôt: <Text style={styles.boldText}>{depot.nom}</Text>
                 </Text>
               </View>
-            )}
+            ) : null}
           </View>
           <View style={styles.fournisseurInfoContainer}>
             <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 3 }}>
               <Text style={styles.sectionTitle}>FOURNISSEUR</Text>
             </View>
-            {fournisseur && (
-              <>
-                {fournisseur.raison_sociale &&
-                  wrapTextHelper(fournisseur.raison_sociale, 45).map((line, idx) => (
-                    <Text key={`rs-${idx}`} style={styles.fournisseurLineItem}>{line}</Text>
-                  ))}
-                {fournisseur.matricule_fiscal && (
-                  <Text style={styles.fournisseurLineItem}>MF: {fournisseur.matricule_fiscal}</Text>
-                )}
-                {[fournisseur.adresse, fournisseur.ville].filter(Boolean).join(" - ") &&
-                  wrapTextHelper([fournisseur.adresse, fournisseur.ville].filter(Boolean).join(" - "), 45).map((line, idx) => (
-                    <Text key={`adr-${idx}`} style={styles.fournisseurLineItem}>{line}</Text>
-                  ))}
-                {fournisseur.telephone1 && (
-                  <Text style={styles.fournisseurLineItem}>Tél: {formatPhoneDisplay(fournisseur.telephone1, "")}</Text>
-                )}
-                {fournisseur.telephone2 && (
-                  <Text style={styles.fournisseurLineItem}>Tél: {formatPhoneDisplay(fournisseur.telephone2, "")}</Text>
-                )}
-                {fournisseur.email && (
-                  <Text style={styles.fournisseurLineItem}>Email: {fournisseur.email}</Text>
-                )}
-              </>
-            )}
+            {fournisseurLines.map((line, idx) => (
+              <Text key={idx} style={styles.fournisseurLineItem}>{line}</Text>
+            ))}
           </View>
         </View>
       </View>

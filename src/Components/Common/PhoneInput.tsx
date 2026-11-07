@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Input, InputGroup, InputProps } from "reactstrap";
 import tnFlag from "../../assets/images/flags/tn.svg";
-import dzFlag from "../../assets/images/flags/dz.svg";
 import {
   PhoneCountry,
   PHONE_COUNTRIES,
@@ -10,8 +9,8 @@ import {
   formatPhoneInput,
 } from "../../helpers/phone_helper";
 
-const FLAGS: Partial<Record<PhoneCountry, string>> = { TN: tnFlag, DZ: dzFlag };
-const COUNTRIES: PhoneCountry[] = ["TN", "DZ", "OT"];
+const FLAGS: Partial<Record<PhoneCountry, string>> = { TN: tnFlag };
+const COUNTRIES: PhoneCountry[] = ["TN", "OT"];
 
 interface PhoneInputProps extends Omit<InputProps, "value" | "onChange" | "type"> {
   value?: string | null;
@@ -20,10 +19,10 @@ interface PhoneInputProps extends Omit<InputProps, "value" | "onChange" | "type"
 }
 
 /**
- * Phone field with a Tunisia / Algeria / Autre switch. Tunisia and Algeria
- * format the value as it is typed ("22 222 222", "0555 12 34 56"); "Autre" is
- * a plain field — nothing is grouped or capped in length beyond the column
- * itself, for a foreign number or anything that doesn't fit the other two.
+ * Phone field with a Tunisia / Autre (globe) switch. Tunisia formats the value as
+ * it is typed ("22 222 222"); "Autre" is a plain field — nothing is grouped or
+ * capped in length beyond the column itself, for a foreign number or anything
+ * that isn't a Tunisian number.
  */
 const PhoneInput = ({
   value,
@@ -37,12 +36,12 @@ const PhoneInput = ({
     () => detectPhoneCountry(value) ?? defaultCountry
   );
 
-  // Follow the number when it is loaded from a client, pasted with a +216/+213
-  // prefix, typed with a leading 0 (always Algerian), or grown past either
-  // shape (falls into "Autre" on its own). "Autre" itself is sticky, though:
-  // once picked — by hand or by outgrowing TN/DZ — only the buttons below
-  // switch back, so a number that happens to shrink back to eight digits
-  // isn't suddenly reformatted out from under the person typing it.
+  // Follow the number when it is loaded from a client, pasted with a +216
+  // prefix, typed with a leading 0 or grown past eight digits (not Tunisian: falls
+  // into "Autre" on its own). "Autre" itself is sticky, though: once picked — by
+  // hand or by outgrowing the Tunisian shape — only the buttons below switch back,
+  // so a number that happens to shrink back to eight digits isn't suddenly
+  // reformatted out from under the person typing it.
   useEffect(() => {
     const detected = detectPhoneCountry(value);
     if (!detected) return;

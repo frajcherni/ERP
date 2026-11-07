@@ -37,14 +37,16 @@ export const toSelectedArticle = (item: any) => {
   };
 };
 
-/** Totals of a saved bon de commande / réception, exactly as the ventes pages compute them. */
+/** Totals of a saved bon de commande / réception / facture, exactly as the ventes pages compute them. */
 export const calculateAchatTotals = (bon: {
   articles?: any[];
   remise?: number | string | null;
   remiseType?: string | null;
+  timbreFiscal?: boolean | null;
 }): DocTotals =>
   calculateDocumentTotals({
     articles: (bon.articles || []).map(toAchatCalcLine),
     remise: Number(bon.remise) || 0,
     remiseType: bon.remiseType || "percentage",
+    timbreFiscal: !!bon.timbreFiscal,
   });

@@ -17,6 +17,7 @@ interface FacturePDFModalProps {
     website: string;
     logo?: string;
     taxId: string;
+    gsm?: string;
   };
 }
 
@@ -35,7 +36,7 @@ const FacturePDFModal: React.FC<FacturePDFModalProps> = ({
   if (!facture) return null;
 
   return (
-    <Modal isOpen={isOpen} toggle={toggle} size="lg" centered>
+    <Modal isOpen={isOpen} toggle={toggle} size="xl" centered>
       <ModalHeader toggle={toggle}>
         Aperçu Facture - {facture.numeroFacture}
       </ModalHeader>
