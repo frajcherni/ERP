@@ -266,7 +266,11 @@ export const calculateDocumentTotals = (
   let finalTTC = grandTTCAcc;
   let discPerc = 0;
 
-  const effectiveLockedPerc = (lockedPercentage !== null) ? lockedPercentage : (doc.lockedPercentage ?? doc.locked_percentage ?? null);
+  // The API returns decimal columns as strings ("12.5000"): coerce, or discountPercentage
+  // comes back as a string and every .toFixed() on it crashes the page.
+  const rawLockedPerc: unknown = (lockedPercentage != null) ? lockedPercentage : (doc.lockedPercentage ?? doc.locked_percentage ?? null);
+  const parsedLockedPerc = (rawLockedPerc === null || rawLockedPerc === "") ? NaN : Number(rawLockedPerc);
+  const effectiveLockedPerc: number | null = Number.isFinite(parsedLockedPerc) ? parsedLockedPerc : null;
 
   if (globalRemise > 0 || (effectiveLockedPerc !== null && effectiveLockedPerc > 0)) {
     if (remiseType === "percentage" || effectiveLockedPerc !== null) {

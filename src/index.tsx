@@ -9,8 +9,11 @@ import { configureStore } from "@reduxjs/toolkit";
 import rootReducer from "./slices";
 import ErrorBoundary from './Components/Common/ErrorBoundary';
 import { removeLeftoverServiceWorkers } from './helpers/siteData';
+import { startFullscreenByDefault } from './helpers/fullscreen';
 
 removeLeftoverServiceWorkers();
+// Full screen is on by default: the first click or key press after the site opens turns it on.
+startFullscreenByDefault();
 
 const store = configureStore({ reducer: rootReducer, devTools: true });
 

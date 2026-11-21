@@ -1,65 +1,38 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { isFullscreen, onFullscreenChange, toggleFullscreen } from '../../helpers/fullscreen';
 
 const FullScreenDropdown: React.FC = () => {
     /*
-    mode
+    Follows the browser's real full screen state, so the icon is right whether it
+    was this button, the Esc key or the "full screen by default" start
+    (helpers/fullscreen.ts) that changed it.
     */
-    const [isFullScreenMode, setIsFullScreenMode] = useState<boolean>(true);
+    const [active, setActive] = useState<boolean>(isFullscreen);
 
-    /*
-    full screen
-    */
-    const toggleFullscreen = () => {
-        let document :any= window.document;
-        document.body.classList.add("fullscreen-enable");
-
-        if (
-            !document.fullscreenElement &&
-            !document.mozFullScreenElement &&
-            !document.webkitFullscreenElement
-        ) {
-            // current working methods
-            setIsFullScreenMode(false);
-            if (document.documentElement.requestFullscreen) {
-                document.documentElement.requestFullscreen();
-            } else if (document.documentElement.mozRequestFullScreen) {
-                document.documentElement.mozRequestFullScreen();
-            } else if (document.documentElement.webkitRequestFullscreen) {
-                document.documentElement.webkitRequestFullscreen();
-            }
-        } else {
-            setIsFullScreenMode(true);
-            if (document.cancelFullScreen) {
-                document.cancelFullScreen();
-            } else if (document.mozCancelFullScreen) {
-                document.mozCancelFullScreen();
-            } else if (document.webkitCancelFullScreen) {
-                document.webkitCancelFullScreen();
-            }
-        }
-
-        // handle fullscreen exit
-        const exitHandler = () => {
-            if (
-                !document.webkitIsFullScreen &&
-                !document.mozFullScreen &&
-                !document.msFullscreenElement
-            )
-                document.body.classList.remove("fullscreen-enable");
+    useEffect(() => {
+        const sync = (on: boolean) => {
+            setActive(on);
+            document.body.classList.toggle('fullscreen-enable', on);
         };
-        document.addEventListener("fullscreenchange", exitHandler);
-        document.addEventListener("webkitfullscreenchange", exitHandler);
-        document.addEventListener("mozfullscreenchange", exitHandler);
-    };
+        sync(isFullscreen());
+        const stopListening = onFullscreenChange(sync);
+        return () => {
+            stopListening();
+            document.body.classList.remove('fullscreen-enable');
+        };
+    }, []);
+
     return (
         <React.Fragment>
+            {/* data-fullscreen-toggle: the "full screen by default" start leaves a press on this button alone */}
             <div className="ms-1 header-item d-none d-sm-flex">
                 <button
                     onClick={toggleFullscreen}
                     type="button"
+                    data-fullscreen-toggle
                     className="btn btn-icon btn-topbar btn-ghost-secondary rounded-circle"
                 >
-                    <i className={isFullScreenMode ? 'bx bx-fullscreen fs-22' : "bx bx-exit-fullscreen fs-22"}></i>
+                    <i className={active ? 'bx bx-exit-fullscreen fs-22' : 'bx bx-fullscreen fs-22'}></i>
                 </button>
             </div>
         </React.Fragment>

@@ -2282,10 +2282,15 @@ const BonLivraisonList = () => {
                     setSelectedClient(cellProps.row.original.client || null);
                     setSelectedDepot(cellProps.row.original.depot || null);
                     setIsEdit(true);
+                    // API sends decimals as strings ("12.5000") — store a real number
+                    const lockedPercNum = Number(
+                      cellProps.row.original.lockedPercentage ??
+                      cellProps.row.original.locked_percentage
+                    );
                     setLockedPercentage(
-                      cellProps.row.original.lockedPercentage ||
-                      cellProps.row.original.locked_percentage ||
-                      null
+                      Number.isFinite(lockedPercNum) && lockedPercNum !== 0
+                        ? lockedPercNum
+                        : null
                     );
                     setModal(true);
                   }}
@@ -5360,7 +5365,7 @@ const BonLivraisonList = () => {
                                              <th className={`text-end fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                                {remiseType === "percentage"
                                                  ? `Remise (Global) ${Number(discountPercentage).toFixed(2)}%`
-                                                 : `Remise (Montant fixe) ${discountPercentage.toFixed(2)}%`}
+                                                 : `Remise (Montant fixe) ${Number(discountPercentage).toFixed(2)}%`}
                                              </th>
                                              <td className={`text-end fw-bold fs-6 ${discountPercentage > 10 ? "text-danger" : "text-success"}`}>
                                                - {discountAmount.toFixed(3)} DT
