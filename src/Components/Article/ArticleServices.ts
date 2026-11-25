@@ -26,7 +26,7 @@ export const uploadArticleWebsiteImages = async (articleId: number, images: File
   });
   
   if (!response.ok) {
-      throw new Error('Failed to upload website images');
+      throw await errorFrom(response, "Échec de l'envoi des images");
   }
   
   return response.json();
@@ -38,16 +38,50 @@ export const removeArticleWebsiteImage = async (articleId: number, imageIndex: n
   });
   
   if (!response.ok) {
-      throw new Error('Failed to remove website image');
+      throw await errorFrom(response, "Échec de la suppression de l'image");
   }
   
   return response.json();
 };
 
-// Add these functions to your ArticleServices.ts file
+const errorFrom = async (response: Response, fallback: string) => {
+  const data = await response.json().catch(() => null);
+  return new Error((data && data.message) || fallback);
+};
+
+/** Replaces the main image; the old one moves to the other images. */
+export const uploadArticleMainImage = async (articleId: number, image: File) => {
+  const formData = new FormData();
+  formData.append('image', image);
+  const response = await fetch(`${API_BASE}/articles/${articleId}/main-image`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) throw await errorFrom(response, "Échec de l'envoi de l'image principale");
+  return response.json();
+};
+
+/** Makes website_images[index] the main image (swapped with the current one). */
+export const setArticleMainImage = async (articleId: number, index: number) => {
+  const response = await fetch(`${API_BASE}/articles/${articleId}/main-image`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ index }),
+  });
+  if (!response.ok) throw await errorFrom(response, "Impossible de choisir l'image principale");
+  return response.json();
+};
+
+/** Deletes the main image; the first other image (if any) takes its place. */
+export const removeArticleMainImage = async (articleId: number) => {
+  const response = await fetch(`${API_BASE}/articles/${articleId}/main-image`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) throw await errorFrom(response, "Échec de la suppression de l'image principale");
+  return response.json();
+};
 
 export const updateArticleWebsiteSettings = async (articleId: number, settings: any) => {
-  debugger
   const response = await fetch(`${API_BASE}/articles/${articleId}/website-settings`, {
       method: 'PUT',
       headers: {

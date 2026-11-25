@@ -31,14 +31,15 @@ import 'react-toastify/dist/ReactToastify.css';
 import * as Yup from "yup";
 import { useFormik } from "formik";
 import {
-    fetchArticles,
     searchArticles,
-    removeArticleWebsiteImage,
     updateArticleWebsiteSettings,
-    uploadArticleWebsiteImages
 } from "../../../Components/Article/ArticleServices";
 
 import { Article } from "../../../Components/Article/Interfaces";
+import ArticleImagesManager, { ArticleImages } from "../../../Components/Article/ArticleImagesManager";
+
+/** Long enough for a real product description (the column is TEXT). */
+const DESCRIPTION_MAX = 5000;
 
 const WebsiteArticlesManager = () => {
     const [websiteArticles, setWebsiteArticles] = useState<Article[]>([]);
@@ -49,9 +50,7 @@ const WebsiteArticlesManager = () => {
     const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
     const [loading, setLoading] = useState(true);
     const [searchLoading, setSearchLoading] = useState(false);
-    const [imagePreviews, setImagePreviews] = useState<string[]>([]);
-    const [selectedImages, setSelectedImages] = useState<File[]>([]);
-    
+
     // Pagination states
     const [currentPage, setCurrentPage] = useState(1);
     const [pageSize, setPageSize] = useState(10);
@@ -67,16 +66,6 @@ const WebsiteArticlesManager = () => {
         if (path.startsWith('http')) return path;
         return `${IMAGE_BASE}/${path.replace(/\\/g, "/")}`;
     };
-
-    // Add image preview modal state
-const [previewModal, setPreviewModal] = useState(false);
-const [previewImage, setPreviewImage] = useState<string>('');
-
-// Add this function to handle image preview
-const handleImagePreview = (imageUrl: string) => {
-    setPreviewImage(imageUrl);
-    setPreviewModal(true);
-};
 
     // Fetch articles already on website with pagination
     const fetchData = useCallback(async () => {
@@ -161,13 +150,12 @@ const handleImagePreview = (imageUrl: string) => {
             setSearchDropdownOpen(false); // Close dropdown immediately
             setSearchText(""); // Clear search
             
-            // Update article to be on website
+            // Update article to be on website (an existing description is kept)
             await updateArticleWebsiteSettings(articleToAdd.id, {
                 on_website: true,
                 is_offre: false,
                 is_top_seller: false,
                 is_new_arrival: false,
-                website_description: articleToAdd.designation || ""
             });
     
             // Refetch data to get fresh state from server
@@ -202,59 +190,12 @@ const handleImagePreview = (imageUrl: string) => {
 
 
 
-    // Handle image upload
-    const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const files = event.target.files;
-        if (files) {
-            const newImages = Array.from(files);
-            setSelectedImages(prev => [...prev, ...newImages]);
-            
-            // Create preview URLs
-            newImages.forEach(file => {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    setImagePreviews(prev => [...prev, e.target?.result as string]);
-                };
-                reader.readAsDataURL(file);
-            });
-        }
-    };
-
-// Remove image handler
-const handleRemoveImage = async (index: number) => {
-    try {
-        const preview = imagePreviews[index];
-        const isNewImage = preview.startsWith('data:');
-
-        if (!isNewImage) {
-            if (selectedArticle) {
-                await removeArticleWebsiteImage(selectedArticle.id, index);
-            }
-        }
-
-        // Remove from previews
-        setImagePreviews(prev => prev.filter((_, i) => i !== index));
-
-        // If new, remove from selectedImages
-        if (isNewImage) {
-            const newStartIndex = imagePreviews.length - selectedImages.length;
-            const fileIndex = index - newStartIndex;
-            setSelectedImages(prev => prev.filter((_, i) => i !== fileIndex));
-        }
-
-        // Update local article state for old images
-        if (!isNewImage && selectedArticle) {
-            const updatedImages = selectedArticle.website_images?.filter((_, i) => i !== index) || [];
-            const updatedArticle = { ...selectedArticle, website_images: updatedImages };
-            setSelectedArticle(updatedArticle);
-            setWebsiteArticles(prev => prev.map(a => a.id === selectedArticle.id ? updatedArticle : a));
-        }
-
-        toast.success("Image supprimée avec succès");
-    } catch (err) {
-        toast.error("Échec de la suppression de l'image");
-    }
-};
+    // Images are saved by ArticleImagesManager itself; keep the table in step.
+    const handleImagesChange = useCallback((articleId: number, images: ArticleImages) => {
+        setWebsiteArticles(prev => prev.map(a =>
+            a.id === articleId ? { ...a, image: images.image || "", website_images: images.website_images } : a
+        ));
+    }, []);
 
 useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -272,8 +213,6 @@ useEffect(() => {
 // Also update the handleOpenSettings to ensure fresh data
 const handleOpenSettings = useCallback((article: Article) => {
     setSelectedArticle(article);
-    setImagePreviews(article.website_images || []);
-    setSelectedImages([]);
     setSettingsModal(true);
 }, []);
 
@@ -287,34 +226,17 @@ const validation = useFormik({
         website_description: selectedArticle?.website_description || ""
     },
     validationSchema: Yup.object({
-        website_description: Yup.string().max(500, "La description ne doit pas dépasser 500 caractères")
+        website_description: Yup.string().max(DESCRIPTION_MAX, `La description ne doit pas dépasser ${DESCRIPTION_MAX} caractères`)
     }),
     onSubmit: async (values) => {
         if (!selectedArticle) return;
 
         try {
-            // First update website settings
+            // Images are already saved by the images manager.
             await updateArticleWebsiteSettings(selectedArticle.id, values);
-
-            let updatedArticle = { 
-                ...selectedArticle, 
-                ...values
-            };
-
-            // Then upload new images if any
-            const hadNewImages = selectedImages.length > 0;
-            if (hadNewImages) {
-                await uploadArticleWebsiteImages(selectedArticle.id, selectedImages);
-                // Refetch to get updated images from server
-                await fetchData();
-            } else {
-                // No new images, update local state
-                await fetchData();
-            }
+            await fetchData();
 
             setSettingsModal(false);
-            setSelectedImages([]);
-            setImagePreviews([]);
             toast.success("Paramètres mis à jour avec succès");
         } catch (err) {
             toast.error("Échec de la mise à jour des paramètres");
@@ -331,10 +253,10 @@ const validation = useFormik({
                 enableColumnFilter: false,
                 cell: (cell: any) => {
                     const article = cell.row.original;
-                    // Use website_images for additional images count
                     const mainImage = article.image;
                     const hasAdditionalImages = article.website_images && article.website_images.length > 0;
-                    
+                    const totalImages = (mainImage ? 1 : 0) + (article.website_images?.length || 0);
+
                     return (
                         <div className="d-flex align-items-center">
                             {mainImage ? (
@@ -359,9 +281,9 @@ const validation = useFormik({
                                     <i className="ri-image-line text-muted"></i>
                                 </div>
                             )}
-                            {article.website_images && article.website_images.length > 1 && (
+                            {totalImages > 1 && (
                                 <Badge color="info" className="ms-1">
-                                    +{article.website_images.length - 1}
+                                    +{totalImages - 1}
                                 </Badge>
                             )}
                         </div>
@@ -691,7 +613,8 @@ const validation = useFormik({
                                                 type="textarea"
                                                 name="website_description"
                                                 id="website_description"
-                                                rows={4}
+                                                rows={8}
+                                                placeholder="Caractéristiques, dimensions, matière, puissance, conseils d'utilisation..."
                                                 value={validation.values.website_description}
                                                 onChange={validation.handleChange}
                                                 onBlur={validation.handleBlur}
@@ -700,95 +623,22 @@ const validation = useFormik({
                                             {validation.touched.website_description && validation.errors.website_description ? (
                                                 <FormFeedback type="invalid">{validation.errors.website_description}</FormFeedback>
                                             ) : null}
+                                            <small className={`d-block text-end ${validation.values.website_description.length > DESCRIPTION_MAX ? "text-danger" : "text-muted"}`}>
+                                                {validation.values.website_description.length} / {DESCRIPTION_MAX} caractères · les retours à la ligne sont gardés sur le site
+                                            </small>
                                         </Col>
                                     </Row>
 
                                     {/* Images Management */}
                                     <Row className="mb-3">
                                         <Col md={12}>
-                                            <Label className="form-label fw-semibold">Images supplémentaires</Label>
-                                            
-                                            {/* Current Images */}
-{imagePreviews.length > 0 && (
-    <div className="mb-3">
-        <Row>
-            {imagePreviews.map((preview, index) => (
-                <Col md={3} key={index} className="mb-2">
-                    <div className="position-relative">
-                        <img 
-                            src={preview.startsWith('data:') ? preview : getImageUrl(preview)}
-                            alt={`Preview ${index + 1}`}
-                            className="img-fluid rounded border"
-                            style={{ 
-                                height: '80px', 
-                                objectFit: 'cover', 
-                                width: '100%',
-                                cursor: 'pointer' 
-                            }}
-                            onClick={() => handleImagePreview(preview.startsWith('data:') ? preview : getImageUrl(preview))}
-                        />
-                        <Button
-                            color="danger"
-                            size="sm"
-                            className="position-absolute top-0 end-0"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                handleRemoveImage(index);
-                            }}
-                            style={{ transform: 'translate(50%, -50%)' }}
-                        >
-                            <i className="ri-close-line"></i>
-                        </Button>
-                    </div>
-                </Col>
-            ))}
-        </Row>
-    </div>
-)}
-
-{/* Main Image from Article */}
-{selectedArticle.image && (
-    <div className="mb-3">
-        <Label className="form-label">Image principale:</Label>
-        <div className="border rounded p-2">
-            <img 
-                src={getImageUrl(selectedArticle.image)}
-                alt={selectedArticle.nom}
-                className="img-fluid rounded"
-                style={{ 
-                    maxHeight: '150px', 
-                    objectFit: 'cover',
-                    cursor: 'pointer'
-                }}
-                onClick={() => handleImagePreview(getImageUrl(selectedArticle.image))}
-            />
-            <small className="text-muted d-block mt-1">
-                Image principale de l'article
-            </small>
-        </div>
-    </div>
-)}
-
-                                            {/* Add More Images */}
-                                            <div className="border rounded p-3 text-center">
-                                                <i className="ri-image-line fs-1 text-muted mb-2 d-block"></i>
-                                                <Label htmlFor="additional-images" className="btn btn-outline-primary">
-                                                    <i className="ri-upload-line align-middle me-1"></i>
-                                                    Ajouter des images supplémentaires
-                                                </Label>
-                                                <Input
-                                                    id="additional-images"
-                                                    name="additionalImages"
-                                                    type="file"
-                                                    accept="image/*"
-                                                    multiple
-                                                    onChange={handleImageUpload}
-                                                    className="d-none"
-                                                />
-                                                <small className="text-muted d-block mt-2">
-                                                    Formats supportés: JPG, PNG, GIF. Taille max: 5MB par image
-                                                </small>
-                                            </div>
+                                            <Label className="form-label fw-semibold">Images (principale + autres)</Label>
+                                            <ArticleImagesManager
+                                                articleId={selectedArticle.id}
+                                                image={selectedArticle.image}
+                                                websiteImages={selectedArticle.website_images}
+                                                onChange={(images) => handleImagesChange(selectedArticle.id, images)}
+                                            />
                                         </Col>
                                     </Row>
                                 </>
@@ -808,25 +658,6 @@ const validation = useFormik({
                         </div>
                     </Form>
                 </Modal>
-{/* Image Preview Modal */}
-<Modal isOpen={previewModal} toggle={() => setPreviewModal(false)} size="lg" centered>
-    <ModalHeader toggle={() => setPreviewModal(false)}>
-        Aperçu de l'image
-    </ModalHeader>
-    <ModalBody className="text-center">
-        <img 
-            src={previewImage} 
-            alt="Preview" 
-            className="img-fluid"
-            style={{ maxHeight: '70vh', objectFit: 'contain' }}
-        />
-    </ModalBody>
-    <div className="modal-footer">
-        <Button color="secondary" onClick={() => setPreviewModal(false)}>
-            Fermer
-        </Button>
-    </div>
-</Modal>
                 <ToastContainer closeButton={false} limit={1} />
             </Container>
         </div>

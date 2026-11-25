@@ -46,7 +46,10 @@ import {
   fetchFournisseurs,
   searchArticles,
   fetchArticleById,
+  getImageUrl,
+  uploadArticleWebsiteImages,
 } from "../../../Components/Article/ArticleServices";
+import ArticleImagesManager, { ArticleImages } from "../../../Components/Article/ArticleImagesManager";
 
 import {
   Categorie,
@@ -84,6 +87,9 @@ const ArticlesList = () => {
   const [debouncedReferenceSearch, setDebouncedReferenceSearch] = useState("");
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  // New article only: other images, uploaded right after the article is created.
+  const [extraImages, setExtraImages] = useState<File[]>([]);
+  const [extraPreviews, setExtraPreviews] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [totalArticles, setTotalArticles] = useState(0);
@@ -525,6 +531,41 @@ const ArticlesList = () => {
     }
   };
 
+  const handleExtraImages = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    const big = files.find((f) => f.size > 5 * 1024 * 1024);
+    if (big) {
+      toast.error(`"${big.name}" dépasse 5 Mo`);
+      return;
+    }
+    setExtraImages((prev) => [...prev, ...files].slice(0, 10));
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (e) =>
+        setExtraPreviews((prev) => [...prev, e.target?.result as string].slice(0, 10));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const removeExtraImage = (index: number) => {
+    setExtraImages((prev) => prev.filter((_, i) => i !== index));
+    setExtraPreviews((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // Images saved by ArticleImagesManager: refresh the row without touching the
+  // `article` state, which would re-initialise the edit form and lose typing.
+  const handleImagesChange = useCallback((articleId: number, images: ArticleImages) => {
+    const patch = (list: Article[]) =>
+      list.map((a) =>
+        a.id === articleId
+          ? { ...a, image: images.image || "", website_images: images.website_images }
+          : a
+      );
+    setArticles(patch);
+    setFilteredArticles(patch);
+  }, []);
+
   // Fetch all data
   const fetchData = useCallback(async () => {
     try {
@@ -719,13 +760,25 @@ const ArticlesList = () => {
         );
         toast.success("Article mis à jour avec succès");
       } else {
-        await createArticle(articleData, selectedImage || undefined);
+        const created = await createArticle(articleData, selectedImage || undefined);
+        if (extraImages.length > 0 && created?.id) {
+          try {
+            await uploadArticleWebsiteImages(created.id, extraImages);
+          } catch (imgErr) {
+            toast.error(
+              "Article créé, mais les autres images n'ont pas été envoyées : " +
+                (imgErr instanceof Error ? imgErr.message : "")
+            );
+          }
+        }
         toast.success("Article ajouté avec succès");
       }
 
       setModal(false);
       setSelectedImage(null);
       setImagePreview(null);
+      setExtraImages([]);
+      setExtraPreviews([]);
       fetchData();
     } catch (err) {
       console.error("Error in handleSubmit:", err);
@@ -887,6 +940,8 @@ const ArticlesList = () => {
     if (!modal) {
       setSelectedImage(null);
       setImagePreview(null);
+      setExtraImages([]);
+      setExtraPreviews([]);
     }
   }, [modal]);
 
@@ -1891,6 +1946,56 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
   const columns = useMemo(
     () => [
       {
+        header: "Image",
+        accessorKey: "image",
+        enableColumnFilter: false,
+        enableSorting: false,
+        cell: (cell: any) => {
+          const art = cell.row.original as Article;
+          const src = art.image || art.website_images?.[0];
+          const count = (art.image ? 1 : 0) + (art.website_images?.length || 0);
+          return (
+            <div
+              className="position-relative"
+              style={{ width: 44, height: 44, cursor: "pointer" }}
+              title="Gérer les images"
+              onClick={() => {
+                setArticle(art);
+                setIsEdit(true);
+                setModal(true);
+              }}
+            >
+              {src ? (
+                <img
+                  src={getImageUrl(src)}
+                  alt=""
+                  loading="lazy"
+                  className="rounded border"
+                  style={{ width: 44, height: 44, objectFit: "cover" }}
+                />
+              ) : (
+                <div
+                  className="rounded bg-light d-flex align-items-center justify-content-center"
+                  style={{ width: 44, height: 44 }}
+                >
+                  <i className="ri-image-add-line text-muted"></i>
+                </div>
+              )}
+              {count > 1 && (
+                <Badge
+                  color="info"
+                  pill
+                  className="position-absolute"
+                  style={{ top: -6, right: -8, fontSize: 10 }}
+                >
+                  {count}
+                </Badge>
+              )}
+            </div>
+          );
+        },
+      },
+      {
         header: "Référence",
         accessorKey: "reference",
         enableColumnFilter: false,
@@ -2306,20 +2411,38 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                         <Row className="mb-4">
                           <Col md={3}>
                             <div className="article-image-section text-center">
-                              {article.image ? (
-                                <img
-                                  src={`${API_BASE}/${article.image.replace(
-                                    /\\/g,
-                                    "/"
-                                  )}`}
-                                  alt={article.designation}
-                                  className="img-fluid rounded shadow-sm mb-3"
-                                  style={{
-                                    maxHeight: "120px",
-                                    objectFit: "cover",
-                                    width: "100%",
-                                  }}
-                                />
+                              {article.image || article.website_images?.[0] ? (
+                                <>
+                                  <img
+                                    src={getImageUrl(article.image || article.website_images?.[0])}
+                                    alt={article.designation}
+                                    className="img-fluid rounded shadow-sm mb-2"
+                                    style={{
+                                      maxHeight: "120px",
+                                      objectFit: "cover",
+                                      width: "100%",
+                                    }}
+                                  />
+                                  {(() => {
+                                    const rest = article.image
+                                      ? article.website_images || []
+                                      : (article.website_images || []).slice(1);
+                                    return rest.length > 0 ? (
+                                      <div className="d-flex flex-wrap gap-1 justify-content-center mb-2">
+                                        {rest.map((img, i) => (
+                                          <img
+                                            key={img + i}
+                                            src={getImageUrl(img)}
+                                            alt=""
+                                            loading="lazy"
+                                            className="rounded border"
+                                            style={{ width: 34, height: 34, objectFit: "cover" }}
+                                          />
+                                        ))}
+                                      </div>
+                                    ) : null;
+                                  })()}
+                                </>
                               ) : (
                                 <div
                                   className="bg-light rounded d-flex align-items-center justify-content-center mb-3"
@@ -2801,25 +2924,34 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                   <Form onSubmit={validation.handleSubmit}>
                     <ModalBody>
                       {/* Image Upload Section */}
+                      {isEdit && article ? (
+                        <Row>
+                          <Col md={12}>
+                            <div className="mb-3">
+                              <Label className="form-label">
+                                Images de l'article (principale + autres)
+                              </Label>
+                              <ArticleImagesManager
+                                articleId={article.id}
+                                image={article.image}
+                                websiteImages={article.website_images}
+                                onChange={(images) => handleImagesChange(article.id, images)}
+                              />
+                            </div>
+                          </Col>
+                        </Row>
+                      ) : (
                       <Row>
                         <Col md={12}>
                           <div className="mb-3">
                             <Label className="form-label">
-                              Image de l'article
+                              Image principale
                             </Label>
                             <div className="border rounded p-3 text-center">
-                              {imagePreview || article?.image ? (
+                              {imagePreview ? (
                                 <div className="mb-3">
                                   <img
-                                    src={
-                                      imagePreview ||
-                                      (article?.image
-                                        ? `${API_BASE}/${article.image.replace(
-                                          /\\/g,
-                                          "/"
-                                        )}`
-                                        : "")
-                                    }
+                                    src={imagePreview}
                                     alt="Preview"
                                     className="img-fluid rounded mb-2"
                                     style={{
@@ -2875,8 +3007,58 @@ ${showPrice ? `<div class="price"><strong>PRIX : ${formattedPrice}</strong></div
                               </small>
                             </div>
                           </div>
+                          <div className="mb-3">
+                            <Label className="form-label">Autres images</Label>
+                            <div className="border rounded p-3">
+                              {extraPreviews.length > 0 && (
+                                <div className="d-flex flex-wrap gap-2 mb-2">
+                                  {extraPreviews.map((src, i) => (
+                                    <div
+                                      key={i}
+                                      className="position-relative rounded border"
+                                      style={{ width: 80, height: 80, overflow: "hidden" }}
+                                    >
+                                      <img
+                                        src={src}
+                                        alt=""
+                                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                      />
+                                      <button
+                                        type="button"
+                                        className="btn btn-danger btn-sm position-absolute top-0 end-0 py-0 px-1"
+                                        onClick={() => removeExtraImage(i)}
+                                        title="Retirer"
+                                      >
+                                        <i className="ri-close-line"></i>
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <Label
+                                htmlFor="extra-images-upload"
+                                className="btn btn-sm btn-outline-primary mb-0"
+                              >
+                                <i className="ri-upload-2-line align-middle me-1"></i>
+                                Ajouter d'autres images
+                              </Label>
+                              <Input
+                                id="extra-images-upload"
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                onChange={handleExtraImages}
+                                className="d-none"
+                              />
+                              <small className="text-muted d-block mt-2">
+                                Envoyées après la création de l'article (10 max, 5 Mo chacune).
+                                Vous pourrez ensuite choisir l'image principale en modifiant l'article.
+                              </small>
+                            </div>
+                          </div>
                         </Col>
                       </Row>
+                      )}
 
                       {/* Basic Information */}
                       <Row>
